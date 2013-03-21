@@ -251,6 +251,7 @@ mixin CreateBinderForDependent!("ConvertsTo","convertsTo");
 mixin CreateBinderForDependent!("TypeMostGeneral","typeMostGeneral");
 mixin CreateBinderForDependent!("TypeCombine","typeCombine");
 mixin CreateBinderForDependent!("Combine","combine");
+mixin CreateBinderForDependent!("Unify","unify");
 mixin CreateBinderForDependent!("TypeMatch","typeMatch");
 mixin CreateBinderForDependent!("RefCombine","refCombine");
 mixin CreateBinderForDependent!("MatchCall","matchCall");
@@ -883,23 +884,22 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
 		auto ty=lit[0].type;
 		foreach(i,x;lit[1..$]){
-			mixin(ImplConvertsTo!q{bool xtoty; x, ty}); // TODO: keep state?
-			if(!xtoty){
-				bool ok = true;
-				mixin(ImplConvertsTo!q{bool tytox; ty, x.type}); // TODO: ditto?
-				if(!tytox){
-					foreach(y;lit[0..i+1]){
-						mixin(ImplConvertsTo!q{bool ytox; y, x.type});
-						if(!ytox) goto Lnot;
-					}
-				}
-				ty = x.type;
-				continue;
-			}
-		Lnot:
-			mixin(Combine!q{Type newty; ty, x.type}); // TODO: ditto?
+			mixin(Combine!q{Type newty; ty, x.type}); // TODO: keep state?
 			if(newty) ty=newty;
 			else{
+				mixin(ImplConvertsTo!q{bool xtoty; x, ty}); // TODO: ditto?
+				mixin(ImplConvertsTo!q{bool tytox; ty, x.type}); // TODO: ditto?
+				if(!tytox){
+					tytox = true;
+					foreach(y;lit[0..i+1]){
+						mixin(ImplConvertsTo!q{bool ytox; y, x.type});
+						if(!(tytox &= ytox)) break;
+					}
+				}
+				if(xtoty^tytox){
+					ty = tytox ? x.type : ty;
+					continue;
+				}
 				if((x.isAddressExp()||x.isArrayLiteralExp()) && x.type is Type.get!void())
 					continue;
 				sc.error(format("incompatible type '%s' in array of '%s'",x.type,ty),x.loc);
@@ -1430,6 +1430,10 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	}
 	static if(S==Tok!"&"){
 
+	override bool isConstant(){
+		return !!e.isSymbol(); // TODO: correct?
+	}
+
 	override Dependent!bool implicitlyConvertsTo(Type rhs){
 		// function literals implicitly convert to both function and delegate
 		if(auto sym = e.isSymbol()                      ){
@@ -1441,7 +1445,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 					return fd.type.getDelegate()
 						.implicitlyConvertsTo(dg);
 				}
-			}else
+			}else if(fd.canBeStatic)
 				if(auto ptr = rhsu.isPointerTy()   ){
 				if(auto ft  = ptr.ty.isFunctionTy()){
 					return fd.type.getPointer()
@@ -1547,7 +1551,7 @@ class MatcherTy: Type{
 
 		if(!adapted) adapted=from;
 		else{
-			mixin(Combine!q{Type c; adapted, from}); // TODO: full unification
+			mixin(Unify!q{Type c; adapted, from}); // TODO: full unification
 			if(c) adapted=c;
 			else if(!adapted.equals(from)) ambiguous=true;
 		}
@@ -1717,7 +1721,7 @@ class TemplateInstanceDecl: Declaration{
 		auto params   = parent.params;
 
 		resolved = new Expression[params.length];
-
+		
 		// resolve non-tuple parameters
 		if(args.length>tuplepos&&tuplepos==params.length) return false;
 		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,$)];
@@ -2054,6 +2058,7 @@ class TemplateInstanceDecl: Declaration{
 	private void instanceSemantic(Scope sc_)in{
 		assert(finishedInstantiation);
 	}body{
+		// dw("ism ", this);
 		{alias sc_ sc;mixin(SemPrlg);}
 		assert(sstate == SemState.begin);
 		sstate = SemState.started;
@@ -2750,7 +2755,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			}
 		}
 
-		mixin(SemChld!q{e,args});
+		mixin(SemChld!q{e, args});
 
 		Expression container = null;
 		auto sym = e.isSymbol();
@@ -3659,6 +3664,7 @@ class Symbol: Expression{ // semantic node
 			errsc.error("circular dependencies are illegal",loc);
 			circ = null;
 			mixin(SetErr!q{});
+			assert(0);
 			foreach_reverse(x; clist[1..$]){
 				// IFTI might spawn locationless identifiers
 				if(x.loc.line) errsc.note("part of dependency cycle",x.loc);
@@ -3687,6 +3693,7 @@ class Symbol: Expression{ // semantic node
 
 
 	override void semantic(Scope sc){
+		// dw("semantic: ",this," ",meaning.sstate," ", loc);
 		debug scope(exit) assert((sstate != SemState.started||needRetry||rewrite) &&(sstate!=SemState.begin||needRetry||rewrite),toString()~" "~typeid(this.meaning).toString());
 		debug scope(exit) assert(needRetry==2||!circ,toString()~" nR: "~to!string(needRetry)~" circ: "~to!string(circ));
 		mixin(SemPrlg);
@@ -3814,6 +3821,7 @@ class Symbol: Expression{ // semantic node
 			// those just don't carry forward the information
 			// whether the template compiled or not.
 			// TODO:
+			// dw(this," ",meaning.sstate);
 			if(meaning.sstate != SemState.started){
 				mixin(MeaningSemantic);
 				mixin(CircErrMsg);
@@ -5662,6 +5670,8 @@ mixin template Semantic(T) if(is(T==Type)){
 		return null.independent!Type;
 	}
 
+	Dependent!Type unify(Type rhs){ return combine(rhs); }
+
 	/* members
 	 */
 
@@ -5723,7 +5733,7 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 	override Dependent!Type combine(Type rhs){
 		if(auto r = mostGeneral(rhs).prop) return r;
 		auto unqual = rhs.getHeadUnqual();
-		return unqual.refCombine(rhs,0);
+		return unqual.refCombine(this,0);
 	}
 
 	// TODO: would like to have Dependent!DelegateTy here...
@@ -5733,6 +5743,17 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 			assert(!rcomb||cast(FunctionTy)rcomb);
 			if(auto r = cast(FunctionTy)cast(void*)rcomb)
 				return r.getDelegate().independent!Type;
+		}
+		return null.independent!Type;
+	}
+
+	override Dependent!Type unify(Type rhs){
+		if(auto rft=rhs.getFunctionTy()){
+			mixin(Unify!q{auto unf; ft, rft});
+			if(unf){
+				assert(cast(FunctionTy)unf);
+				return (cast(FunctionTy)cast(void*)unf).getDelegate().independent!Type;
+			}
 		}
 		return null.independent!Type;
 	}
@@ -5914,6 +5935,35 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 				p.type = null;
 	}
 
+	override Dependent!Type unify(Type rhs){
+		if(auto ft = rhs.isFunctionTy()){
+			// TODO: unify STC
+			if(vararg != ft.vararg ||
+			   stc!=ft.stc||ft.params.length!=params.length) return Type.init.independent;
+			Type r;
+			auto p = new Parameter[params.length]; // TODO: avoid allocation
+			if(!ret) r=ft.ret;
+			else if(!ft.ret) r=ret;
+			else mixin(Unify!q{r; ret, ft.ret});
+			foreach(i,ref x;p){
+				// TODO: unify STC
+				x = New!Parameter(params[i].stc, null, null, null);
+				if(!ft.params[i]||!params[i]||ft.params[i].stc!=params[i].stc)
+					continue;
+				Type tt;
+				if(!params[i].type) tt = ft.params[i].type;
+				else if(!ft.params[i].type) tt = params[i].type;
+				else mixin(Unify!q{tt;params[i].type,ft.params[i].type});
+				x.type = tt;
+			}
+			//if(ret == r && params == p) return this.independent!Type;
+			auto res = New!FunctionTy(stc,r,p,vararg);
+			do res.semantic(scope_); // TODO: not great
+			while(!res.sstate == SemState.completed);
+			return res.independent!Type;
+		}else return rhs.unify(this);
+	}
+
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
 		alias util.any any; // TODO: file bug
 		if(args.length > params.length ||
@@ -6041,7 +6091,6 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		}
 		return null.independent!Type;
 	}
-
 
 	DelegateTy getDelegate()in{
 		assert(sstate==SemState.completed);
@@ -6787,9 +6836,35 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 	override Dependent!Type refCombine(Type rhs, int num){
 		if(auto c=mixin(`rhs.is`~T.stringof)()){
 			mixin(RefCombine!q{Type rcomb; ty, c.ty, num+!is(T==ArrayTy)});
-			if(rcomb) return mixin(`rcomb.`~puthead).independent!Type;
+			if(rcomb){
+				static if(is(T==ArrayTy))
+					if(c.length!=length)
+						return rcomb.getDynArr().independent!Type;
+				return mixin(`rcomb.`~puthead).independent!Type;
+			}
 		}
 		return super.refCombine(rhs,num);
+	}
+
+	override Dependent!Type unify(Type rhs){
+		if(auto c=mixin(`rhs.is`~T.stringof)()){
+			static if(is(T==ArrayTy)) if(c.length!=length) return Type.init.independent;
+			mixin(Unify!q{Type unf; ty, c.ty});
+			if(unf) return mixin(`unf.`~puthead).independent!Type;
+		}
+		static if(is(T==PointerTy)){
+			if(auto b = rhs.getFunctionTy()){
+				auto a = getFunctionTy();
+				if(!a) return null.independent!Type;
+				mixin(Unify!q{Type c; a,b});
+				if(c){
+					assert(cast(FunctionTy)c);
+					auto r = rhs.isDelegateTy() ? (cast(FunctionTy)cast(void*)c).getDelegate() : c.getPointer();
+					return r.independent!Type;
+				}
+			}
+		}
+		return super.unify(rhs);
 	}
 
 	private enum puthead = "get"~(is(T==ArrayTy)?"Array(length)":typeof(this).stringof[0..$-2]~"()");
@@ -9447,6 +9522,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 	 */
 
 	bool deduceStatic;
+	bool canBeStatic = true;
 
 	final void addContextPointer() in{
 		assert(sstate == SemState.completed);
@@ -9459,7 +9535,6 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 	}
 private:
 	FunctionScope fsc;
-	bool canBeStatic = true;
 }
 
 mixin template Semantic(T) if(is(T==PragmaDecl)){

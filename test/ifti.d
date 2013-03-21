@@ -1,4 +1,13 @@
 
+template G(S,T){ alias T delegate(S) G; }
+
+C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){
+	pragma(msg, A," ",B," ",C);
+	return b(a(x));
+}
+pragma(msg, foo(1, x=>2.0*x, x=>toString(cast(int)x)));
+
+/+
 auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
 static assert(testTupleExpandIFTI(1,2,3,4)==4);
 
@@ -18,12 +27,14 @@ void matchTemplateInstantiation(){
 }
 
 
-auto exec(T)(T arg){
-	pragma(msg, T);
-	return arg();
+struct DefaultParamsNo{
+	auto exec(T)(T arg){
+		pragma(msg, T);
+		return arg();
+	}
+	pragma(msg, exec((int x=2)=>x));// TODO: strip default params
+	pragma(msg, exec((int x=3)=>x));
 }
-pragma(msg, exec((int x=2)=>x));// TODO: strip default params
-pragma(msg, exec((int x=3)=>x));
 
 
 /+// TODO: should this work?
@@ -163,7 +174,7 @@ auto inexistentparamtype(T...)(S arg){ }
 auto inexistentparamtype(T...)(S arg) if(T.length){ // TODO: gag
 	return arg.length;
 }
-pragma(msg, inexistentparamtype!()(2));
+pragma(msg, inexistentparamtype!()(2)); // error
 
 bool all(alias a,T)(T[] r){
 	pragma(msg, typeof(a!int));

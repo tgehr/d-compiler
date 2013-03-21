@@ -193,6 +193,7 @@ class Scheduler{
 				///
 
 				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
+				// if(sc) dw("inst",sc," ", sc.getTemplateInstance());
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
 						if(auto exp=nd.isExpression()) exp.interpret(sc);

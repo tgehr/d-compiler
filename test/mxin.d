@@ -1,3 +1,15 @@
+
+
+struct MixinEvalOrder{
+	enum x = "string xx = q{int y = 0;};";
+	
+	struct S{
+		mixin(x);
+		mixin(xx); // TODO: we want this to work (?)
+	}
+}
+
+
 mixin(q{pragma(msg, is(typeof({immutable(char)[] x=['2'];}())));});
 enum immutable(dchar)[] fooz = "hello";
 //pragma(msg, "fooz");

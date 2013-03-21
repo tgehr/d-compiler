@@ -1,3 +1,31 @@
+ // (indeterministic circular dependency error)
+auto match()(){
+	pragma(msg, typeof(dglit!int));
+	return 0;
+}
+
+auto dglit(T)(T a){ return getLen!(); }
+
+int getLen()(){return match!()();}
+
+pragma(msg, getLen());
+
+void main(){}
+
+/+template ID(alias d){ alias d ID; }
+template boo(){ alias ID!(x=>2) boo;}
+
+pragma(msg, boo!()(2));+/
+
+
+/+
+struct ReturnTypeLambdaParameterIfti{
+	void foo(T)(T a, T b) { }
+	void main() {
+		foo((int a)=>a, b=>1.0); // foo!(double function(int))
+	}
+}
++/
 /+
 struct UndefinedIdentifierError{
 	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message

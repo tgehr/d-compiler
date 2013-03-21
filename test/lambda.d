@@ -1,4 +1,16 @@
 
+void delegateArrayInference() {
+	void writeln(string x);
+	auto tbl1 = [
+		(string x) { writeln(x); },
+		(string x) { x ~= 'a'; },
+	];
+	auto tbl2 = [
+		(string x) { x ~= 'a'; },
+		(string x) { writeln(x); },
+	];
+}
+
 struct testLookupConversionError{
 	struct S{
 		int delegate() dg;

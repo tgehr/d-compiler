@@ -161,7 +161,6 @@ struct ValueRange(int size) if(size==32||size==64){
 			if(max>T.max-rhs.max && min<=T.max-rhs.min) return full(false);
 			return R(min+rhs.min, max+rhs.max, false);
 		}else{
-			S x, y;
 			bool
 				mino = cast(S)min>0 && cast(S)rhs.min>0 && cast(S)min>S.max-cast(S)rhs.min, // min+rhs.min overflows
 				maxo = cast(S)max>0 && cast(S)rhs.max>0 && cast(S)max>S.max-cast(S)rhs.max, // max+rhs.max overflows
@@ -179,7 +178,6 @@ struct ValueRange(int size) if(size==32||size==64){
 			if(min<rhs.max && max>=rhs.min) return full(false);
 			return R(min-rhs.max, max-rhs.min, false);
 		}else{
-			S x, y;
 			bool
 				mino = cast(S)min>0 && cast(S)rhs.max<0 && cast(S)min>S.max+cast(S)rhs.max, // min-rhs.max overflows
 				maxo = cast(S)max>0 && cast(S)rhs.min<0 && cast(S)max>S.max+cast(S)rhs.min, // max-rhs.min overflows
