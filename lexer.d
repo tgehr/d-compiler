@@ -908,7 +908,14 @@ struct Lexer{
 							if(mulp<mlim) val2 = (val2 << 1) + (val2 << 3) + *p -'0', mulp*=10, adjexp--;
 							break;
 						case '.':
-							if('0'<=p[1]&&p[1]<='9' && dot == -1) dot = dig, isfloat = 1; // break; }
+							switch(p[1]){
+								case 'a': .. case 'z':
+								case 'A': .. case 'Z':
+								case '.', '_':
+									break consumedec;
+								default: break;
+							}
+							if(dot == -1) dot = dig, isfloat = 1; // break; }
 							else break consumedec; goto case;
 						case '_': // ignore embedded _
 							break;

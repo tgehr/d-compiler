@@ -265,8 +265,8 @@ mixin template DownCastMethod(){
 
 private string Ximpl(string x){
 	string r=`"`;
-	for(typeof(x.length) i=0;i<x.length;r~=x[i],i++){
-		if(x[i]=='@'&&x[i+1]=='('){
+	foreach(i;0..x.length){
+		if(x[i]=='@'&&i+1<x.length&&x[i+1]=='('){
 			auto start = ++i, nest=1;
 			while(nest){
 				i++;
@@ -277,7 +277,8 @@ private string Ximpl(string x){
 			r~=`"~`~x[start..i]~`~"`;
 			if(i==x.length) break;
 		}
-		if(x[i]=='"'||x[i]=='\\'){r~="\\"; continue;} 
+		if(x[i]=='"'||x[i]=='\\') r~="\\";
+		r~=x[i];
 	}
 	return r~`"`;
 }
@@ -286,10 +287,14 @@ template X(string x){
 	enum X = Ximpl(x);
 }
 
-enum a="";
-
-
 template XX(string x){
 	enum XX = mixin(Ximpl(x));
 }
 
+// Missing from Phobos due to wrong design principles:
+
+import std.range;
+bool any(alias a,R)(R range) if(is(typeof(a(R.init)): bool) && isInputRange!R){
+	foreach(ref x;range) if(a(x)) return true;
+	return false;
+}

@@ -110,6 +110,10 @@ class FormattingErrorHandler: VerboseErrorHandler{
 		}else VerboseErrorHandler.error(err,loc);
 	}
 	override void note(lazy string err, Location loc){
+		if(loc.line == 0){ // just here for robustness
+			stderr.writeln("(bug, location missing): "~err);
+			return;
+		}
 		if(isATTy(stderr)){
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);

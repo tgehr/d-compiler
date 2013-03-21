@@ -39,7 +39,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 	ErrorHandler handler;
 
-	bool insert(Declaration decl)in{assert(decl.name.ptr);}body{
+	bool insert(Declaration decl)in{assert(decl.name&&decl.name.ptr);}body{
 		if(auto d=symtab.get(decl.name.ptr,null)){
 			if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
@@ -69,6 +69,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return New!ErrorDecl();
 	}
 	
+	FunctionDef getFunction(){return null;}
 	
 	T push(T:NestedScope)(R sc){ return New!T(this); }
 	Scope pop(){assert(0,"tried to pop module scope");}
@@ -85,7 +86,7 @@ private:
 abstract class NestedScope: Scope{
 	Scope parent;
 	override Scope pop(){return parent;}
-	this(Scope parent){
+	this(Scope parent) in{assert(!!parent);}body{
 		super(parent.handler);
 		this.parent=parent;
 	}
@@ -93,23 +94,32 @@ abstract class NestedScope: Scope{
 	override Declaration lookup(Identifier ident){
 		return lookup(ident, parent.lookup(ident));
 	}
+
+	override FunctionDef getFunction(){return parent.getFunction();}
+
 }
 
 class FunctionScope: NestedScope{ // Forward references don't get resolved
-	this(Scope parent){
+	this(Scope parent, FunctionDef fun){
 		super(parent);
+		this.fun=fun;
 	}
-	Declaration lookup(Identifier ident, lazy Declaration alt){
+	override Declaration lookup(Identifier ident, lazy Declaration alt){
 		return symtab.get(ident.ptr, parent.lookup(ident));
 	}
+	
+	override FunctionDef getFunction(){return fun;}
+
 	alias Scope.lookup lookup; // overload lookup
 protected:
 	bool canDeclareNested(Declaration decl){ // for BlockScope
 		return !(decl.name.ptr in symtab); // TODO: More complicated stuff.
 	}
+private:
+	FunctionDef fun;
 }
 
-class BlockScope: FunctionScope{ // No shadowing of declarations in the enclosing function.
+class BlockScope: NestedScope{ // No shadowing of declarations in the enclosing function.
 	this(Scope parent){
 		super(parent);
 	}

@@ -6,7 +6,6 @@ import scope_, semantic, visitors, vrange, util;
 
 abstract class Node{
 	Location loc;
-	SemState sstate = SemState.begin;
 
 	abstract @property string kind();
 
@@ -42,6 +41,10 @@ class ErrorExp: Expression{
 	mixin Visitors;
 }
 
+class StubExp: Expression{
+	this(Type type)in{assert(type.sstate==SemState.completed);}body{this.type = type;}
+}
+
 
 class LiteralExp: Expression{
 	Token lit;
@@ -72,7 +75,7 @@ class FunctionLiteralExp: Expression{
 	BlockStm bdy;
 	bool isStatic;
 	this(FunctionTy ft, BlockStm b, bool s=false){ fty=ft; bdy=b; isStatic=s;}
-	override string toString(){return _brk((isStatic?"function"~(fty&&fty.ret?" ":""):fty&&fty.ret?"delegate ":"")~(fty?fty.toString():"")~bdy.toString());}
+	override string toString(){return _brk((isStatic?"function"~(fty&&fty.rret?" ":""):fty&&fty.rret?"delegate ":"")~(fty?fty.toString():"")~bdy.toString());}
 
 	mixin Visitors;
 }

@@ -327,7 +327,7 @@ struct ValueRange(int size) if(size==32||size==64){
 		}
 	}
 
-static:
+private static:
 	T maxOr(R lhs, R rhs){
 		T x=0;
 		auto xor=lhs.max^rhs.max;

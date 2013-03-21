@@ -3,7 +3,7 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
 
-abstract class Declaration: Statement{ // empty declaration if instanced
+abstract class Declaration: Statement{
 	STC stc;
 	Identifier name;
 	this(STC stc,Identifier name){
@@ -50,7 +50,7 @@ class ModuleDecl: Declaration{
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"module "~symbol.toString()~";";}
 }
 
-class ImportBindingsExp: Expression{
+final class ImportBindingsExp: Expression{
 	Expression symbol;
 	Expression[] bindings;
 	this(Expression sym, Expression[] bind){symbol=sym; bindings=bind;}
@@ -141,7 +141,7 @@ enum WhichTemplateParameter{
 	tuple,
 }
 
-class TemplateParameter: Node{
+final class TemplateParameter: Node{
 	Identifier name;
 	Expression type, spec, init;
 	WhichTemplateParameter which;
@@ -231,11 +231,12 @@ class TemplateFunctionDecl: OverloadableDecl{
 	this(STC stc, TemplateParameter[] tp, Expression c, FunctionDecl fd){params=tp; constraint=c;fdecl=fd; super(stc, fdecl.name);}
 	override string toString(){
 		auto fd=cast(FunctionDef)fdecl;
-		return (fdecl.type.stc?STCtoString(fdecl.type.stc)~" ":"")~(fdecl.type.ret?fdecl.type.ret.toString()~" ":"")~name.toString()~
+		return (fdecl.type.stc?STCtoString(fdecl.type.stc)~" ":"")~(fdecl.type.rret?fdecl.type.rret.toString()~" ":"")~name.toString()~
 			"("~join(map!(to!string)(params),",")~")"~fdecl.type.pListToString()~(constraint?" if("~constraint.toString()~")":"")
 			~(fdecl.pre?"in"~fdecl.pre.toString():"")~(fdecl.post?"out"~(fdecl.postres?"("~fdecl.postres.toString()~")":"")~fdecl.post.toString():"")~
 			(fd?(fd.pre||fd.post?"body":"")~fd.bdy.toString():!fdecl.pre&&!fdecl.post?";":"");
 	}
+
 }
 
 
@@ -252,7 +253,7 @@ class VarDecl: Declaration{
 }
 
 class CArrayDecl: VarDecl{
-	Expression postfix; // reverse order
+	Expression postfix; // reverse order until semantic
 	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
 		postfix=pfix; super(stc, rtype, name, initializer);
 	}
@@ -296,7 +297,7 @@ class FunctionDecl: OverloadableDecl{
 		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
 	}
 	final string signatureString(){
-		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");		
 	}
 	override string toString(){
@@ -313,7 +314,7 @@ class FunctionDef: FunctionDecl{
 	this(FunctionTy type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
 		super(type,name, precondition, postcondition, pres); bdy=fbody;}
 	override string toString(){
-		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();
 	}
 

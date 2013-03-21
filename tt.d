@@ -16,14 +16,13 @@ const int x;
 //pragma(msg, typeof(x));
 
 void main(){
-	pragma(msg, typeof(0.f&&{}()));
+	pragma(msg, typeof(0.0f&&{}()));
 	pragma(msg, !is(T==int)^^2);
-
+	
 	char ä='ä';
 	immutable(int)[] a;
 	const(int)[] b;
 	immutable c = a~b;
-
 
 	int y;
 	y = 1;

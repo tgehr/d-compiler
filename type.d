@@ -131,12 +131,12 @@ enum VarArgs{
 }
 class FunctionTy: Type{
 	STC stc;
-	Expression ret;
-	Type retTy;
+	Expression rret;
+	Type ret;
 	Parameter[] params;
 	VarArgs vararg;
-	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; ret=retn; params=plist; vararg=va;}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(ret?ret.toString():"")~pListToString();}
+	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; rret=retn; params=plist; vararg=va;}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rret?rret.toString():"")~pListToString();}
 	string pListToString(){
 		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")");
 	}
@@ -145,18 +145,18 @@ class FunctionTy: Type{
 	mixin Visitors;
 }
 
-class FunctionPtr: Type{
+class FunctionPtr: Type{ // TODO: get rid of this class, merge functionality into PointerTy
 	FunctionTy ft;
-	this(FunctionTy ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
-	override string toString(){return ft.ret.toString()~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+	this(FunctionTy ft)in{assert(ft !is null&&ft.rret !is null);}body{this.ft=ft;}
+	override string toString(){return ft.rret.toString()~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
 
 	mixin Visitors;
 }
 
 class DelegateTy: Type{
 	FunctionTy ft;
-	this(FunctionTy ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
-	override string toString(){return ft.ret.toString()~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+	this(FunctionTy ft)in{assert(ft !is null&&ft.rret !is null);}body{this.ft=ft;}
+	override string toString(){return ft.rret.toString()~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
 
 	mixin Visitors;
 

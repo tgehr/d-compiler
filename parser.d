@@ -769,19 +769,7 @@ private struct Parser{
 				auto catches=appender!(CatchStm[])();
 				do{ // TODO: abstract loop away, as soon as compile memory usage is better
 					Location loc=tok.loc;
-					//mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
-					//pragma(msg,doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
-					expect(Tok!"catch");
-					typeof(parseType()) type=null;
-					typeof(parseIdentifier()) ident=null;
-					if(ttype==Tok!"("){
-						nextToken();
-						type = parseType();
-						ident = ttype==Tok!")" || ttype==Tok!")" ? null : parseIdentifier();
-						expect(Tok!")");
-					}
-					nonEmpty!"statement"();
-					auto s = parseStatement();
+					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
 					auto c=New!CatchStm(type,ident,s); c.loc=loc.to(ptok.loc);
 					catches.put(c);
 					if(!type) break; // this really should work as loop condition!
@@ -862,8 +850,9 @@ private struct Parser{
 		for(;;){
 			switch(ttype){
 				case Tok!"*":
+					auto loc = tt.loc;
 					tt=New!PointerTy(tt); 
-					tt.loc=tok.loc;
+					tt.loc=loc.to(tok.loc);
 					nextToken();
 					continue;
 				case Tok!"[":
@@ -871,7 +860,7 @@ private struct Parser{
 					bool isAA=skip()&&skipType()&&ttype==Tok!"]";
 					restoreState(save);
 					if(isAA){
-						Location loc=tok.loc;
+						auto loc=tt.loc;
 						mixin(doParse!("_",Type,"e","]"));
 						tt=New!IndexExp(tt,[e]);
 						tt.loc=loc.to(ptok.loc);
@@ -952,6 +941,7 @@ private struct Parser{
 				return res=New!ArrayLiteralExp(e);
 			}
 		}
+		// TODO: maybe refactor this a little, the logic is convoluted.
 		if(ttype!=Tok!"{") return parseExpression(rbp!(Tok!","));
 		else{
 			auto save=saveState();
@@ -962,19 +952,22 @@ private struct Parser{
 					case Tok!"}": nest--; continue;
 					case Tok!";", Tok!"return", Tok!"if", Tok!"while", Tok!"do", Tok!"for", Tok!"foreach",
 						 Tok!"switch", Tok!"with", Tok!"synchronized", Tok!"try", Tok!"scope", Tok!"asm", Tok!"pragma": // TODO: complete!
-						if(nest!=1) continue; // EXTENSION: This is a DMD bug
-						restoreState(save); // if it contains return or ;, it is a delegate literal
-						return parseExpression(rbp!(Tok!","));
+						if(nest!=1) continue; // DMD bug: it lacks this
+						goto  isdglit;// if it contains return or ;, or it is a delegate literal
 					case Tok!"EOF": break;
 					default: continue;
 				}
 				break;
 			}
+			if(ttype == Tok!"(") goto isdglit;
 			restoreState(save);
 			nextToken();
 			auto e=parseAssocArgumentList!("}",false,StructAssocExp)();
 			expect(Tok!"}");
 			return res=New!StructLiteralExp(e);
+		isdglit:
+			restoreState(save);
+			return parseExpression(rbp!(Tok!","));
 		}
 	}
 	STC parseSTC(alias which,bool properties=true)(){
