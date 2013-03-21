@@ -1,4 +1,19 @@
+enum x = "enum xx = q{int y = 0;};";
 
+struct S{
+	mixin(xx);       
+	mixin(x);
+}
+/+
+}struct S{
+	enum z = y;
+	enum x = "enum xx = q{immutable y = 123;};";
+	mixin(xx);
+	mixin(x);
+	static assert(z == 123);
+}+/
+
+/+
 
 struct MixinEvalOrder{
 	enum x = "string xx = q{int y = 0;};";
@@ -39,3 +54,5 @@ mixin(q{
 
 	}
 });
+
+// +/

@@ -1,8 +1,8 @@
-class C: typeof(new C){}
-class D: immutable(typeof(new D)){}
-class E: int{}
 
-/+
+class C: typeof(new C){} // error
+class D: immutable(typeof(new D)){} // error
+class E: int{} // error
+
 immutable int foo(){}
 
 void main(){
@@ -17,7 +17,7 @@ bool match(int matches[]); // TODO
 pragma(msg, typeof(match));
 
 void main(){
-	auto d = new A().B();
+	auto d = new A().B(); // error
 
 	//auto x = r"\ ";
 	//import std.stdio;
@@ -51,7 +51,7 @@ void main(){
 	//x="";
 
 	void dddx(){
-		try{
+		try{ // TODO
 			try{
 
 			}finally{

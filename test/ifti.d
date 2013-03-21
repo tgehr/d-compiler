@@ -7,7 +7,7 @@ C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){
 }
 pragma(msg, foo(1, x=>2.0*x, x=>toString(cast(int)x)));
 
-/+
+
 auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
 static assert(testTupleExpandIFTI(1,2,3,4)==4);
 

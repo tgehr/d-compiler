@@ -86,7 +86,7 @@ class MultiDep: Node{
 		}
 		needRetry = true;
 	}
-	void semantic(Scope sc){ mixin(SemEplg); }
+	override void semantic(Scope sc){ mixin(SemEplg); }
 	override void _doAnalyze(scope void delegate(Node) dg){ assert(0); }
 	override inout(Node) ddup()inout{ assert(0); }
 	override string kind(){ return "multi dependency";}
@@ -382,6 +382,7 @@ class TemplateInstanceExp: Expression{
 	this(Expression exp, Expression[] a){e=exp; args=a;}
 	override string toString(){return _brk(e.toString()~"!"~(args.length!=1?"(":"")~join(map!(to!string)(args),",")~(args.length!=1?")":""));}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 

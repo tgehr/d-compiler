@@ -241,7 +241,7 @@ class TemplateMixinDecl: Declaration{
 	override string toString(){return "mixin "~inst.toString()~(name?" "~name.toString():"")~";";}
 }
 
-abstract class AggregateDecl: Declaration{
+abstract class AggregateDecl: Declaration, NotifyOnLayoutChanged{
 	BlockDecl bdy;
 	this(STC stc, Identifier name, BlockDecl b){bdy=b; super(stc,name);}
 
@@ -409,10 +409,11 @@ class FunctionDecl: OverloadableDecl{
 	CompoundStm pre,post;
 	Identifier postres;
 	this(STC stc, FunctionTy type,Identifier name,CompoundStm pr,CompoundStm po,Identifier pres)in{assert(type&&1);}body{
+		stc &= ~STCauto; // auto does not matter
 		this.type=type; pre=pr, post=po; postres=pres; super(stc, name);
 	}
 	final string signatureString(){
-		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":!astStc?"auto ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");		
 	}
 	override string toString(){
@@ -428,7 +429,7 @@ class FunctionDecl: OverloadableDecl{
 	mixin Visitors;
 }
 
-class FunctionDef: FunctionDecl{
+class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 	CompoundStm bdy;
 	this(STC stc, FunctionTy type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody,bool deduceStatic=false){
 		super(stc, type, name, precondition, postcondition, pres); bdy=fbody;

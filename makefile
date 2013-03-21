@@ -2,12 +2,11 @@ SRCFILES = d.d lexer.d operators.d parser.d expression.d statement.d declaration
 OBJFILES = d.o lexer.o operators.o parser.o expression.o statement.o declaration.o type.o scope_.o module_.o semantic.o scheduler.o analyze.o variant.o interpret.o vrange.o visitors.o error.o terminal.o util.o hashtable.o
 
 #DMD = dmd -m64 -O -release -noboundscheck
-DMD = dmd -m32 -O -release -noboundscheck
-#DMD = dmd -debug -gc -m32
-#DMD = ../dmd/src/dmd -O -release -noboundscheck
-#DMD = ../dmd/src/dmd -gc -m32
+#DMD = dmd -m32 -O -release -noboundscheck
+DMD = dmd -debug -gc -m32
+#DMD = ../dmd/src/dmd -m32 -O -release -noboundscheck
+#DMD = ../dmd/src/dmd -debug -gc -m32
 #DMD = ../dmd/src/dmd -m32 -O -release -inline -noboundscheck
-#DMD = ../dmd/src/dmd -property -gc -m32
 #DMD = gdmd -gc -m32 -L-lgphobos2 -O -release -inline -noboundscheck
 #DMD = gdmd -gc -m32 -L-lgphobos2 -O -inline
 #DMD = gdmd -gc -m32 -L-lgphobos2

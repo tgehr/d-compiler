@@ -367,8 +367,7 @@ auto memfactorial(int n) => memoizer([1, 1L], (recur, int n) => n*recur(n-1))(n)
 auto memfibonacci(int n) => memoizer([0, 1 ], (recur, int n) => recur(n-2)+recur(n-1))(n);
 pragma(msg, "memfactorial: ", map!memfactorial(iota(0,19)));
 pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
-
-pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1)))); //TODO
+pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1))));
 
 
 // Haskell-Like CPS //
@@ -531,7 +530,7 @@ size_t indexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 }
 static assert(indexOf("abc",'d')==-1LU);
 
-size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+/+size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 	// TODO: this probably is not supposed to work
 	template bal(string s){ size_t bal = 0; }
 	for(size_t i=0;i<c.length;i++){
@@ -546,6 +545,24 @@ size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 			else if(c[i]==']') bal!"["--;
 			else if(c[i]=='{') bal!"{"++;
 			else if(c[i]=='}') bal!"{"--;
+		}
+	}
+	return -1;
+}+/
+size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	size_t bal1 = 0, bal2 = 0, bal3 = 0, bal4 = 0, bal5 = 0;
+	for(size_t i=0;i<c.length;i++){
+		if(!bal1&&!bal2&&!bal3&&!bal4&&!bal5&&a(c[i],v)) return i;
+
+		if(c[i]=='"') bal2=!bal2;
+		else if(c[i]=='\'') bal1=!bal1;
+		else if(!bal2&&!bal1){
+			if(c[i]=='(') bal3++;
+			else if(c[i]==')') bal3--;
+			else if(c[i]=='[') bal4++;
+			else if(c[i]==']') bal4--;
+			else if(c[i]=='{') bal5++;
+			else if(c[i]=='}') bal5--;
 		}
 	}
 	return -1;

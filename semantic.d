@@ -363,12 +363,12 @@ enum SemPrlg=mixin(X!q{
 	Scheduler().add(this,sc);
 	//dw(cccc++); if(!champ||cccc>champ.cccc) champ=this;
 	//dw(champ);
-/+	debug scope(failure){
+	debug scope(failure){
 		if(loc.line) write("here! ",loc," ",typeid(this));
 		else write("here! ",toString()," ",typeid(this));
 		static if(is(typeof(meaning))) write(" meaning: ",meaning," ",typeid(this.meaning)," ",meaning.sstate);
 		writeln();
-	}+/
+	}
 });
 //static if(is(typeof(dw(this)))) dw(this);
 
@@ -1553,7 +1553,14 @@ class MatcherTy: Type{
 		else{
 			mixin(Unify!q{Type c; adapted, from}); // TODO: full unification
 			if(c) adapted=c;
-			else if(!adapted.equals(from)) ambiguous=true;
+			else{
+				// if unification fails, ignore 'void'
+				// this eg. helps when one argument is an empty array
+				// void foo(T)(T[] a, T[] b); foo([],[1,2,3])
+				auto v = Type.get!void();
+				if(adapted==v) adapted=from;
+				else if(from!=v) ambiguous=true;
+			}
 		}
 		return indepvoid;
 	}
@@ -1568,7 +1575,10 @@ class MatcherTy: Type{
 
 
 class TemplateInstanceDecl: Declaration{
-	TemplateDecl parent;    // template this instance was instantiated from
+	TemplateDecl parent;      // template this instance was instantiated from
+
+	Expression instantiation; // an expression that is responsible for analysis
+	                          // of this instance. (either a symbol or a instantiation)
 
 	Expression[] args;      // arguments as given by the instantiation site
 	Expression[] resolved;  // arguments as given to the template body
@@ -1604,7 +1614,9 @@ class TemplateInstanceDecl: Declaration{
 		MatchState matchState = MatchState.start;
 	}
 
-	this(TemplateDecl parent, const ref Location loc, Expression[] args){
+	this(TemplateDecl parent, const ref Location loc, Expression expr, Expression[] args)in{
+		assert(expr.isSymbol() || expr.isTemplateInstanceExp());
+	}body{
 		super(parent.stc, parent.name);
 		this.parent=parent;
 		this.args=args;
@@ -1613,12 +1625,16 @@ class TemplateInstanceDecl: Declaration{
 
 		this.loc = loc;
 
+		this.instantiation = expr; // TODO: need to handle FieldExp?
+
 		scope_ = parent.scope_;
 		sstate = SemState.begin;
 	}
 
-	this(TemplateDecl parent, const ref Location loc, Expression[] args, Expression[] iftiArgs){
-		this(parent, loc, args);
+	this(TemplateDecl parent, const ref Location loc, Expression func, Expression[] args, Expression[] iftiArgs)in{
+		assert(func.isSymbol() || func.isTemplateInstanceExp());
+	}body{
+		this(parent, loc, func, args);
 		this.iftiArgs = iftiArgs;
 		this.matchState = MatchState.iftiStart;
 	}
@@ -1721,7 +1737,7 @@ class TemplateInstanceDecl: Declaration{
 		auto params   = parent.params;
 
 		resolved = new Expression[params.length];
-		
+
 		// resolve non-tuple parameters
 		if(args.length>tuplepos&&tuplepos==params.length) return false;
 		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,$)];
@@ -1747,7 +1763,7 @@ class TemplateInstanceDecl: Declaration{
 			resolved[tuplepos]=et;
 		}
 
-		if(!checkResolvedValidity) return false;
+		if(!checkResolvedValidity()) return false;
 
 		if(matchState == MatchState.iftiStart) initializeIFTI();
 
@@ -2058,7 +2074,6 @@ class TemplateInstanceDecl: Declaration{
 	private void instanceSemantic(Scope sc_)in{
 		assert(finishedInstantiation);
 	}body{
-		// dw("ism ", this);
 		{alias sc_ sc;mixin(SemPrlg);}
 		assert(sstate == SemState.begin);
 		sstate = SemState.started;
@@ -2456,6 +2471,21 @@ class TypeTuple: Type, Tuple{
 	
 	mixin TupleImplConvTo!types;
 
+	// TODO: optimize this:
+	override Dependent!Type combine(Type rhs){
+		if(auto tpl=rhs.isTypeTuple()){
+			if(equals(rhs)) return this.independent!Type;
+			if(tpl.length!=length) return null.independent!Type;
+			auto ts = new Type[types.length]; // TODO: allocation (eg. prune allocation when combination yields)
+			foreach(i;0..types.length){
+				mixin(Combine!q{auto r; types[i], tpl.types[i]});
+				ts[i]=r;
+			}
+			return New!TypeTuple(ts).independent!Type;
+		}
+		return null.independent!Type;
+	}
+
 	mixin DownCastMethod;
 	mixin Visitors;
 
@@ -2651,7 +2681,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	}
 +/
 	private Declaration matchHelper(bool fullySpecified, T...)(Scope sc, const ref Location loc, T ts){
-		alias ts[!fullySpecified] args; // respect this_
+		alias ts[!fullySpecified+1] args; // respect this_
 		assert(!!scope_);
 		assert(sstate == SemState.completed);
 
@@ -2681,23 +2711,27 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		return inst;
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression[] args){
-		auto r=matchHelper!true(sc, loc, args);
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression expr, Expression[] args){
+		auto r=matchHelper!true(sc, loc, expr, args);
 		// TODO: more explicit error message
 		if(!r && sc) sc.error("instantiation does not match template declaration",loc);
 		return r;
 	}
 
-	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression[] args, Expression[] funargs){
-		if(!iftiDecl) return matchInstantiation(sc, loc, args);
-		auto r=matchHelper!false(sc, loc, this_, args, funargs);
+	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, Expression[] funargs){
+		if(!iftiDecl) return matchInstantiation(sc, loc, func, args);
+		auto r=matchHelper!false(sc, loc, this_, func, args, funargs);
 		// TODO: more explicit error message
 		if(!r && sc) sc.error("could not match call to function template",loc);
 		return r;
 	}
 
-	final override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
+	final override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 		assert(0);
+	}
+
+	void forallInstances(scope void delegate(TemplateInstanceDecl) dg){
+		foreach(k,v;store.instances) dg(v);
 	}
 
 
@@ -2731,7 +2765,6 @@ private:
 	}
 
 	TemplateInstanceStore store;
-	TemplateInstanceStore gaggedStore;
 }
 
 
@@ -2814,7 +2847,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			}
 		}
 
-		inst = sym.meaning.matchIFTI(sc, loc, this_, args, funargs);
+		inst = sym.meaning.matchIFTI(sc, loc, this_, this, args, funargs);
 		if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 
 		if(!inst.isTemplateInstanceDecl
@@ -2827,7 +2860,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	private void instantiateSemantic(Scope sc, Expression container, Symbol sym){
 		if(!inst){
-			inst = sym.meaning.matchInstantiation(sc, loc, args);
+			inst = sym.meaning.matchInstantiation(sc, loc, this, args);
 			if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 		}
 		assert(!!inst);
@@ -2863,6 +2896,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		sym = New!Symbol(inst);
 		sym.loc = loc;
 		sym.accessCheck = acheck;
+		inst.instantiation = sym; // transfer ownership
 
 		if(container){
 			auto res = New!(BinaryExp!(Tok!"."))(container, sym);
@@ -2924,7 +2958,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 				this(Expression e, const ref Location l, Expression[] ia){
 					exp = e; loc = l; iftiArgs = ia;
 				}
-				void semantic(Scope sc){
+				override void semantic(Scope sc){
 					mixin(SemPrlg);
 					mixin(SemChld!q{exp});
 					mixin(MatchCall!q{auto r; exp, sc, loc, iftiArgs});
@@ -3664,7 +3698,6 @@ class Symbol: Expression{ // semantic node
 			errsc.error("circular dependencies are illegal",loc);
 			circ = null;
 			mixin(SetErr!q{});
-			assert(0);
 			foreach_reverse(x; clist[1..$]){
 				// IFTI might spawn locationless identifiers
 				if(x.loc.line) errsc.note("part of dependency cycle",x.loc);
@@ -3693,8 +3726,8 @@ class Symbol: Expression{ // semantic node
 
 
 	override void semantic(Scope sc){
-		// dw("semantic: ",this," ",meaning.sstate," ", loc);
-		debug scope(exit) assert((sstate != SemState.started||needRetry||rewrite) &&(sstate!=SemState.begin||needRetry||rewrite),toString()~" "~typeid(this.meaning).toString());
+		// dw("semantic: ",this," ",meaning.sstate," ", loc," ",cast(void*)meaning," ",meaning.loc," ",typeid(this.meaning));
+		debug scope(exit) assert(sstate != SemState.started||needRetry||rewrite,toString()~" "~typeid(this.meaning).toString());
 		debug scope(exit) assert(needRetry==2||!circ,toString()~" nR: "~to!string(needRetry)~" circ: "~to!string(circ));
 		mixin(SemPrlg);
 		if(!scope_) scope_=sc;
@@ -3704,10 +3737,12 @@ class Symbol: Expression{ // semantic node
 
 		if(sstate >= SemState.started){
 			// template instances may depend circularly upon each other
-			if(meaning.isTemplateInstanceDecl()&&meaning.sstate == SemState.started){
-				sstate = SemState.begin;
-				needRetry = true;
-				return;
+			if(meaning.isTemplateInstanceDecl()){
+				if(meaning.sstate == SemState.started){
+					sstate = SemState.begin;
+					needRetry = true;
+					return;
+				}
 			}
 			assert(!circ,toString());
 			circ = this;
@@ -3820,9 +3855,7 @@ class Symbol: Expression{ // semantic node
 			// circular template instantiations are allowed
 			// those just don't carry forward the information
 			// whether the template compiled or not.
-			// TODO:
-			// dw(this," ",meaning.sstate);
-			if(meaning.sstate != SemState.started){
+			if(tm.sstate != SemState.started){
 				mixin(MeaningSemantic);
 				mixin(CircErrMsg);
 				if(meaning.sstate == SemState.error)
@@ -4010,7 +4043,7 @@ class Symbol: Expression{ // semantic node
 		if(!scope_) scope_=sc;
 		assert(meaning && scope_);
 		if(!this_) this_ = maybeThisContext();
-		mixin(MatchCall!q{auto m; meaning, sc, loc, this_, args, context});
+		mixin(MatchCall!q{auto m; meaning, sc, loc, this_, this, args, context});
 		if(m){
 			// resolve the overload in place and then rely on
 			// semantic to catch eventual circular dependencies:
@@ -5073,8 +5106,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			if(needThis){
 				if(this_ && sym.meaning.needsAccessCheck(AccessCheck.all))
 				if(auto vd=sym.meaning.isVarDecl())
-				if(vd.isField)
-				{
+				if(vd.isField){
 					assert(!!this_.type.getUnqual().isAggregateTy());
 					auto stc = this_.type.getHeadSTC();
 					type=type.applySTC(stc);
@@ -6054,6 +6086,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 			auto stc1 = stc, stc2 = ft.stc;
 			static if(implconv){
 				stc1 &= ~STCproperty, stc2 &= ~STCproperty; // STCproperty does not matter
+				stc1 &= ~STCauto, stc2 &= ~STCauto; // STCauto does not matter
 				if(stc1 & STCsafe || stc1 & STCtrusted)
 					stc1 &= ~STCsafe & ~STCtrusted, stc2 &= ~STCsafe & ~STCtrusted & ~STCsystem;
 				// attributes that can be freely dropped:
@@ -6698,7 +6731,7 @@ private:
      tail:    string evaluating to the tail of the type
      puthead: string evaluating to a member that puts the head back on the tail
  */
-private mixin template GetTailOperations(string tail, string puthead){
+mixin template GetTailOperations(string tail, string puthead){
 	static string __dgliteralTailQualified(){// "delegate literals cannot be class members..."
 		string r;
 		foreach(q;typeQualifiers){
@@ -7401,19 +7434,19 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		return !(stc&STCstatic) && check == AccessCheck.all;
 	}
 
-	Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
+	Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 		return null.independent!Declaration;
 	}
 	void matchError(Scope sc, Location loc, Type this_, Expression[] args){
 		sc.error(format("%s '%s' is not callable",kind,name.toString()),loc);
 	}
 
-	Declaration matchInstantiation(Scope sc, const ref Location loc, Expression[] args){
+	Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, Expression[] args){
 		if(sc) sc.error(format("can only instantiate templates, not %s%ss",kind,kind[$-1]=='s'?"e":""),loc);
 		return null;
 	}
 
-	Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression[] args, Expression[] funargs){
+	Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, Expression[] funargs){
 		if(sc) sc.error(format("%s '%s' is not a function template",kind, name.name),loc);
 		return null;
 	}
@@ -7496,10 +7529,8 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		super.presemantic(sc);
 		if(sstate == SemState.error) type = null; // TODO: why is this here?
 		if(auto decl=sc.getDeclaration())
-			if(auto aggr = decl.isAggregateDecl()){
+			if(auto aggr = decl.isAggregateDecl())
 				isField=true;
-				aggr.layoutChanged();
-			}
 	}
 
 	// used in Symbol to get the correct storage classes for the variable decl
@@ -7682,6 +7713,11 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		}
 		type = type.checkVarDecl(sc,this);
 		mixin(SemProp!q{type});
+		if(isField){
+			auto aggr = sc.getDeclaration().isAggregateDecl();
+			assert(!!aggr);
+			aggr.layoutChanged();
+		}
 		mixin(SemEplg);
 	}
 
@@ -8448,23 +8484,8 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 
 	mixin HandleNestedDeclarations;
 
-	/* Called in presemantic of fields. This allows multiple different interpretations
-	   of the same aggregate type during different CTFE executions, while the layout
-	   can still be cached.
-	 */
-
-	void layoutChanged(){
-		updateVersion();
-		layoutKnown = false;
-	}
-
-	bool isLayoutKnown(){
-		return layoutKnown;
-	}
-
 private:
 	AggregateTy type;
-	bool layoutKnown = false;
 }
 
 mixin template Semantic(T) if(is(T==Declarators)){
@@ -8630,12 +8651,12 @@ class OverloadSet: Declaration{ // purely semantic node
 			//}
 	}
 
-	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
+	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 		debug _matchedOne = true;
 
 		if(!tdecls.length){
-			if(decls.length == 1) return decls[0].matchCall(sc, loc, this_, args, context);
-		}else return New!FunctionOverloadMatcher(this, loc, this_, args).independent!Declaration;
+			if(decls.length == 1) return decls[0].matchCall(sc, loc, this_, func, args, context);
+		}else return New!FunctionOverloadMatcher(this, loc, this_, func, args).independent!Declaration;
 
 		auto matches = new Matched[decls.length]; // pointless GC allocation
 		foreach(i,decl; decls){
@@ -8644,7 +8665,7 @@ class OverloadSet: Declaration{ // purely semantic node
 				if(!fd||fd.type.sstate == SemState.error)
 					return Dependee(decl,decl.scope_).dependent!Declaration;
 			}
-			mixin(MatchCall!q{auto matched; decls[i], null, loc, this_, args, matches[i].context});
+			mixin(MatchCall!q{auto matched; decls[i], null, loc, this_, func, args, matches[i].context});
 			assert(!matched||cast(FunctionDecl)matched);
 			matches[i].decl = cast(FunctionDecl)cast(void*)matched;
 		}
@@ -8655,7 +8676,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		if(!r) foreach(a;args)
 		if(auto ae = a.isAddressExp())
 		if(ae.isUndeducedFunctionLiteral()){
-			return New!FunctionOverloadMatcher(this, loc, this_, args).independent!Declaration;
+			return New!FunctionOverloadMatcher(this, loc, this_, func, args).independent!Declaration;
 		}
 		return r.independent!Declaration;
 	}
@@ -8829,10 +8850,10 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression[] args){
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, Expression[] args){
 		if(tdecls.length==0) return null; // TODO: error message
-		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, args);
-		return New!TemplateOverloadMatcher(this, loc, args);
+		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, owner, args);
+		return New!TemplateOverloadMatcher(this, loc, owner, args);
 	}
 
 	final void instantiationError(Scope sc, const ref Location loc, TemplateInstanceDecl[] insts, Expression[] args){
@@ -8854,9 +8875,9 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression[] args, Expression[] funargs){
-		if(tdecls.length==1) return tdecls[0].matchIFTI(sc, loc, this_, args, funargs);
-		return New!FunctionOverloadMatcher(this, loc, this_, args, funargs);
+	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, Expression[] funargs){
+		if(tdecls.length==1) return tdecls[0].matchIFTI(sc, loc, this_, func, args, funargs);
+		return New!FunctionOverloadMatcher(this, loc, this_, func, args, funargs);
 	}
 
 	override @property string kind(){
@@ -8874,12 +8895,14 @@ class OverloadSet: Declaration{ // purely semantic node
 // TODO: should those be nested classes of OverloadSet? Silly indentation...
 abstract class SymbolMatcher: Declaration{
 	OverloadSet set;
+	Expression func;
 	Expression[] args;
 	MatchContext context; // will be picked up by Symbol
 
-	this(OverloadSet set, const ref Location loc, Expression[] args){
+	this(OverloadSet set, const ref Location loc, Expression func, Expression[] args){
 		super(set.stc,set.name);
 		this.set=set;
+		this.func = func;
 		this.args=args;
 		this.loc=loc;
 	}
@@ -8889,11 +8912,11 @@ abstract class SymbolMatcher: Declaration{
 
 class TemplateOverloadMatcher: SymbolMatcher{
 	Declaration[] insts;
-	this(OverloadSet set, const ref Location loc, Expression[] args){
-		super(set, loc, args);
+	this(OverloadSet set, const ref Location loc, Expression func, Expression[] args){
+		super(set, loc, func, args);
 		// TODO: gc allocation
 		insts = new Declaration[](set.tdecls.length);
-		foreach(i, ref x; insts) x=set.tdecls[i].matchInstantiation(null, loc, args);
+		foreach(i, ref x; insts) x=set.tdecls[i].matchInstantiation(null, loc, func, args);
 		mixin(RetryEplg);
 	}
 	override void semantic(Scope sc_){
@@ -8941,14 +8964,14 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	GaggingScope gscope;
 
 
-	this(OverloadSet set, const ref Location loc, Type this_, Expression[] args)in{
+	this(OverloadSet set, const ref Location loc, Type this_, Expression func, Expression[] args)in{
 		assert(set.decls.length>1||set.tdecls.length>0);
 	}body{
 		this.this_=this_;
-		super(set, loc, args);
+		super(set, loc, func, args);
 		// TODO: GC allocations
 		iftis = new Declaration[](set.tdecls.length);
-		foreach(i, ref x; iftis) x=set.tdecls[i].matchIFTI(null, loc, this_, templArgs, args);
+		foreach(i, ref x; iftis) x=set.tdecls[i].matchIFTI(null, loc, this_, func, templArgs, args);
 
 		size_t numfunclit;
 		foreach(a;args)
@@ -8978,10 +9001,10 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	bool matchATemplate = false;
 	Expression[] templArgs = [];
 
-	this(OverloadSet set, const ref Location loc, Type this_, Expression[] templArgs, Expression[] args){
+	this(OverloadSet set, const ref Location loc, Type this_, Expression func, Expression[] templArgs, Expression[] args){
 		matchATemplate = true;
 		this.templArgs = templArgs;
-		this(set, loc, this_, args);
+		this(set, loc, this_, func, args);
 	}
 
 	TemplateInstanceDecl waitFor = null;
@@ -9121,7 +9144,7 @@ private:
 			adjustArgs(args, i);
 			foreach(a; args) if(a.sstate == SemState.error) continue trymatch;
 			//auto matched=set.decls[i].matchCall(null, loc, args, matches[i].context);
-			mixin(MatchCall!q{auto matched; set.decls[i], null, loc, this_, args, matches[i].context});
+			mixin(MatchCall!q{auto matched; set.decls[i], null, loc, this_, func, args, matches[i].context});
 			assert(!matched||cast(FunctionDecl)matched);
 			matches[i].decl = cast(FunctionDecl)cast(void*)matched;
 			if(matches[i].decl){
@@ -9152,7 +9175,7 @@ private:
 			}else{
 				if(fd.type.sstate == SemState.error) continue;
 				//fd=fd.matchCall(null, loc, args, tcontext);
-				mixin(MatchCall!q{auto tmp; fd, null, loc, this_, args, tcontext});
+				mixin(MatchCall!q{auto tmp; fd, null, loc, this_, func, args, tcontext});
 				assert(!tmp||cast(FunctionDecl)tmp);
 				fd = cast(FunctionDecl)cast(void*)tmp;
 			}
@@ -9261,7 +9284,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 	}
 
 	// TODO: would like Dependent!FunctionDecl for return type
-	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
+	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 		enum SemRet = q{ return this.independent!Declaration; };
 		// semantically analyze the type if necessary
 		type.semantic(scope_); // TODO: get rid of direct call
@@ -9288,7 +9311,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		/+auto pt = array(map!(function Expression (_)=>
 		                     new StubExp(_.type,!!(_.stc&STCbyref)))(type.params));+/
 
-		mixin(MatchCall!q{auto rr; rhs, null, loc, this_, pt, dummy});
+		mixin(MatchCall!q{auto rr; rhs, null, loc, this_, null, pt, dummy});
 		assert(!rr||cast(FunctionDecl)rr);
 		auto r=cast(FunctionDecl)cast(void*)rr;
 		assert(!r||r.type.sstate == SemState.completed);
@@ -9483,10 +9506,6 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 			presemantic(sc); // add self to parent scope
 			if(sstate == SemState.error) needRetry=false;
 		}
-		assert(sstate == SemState.begin || sstate == SemState.started);
-		bool reset = sstate == SemState.begin;
-		sstate = SemState.started;
-		scope(exit) if(reset&&sstate == SemState.started) sstate = SemState.begin;
 		analyzeType();
 		if(auto nr=type.needRetry) { needRetry = nr; return; }
 		mixin(PropErr!q{type});
@@ -9699,8 +9718,8 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 
 	override void semantic(Scope sc){
 		auto r=evaluate(sc);
+		static if(is(T==MixinDecl)) scope(success) sc.removeMixin(this);
 		mixin(SemCheck);
-		static if(is(T==MixinDecl)) sc.removeMixin(this);
 		mixin(RewEplg!q{r});
 	}
 }

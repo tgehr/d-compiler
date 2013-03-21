@@ -1602,7 +1602,7 @@ private struct Parser{
 	}
 
 	auto parse(){
-		//using appender leads to segmentation faults in semantic
+		//using appender leads to segmentation faults in DMD
 		//TODO: FIX
 		//auto x=appender!(Declaration[])();
 		Declaration[] r;

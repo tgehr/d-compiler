@@ -1,33 +1,58 @@
- // (indeterministic circular dependency error)
-auto match()(){
-	pragma(msg, typeof(dglit!int));
-	return 0;
+
+
+
+/+int dontTouchThis(alias a)(){
+
+	static struct S{
+		int foo(){
+			pragma(msg, typeof(a(2)));
+			static assert(is(typeof({return a(2);}))); // no access check inside typeof
+			a(2); // should be an error
+			return 2;
+		}
+	}
+	S s;
+	return s.foo();
 }
 
-auto dglit(T)(T a){ return getLen!(); }
-
-int getLen()(){return match!()();}
-
-pragma(msg, getLen());
-
-void main(){}
-
+int nanana(){
+	int x=3;
+	auto goo(T)(T a)=>a+x;
+	return dontTouchThis!(a=>a+x)();
+}
+//pragma(msg, "nanana: ", nanana());
++/
+/+
+struct TTTTTTTTT{
+	static int fun(T)(){
+		T s;
+		return s.f();
+	}
+	
+	static int main() {
+		int x=2;
+		void f(){}
+		struct R { int f() { return x; } } // should work
+		auto m = fun!(R)();
+		return m;
+	}
+	pragma(msg, main());
+}
++/
 /+template ID(alias d){ alias d ID; }
 template boo(){ alias ID!(x=>2) boo;}
 
 pragma(msg, boo!()(2));+/
 
-
-/+
-struct ReturnTypeLambdaParameterIfti{
+/+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
 	void main() {
 		foo((int a)=>a, b=>1.0); // foo!(double function(int))
 	}
 }
 +/
-/+
-struct UndefinedIdentifierError{
+
+/+struct UndefinedIdentifierError{
 	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message
 	pragma(msg, foo(a=>1,a=>1.0));
 }
@@ -90,33 +115,13 @@ void main() {
 	bar(foo, 1);
 }+/
 
-/+
-template ReturnType(alias a) { }
-
-struct BinaryOperatorX(string _op, rhs_t,C) {
-	ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T; // <- should not access check!
-}
-
-class MyClass {
-	auto opBinary(string op, T)() { }
-}
-
-void PydMain() {
-	BinaryOperatorX!("+", int, MyClass);
-}
-
-+/
 
 /+
 // TODO: make interpretation of partially analyzed functions work
 int cdep(){ enum x=cdep2(); return x;}
 int cdep2(){ return cdep(); }+/
 
-
-/+
 /+auto intarrlen = int[].length;+/
-
-/+
 
 /+// TODO: this must work! (need notion of potential indirections to support this)
 pragma(msg, {
@@ -200,7 +205,6 @@ auto testcallCC(){
 
 // ok now
 
-
 struct MixinAccessCheck{
 	struct S{
 		immutable int x = 2;
@@ -211,7 +215,7 @@ struct MixinAccessCheck{
 		alias int ReturnType;
 	}
 	struct BinaryOperatorX(string _op, rhs_t,C) {
-		ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T; // TODO: should work fine!
+		ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T;
 	}
 	class MyClass {
 		auto opBinary(string op, T)() { }
@@ -222,34 +226,19 @@ struct MixinAccessCheck{
 }
 
 struct FOFOFO{
-	enum x = undef;
+	enum x = undef; // error
 	mixin(`float a11=`~foo1~";"); // error
 }
 
-struct TTTTTTTTT{
-	static int fun(T)(){
-		T s;
-		return s.f();
+struct DRPF{
+	struct DynRange(T){
+		DynRange!T delegate() popFrontImpl;
+		void popFront(){
+			auto u = popFrontImpl();
+		}
 	}
-	
-	static int main() {
-		int x=2;
-		void f(){}
-		struct R { int f() { return x; } }
-		auto m = fun!(R)();
-		return m;
-	}
-	pragma(msg, main());
+	pragma(msg, DynRange!int);
 }
-
-
-struct DynRange(T){
-	DynRange!T delegate() popFrontImpl;
-	void popFront(){
-		auto u = popFrontImpl();
-	}
-}
-pragma(msg, DynRange!int);
 
 
 struct TestInheritIsExp{
@@ -355,27 +344,6 @@ auto crash(){
 	return 0;
 }
 pragma(msg, "crash: ", crash());
-
-
-int dontTouchThis(alias a)(){
-
-	static struct S{
-		int foo(){
-			pragma(msg, typeof(a(2))); // TODO: this should work
-			static assert(!is(typeof({return a(2);})));
-			return 2;
-		}
-	}
-	S s;
-	return s.foo();
-}
-
-int nanana(){
-	int x=3;
-	auto goo(T)(T a)=>a+x;
-	return dontTouchThis!(a=>a+x)();
-}
-pragma(msg, "nanana: ", nanana());
 
 
 auto ttex(){
@@ -587,3 +555,4 @@ static assert(is(typeof({int delegate(int) dg = x=>2;})));
 // +/
 
 alias immutable(char)[] string;
+alias typeof((int[]).length) size_t;

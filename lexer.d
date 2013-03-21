@@ -192,8 +192,7 @@ struct Location{
 		auto src = Source.get(rep);
 		assert(src, "source for '"~rep~"' not found!");
 		return src;
-	}	// perfectly safe, because location is tail-immutable: TODO: report bug, it should work
-	//ref Location _toMutable()const{return *cast(Location*)&this;}alias _toMutable this;
+	}
 	Location to(const(Location) end)const{// in{assert(end.source is source);}body{
 		// in{assert(rep.ptr<=end.rep.ptr);}body{ // requiring that is not robust enough
 		if(rep.ptr>end.rep.ptr) return cast()this;
@@ -1109,7 +1108,7 @@ private:
 }
 
 // Exception thrown on unrecognized escape sequences
-class EscapeSeqException: Exception{string loc; this(string msg,string loc){this.loc=loc;super(msg);}}
+private class EscapeSeqException: Exception{string loc; this(string msg,string loc){this.loc=loc;super(msg);}}
 
 /* Reads an escape sequence and increases the given pointer to point past the sequence
 	returns a dchar representing the read escape sequence or

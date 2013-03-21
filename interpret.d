@@ -580,6 +580,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
 			mixin(PropRetry!q{e.node});
+			needRetry = true;
 		}catch(UnwindException){
 			sc.note("during evaluation requested here", loc);
 			mixin(ErrEplg);
@@ -1663,13 +1664,16 @@ Ltailcall:
 					/+if(!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)
 						sym.makeStrong();+/
 					sym.makeStrong();
+					// running semantic might bork up the in-memory data by
+					// changing its layout. In this case, restart the computation
+					tmpstack.push(AggregateDecl.getVersion());
 					// TODO: allow detailed discovery of circular dependencies
 					sym.semantic(sym.scope_);
 					Expression e = sym;
 					mixin(Rewrite!q{e});
 					assert(!!cast(Symbol)e);
 					sym = cast(Symbol)cast(void*)e;
-					if(sym.needRetry){
+					if(sym.needRetry||tmpstack.pop()!=AggregateDecl.getVersion()){
 						// TODO: make as unlikely as possible
 						throw new CTFERetryException(sym);
 					}
@@ -3707,6 +3711,10 @@ mixin template CTFEInterpret(T) if(is(T==ConditionDeclExp)){
 	}
 }
 
+interface NotifyOnLayoutChanged{
+	void notifyLayoutChanged(AggregateDecl decl);
+}
+
 mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 	enum bcTypeidOffset = bcPointerBCSize;
 	enum bcTypeidSize = 1;
@@ -3716,11 +3724,41 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		return stc&STCstatic ? 0 : bcPointerBCSize;
 	}
 
+	private bool[NotifyOnLayoutChanged] subscribers;
+	void subscribeForLayoutChanges(NotifyOnLayoutChanged notified){
+		subscribers[notified]=true;
+	}
+	void notifyLayoutChanged(AggregateDecl decl){
+		layoutKnown = false;
+		foreach(s,_;subscribers) s.notifyLayoutChanged(this);
+	}
+
+	/* Called in presemantic of fields. This allows multiple different interpretations
+	   of the same aggregate type during different CTFE executions, while the layout
+	   can still be cached.
+	 */
+
+	void layoutChanged(){
+		updateVersion();
+		notifyLayoutChanged(this);
+	}
+
+	bool isLayoutKnown(){
+		return layoutKnown;
+	}
+
 	void updateLayout()in{assert(!isLayoutKnown());}body{
 		size_t off=initialOffset();
 		// TODO: unions, anonymous structs/unions etc.
 		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
+				if(vd.sstate != SemState.completed) continue; // TODO: ok?
+				if(auto aggrty=vd.type.isAggregateTy()){
+					if(auto decl=aggrty.decl.isValueAggregateDecl()){
+						decl.subscribeForLayoutChanges(this);
+					}
+				}
+				assert(!!vd.type, vd.to!string);
 				auto len = getBCSizeof(vd.type);
 				vd.setBCLoc(off, len);
 				off+=len;
@@ -3736,7 +3774,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 	static ulong getVersion(){
 		return vers;
 	}
-	private void updateVersion(){
+	private static void updateVersion(){
 		if(vers == ulong.max) assert(0);
 		vers++;
 	}
@@ -3769,6 +3807,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 	protected void byteCompileFields(ref ByteCodeBuilder bld){
 		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
+				if(vd.sstate != SemState.completed) continue; // TODO: ok?
 				size_t len, off = vd.getBCLoc(len);
 				if(len!=-1){
 					if(vd.init) vd.init.byteCompile(bld);
@@ -3783,6 +3822,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 private:
 	size_t bcSize;
 	static ulong vers;
+	bool layoutKnown = false;
 }
 
 mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
@@ -3840,7 +3880,7 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 							this.ident=ident;
 							needRetry = true;
 						}
-						void semantic(Scope _){
+						override void semantic(Scope _){
 							mixin(Lookup!q{_; ident, sc});
 							mixin(SemEplg);
 						}
@@ -3873,7 +3913,7 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 	}
 	override void updateLayout(){
 		super.updateLayout();
-		if(auto p = parentClass()) parentVers = getVersion();
+		if(auto p = parentClass()) parentVers = p.getVersion();
 	}
 
 	override protected size_t initialOffset(){
@@ -3987,7 +4027,7 @@ mixin template CTFEInterpret(T) if(is(T==CurrentExp)){
 // get size in ulongs on the bc stack
 enum bcPointerBCSize = (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
 enum bcFunPointerBCSiz = 1;
-size_t getBCSizeof(Type type){
+size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	type = type.getHeadUnqual();
 	if(auto bt = type.isBasicType()){
 		if(bt.op == Tok!"void") return 0;
@@ -4300,7 +4340,6 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				// TODO: this is very conservative
 				if(!(self.stc&STCstatic)) self.resetByteCode();
 			}
-
 			void perform(TemplateInstanceDecl self){
 				// TODO: maybe this is too conservative too
 				if(!(self.stc&STCstatic)) self.resetByteCode();
@@ -4323,29 +4362,28 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		}
 	}
 
-	private bool needsReset(){
-		// TODO: this is extremely conservative
-		// add some kind of versioning scheme?
-		static struct NeedsReset{
-			bool result = false;
+	private void subscribeForLayoutChanges(){
+		static struct Subscribe{
+			NotifyOnLayoutChanged me;
 			void perform(Expression self){
 				if(!self.type) return;
-				if(auto aggrty=self.type.isAggregateTy()){
-					result = true; // TODO: shortcut
-				}
+				if(auto aggrty=self.type.isAggregateTy())
+					aggrty.decl.subscribeForLayoutChanges(me);
 			}
 			void perform(VarDecl self){
 				if(!self.type) return;
-				if(auto aggrty=self.type.isAggregateTy()){
-					result = true; // TODO: shortcut
-				}
+				if(auto aggrty=self.type.isAggregateTy())
+					aggrty.decl.subscribeForLayoutChanges(me);
 			}
 		}
-		return runAnalysis!NeedsReset(this).result;
+		runAnalysis!Subscribe(this, this);
+	}
+
+	void notifyLayoutChanged(AggregateDecl decl){
+		resetByteCode();
 	}
 
 	@property ByteCode byteCode(){
-		if(mayBeOutdated() && needsReset()) resetByteCode();
 		if(_byteCode is null){
 			ByteCodeBuilder bld;
 			if(bcnumargs==-1) bcpreanalyze();
@@ -4403,10 +4441,11 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			_byteCode = bld.getByteCode();
 			bcErrtbl = bld.getErrtbl();
 			if(_displayByteCode){
-				import std.stdio; writeln("byteCode for ",name,":\n",_byteCode.toString());
+				import std.stdio; writeln("byteCode for ",name," ",scope_.getDeclaration()?scope_.getDeclaration().name.name:"",":\n",_byteCode.toString());
 			}
 
 			rememberVersion();
+			subscribeForLayoutChanges();
 		}
 		return _byteCode;
 	}

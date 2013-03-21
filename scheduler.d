@@ -176,24 +176,22 @@ class Scheduler{
 		void semantic(){
 			//dw(payload);
 			foreach(nd,sc; payload){
-				// TODO: kludgy
-				auto tmpl = sc?sc.getTemplateInstance():null;
-				if(tmpl){
-					if(tmpl.sstate == SemState.begin) tmpl.sstate = SemState.started;
-					else tmpl = null;
+				// this code causes very significant slowdowns for deeply nested template instantiations
+				// TODO: optimize or find a way to ensure correctness that does not depend on this
+				TemplateInstanceDecl[] tmpls; // TODO: use a SmallCollection, or just a counter
+				for(auto tmpl=sc.maybe!(a=>a.getTemplateInstance());
+				    tmpl&&tmpl.sstate==SemState.begin;
+				    tmpl=tmpl.instantiation.isSymbol()
+						.maybe!(a=>a.scope_.maybe!(a=>a.getTemplateInstance()))
+				){
+					tmpl.sstate = SemState.started;
+					tmpls~=tmpl;
 				}
-				scope(exit) if(tmpl) tmpl.sstate = SemState.begin;
+				scope(exit) foreach(tmpl;tmpls) tmpl.sstate = SemState.begin;
+				/////////////////////////////////////////////////////////////////////////////////////////
 
-				auto fun = sc?sc.getFunction():null;
-				if(fun){
-					if(fun.sstate == SemState.begin) fun.sstate = SemState.started;
-					else fun = null;
-				}
-				scope(exit) if(fun) fun.sstate = SemState.begin;
-				///
-
-				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
-				// if(sc) dw("inst",sc," ", sc.getTemplateInstance());
+				//dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
+				//if(sc) dw("inst",sc," ", sc.getTemplateInstance());
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
 						if(auto exp=nd.isExpression()) exp.interpret(sc);
@@ -202,6 +200,8 @@ class Scheduler{
 				}else if(nd.sstate == SemState.error) remove(nd);
 				nd.semantic(sc);
 				assert(nd.needRetry != 2,text(nd.toString()," ",nd.loc));
+				assert(!Symbol.circ);
+				//assert(nd.sstate != SemState.started, text(nd, " ", nd.loc," ", typeid(nd)));
 				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 			}
 			update();

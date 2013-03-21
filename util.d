@@ -321,6 +321,14 @@ template XX(string x){
 	enum XX = mixin(Ximpl(x));
 }
 
+auto maybe(alias a, alias b, T)(T arg){
+	if(arg !is null) return a(arg);
+	return b();
+}
+auto maybe(alias a, T)(T arg){
+	return maybe!(a, ()=>typeof(a(arg)).init)(arg);
+}
+
 // Versions from Phobos do not work. TODO: reduce and file bug report
 
 import std.range;

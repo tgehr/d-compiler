@@ -47,7 +47,7 @@ enum Occupies{
 	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, err
 }
 
-private template getOccupied(T){
+template getOccupied(T){
 	static if(is(T==string))
 		enum getOccupied = Occupies.str;
 	else static if(is(T==wstring))

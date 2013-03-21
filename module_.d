@@ -20,10 +20,10 @@ class Module: Declaration{
 		app.put("\0\0\0\0"); // insert 4 padding zero bytes
 		string code=cast(string)app.data;
 		sc=new ModuleScope(new FormattingErrorHandler(), this);
-		//sc=new Scope(new SimpleErrorHandler(path, code));
-		//auto lexer = lex(code);
-		// int count=0; foreach(tk;lexer){count++;}writeln(count);
+		//sc=new Scope(new SimpleErrorHandler(path, code));;
 		auto src = new Source(path, code);
+		//auto lexer = lex(src);
+		//int count=0; foreach(tk;lexer){count++;}writeln(count);
 		decls=parse(src,sc.handler);
 		sstate = SemState.pre;
 		if(sc.handler.nerrors) sstate = SemState.error;
