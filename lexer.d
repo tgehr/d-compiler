@@ -4,6 +4,8 @@ import std.stdio, std.conv;
 import std.algorithm : startsWith;
 import std.traits : EnumMembers;
 
+import core.memory;
+
 import util;
 
 // enum TokenType;
@@ -147,6 +149,9 @@ string TokCharsImpl(){
 	return r;
 }
 }
+string TokenTypeToString(TokenType type){
+	return tokens[cast(int)type][0];
+}
 
 struct Location{
 	string mod;
@@ -158,30 +163,9 @@ struct Location{
 }
 
 string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
-string escape(string i,bool isc=false){ // TODO: replace with std lib one as soon as available
-	string r;
-	foreach(dchar x;i){
-		switch(x){
-			case '"': if(isc) goto default; r~="\\\""; break;
-			case '\'': if(!isc) goto default; r~="\\'"; break;
-			case '\\': r~="\\\\"; break;
-			case '\a': r~="\\a"; break;
-			case '\b': r~="\\b"; break;
-			case '\f': r~="\\f"; break;
-			case '\n': r~="\\n"; break;
-			case '\r': r~="\\r"; break;
-			case '\t': r~="\\t"; break;
-			case '\v': r~="\\v"; break;
-			case '\0': r~="\\0"; break;
-			default:
-				if(isWhite(x)) r~=format("\\u%4.4X",cast(uint)x); // wtf? 
-				else r~=x; break;
-		}
-	}
-	return r;
-}
 struct Token{
 	TokenType type;
+	//uint loc;
 	string toString() const{
 		switch(type) {
 			case Tok!"i":
@@ -219,7 +203,7 @@ struct Token{
 			case Tok!"Error":
 				return "error: "~str;
 			default:
-				return tokens[cast(int)type][0];
+				return TokenTypeToString(type);
 		}
 	}
 	union{
@@ -227,12 +211,23 @@ struct Token{
 		ulong int64;       // integer literals
 		real flt80;        // float, double, real literals
 	}
+	/*@property void str(string){}
+	@property void name(string){}
+	@property void int64(ulong){}
+	@property void flt80(real){}
+
+	@property string str()const{return "aa";}
+	@property string name()const{return "aa";}
+	@property ulong int64()const{return 0;}
+	@property real flt80()const{return 0.0L;}*/
 }
+
 template token(string t){enum token=Token(Tok!t);}
 
-Token tokError(string s) pure{
+Token tokError(string s) {
 	auto r = token!"Error";
 	r.str = s;
+	GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
 	return r;
 }
 
@@ -266,11 +261,12 @@ string caseSimpleToken(string prefix="", bool needs = false){
 }
 
 immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&&!code[$-1]);}body{ // four padding zero bytes required because of UTF
+	alias mallocAppender appender;
 	if(code.length > int.max) return [tokError("no support for sources exceeding 2GB")];
 	if(!code.length) return [];
-	//if(code[$-1]!='\0') code ~= '\0'; //make sure we have an EOF token
-	//auto lexed = appender!(immutable(Token)[])();
-	auto lexed = mallocAppender!(immutable(Token)[])();
+	GC.disable(); scope(exit) GC.enable(); // no garbage collection during lexing
+
+	auto lexed = appender!(immutable(Token)[])();
 	auto p=code.ptr;
 	auto s=p;
 	Token tok;
@@ -527,7 +523,7 @@ immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&
 			case 'x':
 				if(*p!='"') goto case 'X';
 				nl=0;
-				auto r=mallocAppender!string(); p++;
+				auto r=appender!string(); p++;
 				readhexstring: for(int c=0,ch,d;;p++,c++){
 					switch(*p){ // TODO: display correct error locations
 						mixin(caseNl2); // handle newlines
@@ -538,7 +534,7 @@ immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&
 						case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
 						case 'A': .. case 'F': d=*p-('A'-0xA); goto handlexchar;
 						handlexchar:
-							if(c&1) r.put(ch|d);
+							if(c&1) r.put(cast(char)(ch|d));
 							else ch=d<<4; break;
 						case '"': // TODO: improve error message
 							if(c&1) lexed.put(tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":"")));
@@ -562,7 +558,7 @@ immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&
 				goto lexstringsuffix;
 			// DQString
 			case '"':
-				auto r=mallocAppender!string();
+				auto r=appender!string();
 				nl=0;
 				auto start = p;
 				readdqstring: for(;;){
@@ -993,14 +989,6 @@ private dchar readEscapeSeq(ref immutable(char)* _p) {
 			}
 	}
 }
-
-string readDelimitedString(ref immutable(char)* _p, ref MallocAppender!string lexed)in{assert(*_p=='"');}body{
-	auto p=_p+1;
-
-	return "";
-}
-
-
 
 
 unittest{

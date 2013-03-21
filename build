@@ -1,4 +1,0 @@
-
-dmd -O -release -inline ttt lexer.o parser module_.o
-# workaround for strange bug;
-dmd ttt.o
