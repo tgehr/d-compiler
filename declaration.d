@@ -1,7 +1,7 @@
 
-import std.array, std.algorithm, std.range, std.conv;
+import std.array, std.algorithm, std.range, std.conv, std.string;
 
-import lexer, parser, expression, statement, type, scope_, semantic, util;
+import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
 
 class Declaration: Statement{ // empty declaration if instanced
 	STC stc;
@@ -12,34 +12,26 @@ class Declaration: Statement{ // empty declaration if instanced
 		sstate = SemState.pre;
 	}
 	override string toString(){return ";";}
-		Declaration presemantic(Scope sc){ // insert into symbol table, but don't do the heavy processing yet
-		sstate = SemState.begin;
-		if(!name){sc.error("unimplemented feature",loc); return this;} // TODO: obvious
-		sc.insert(this);
-		return this;
-	}
-	override Declaration semantic(Scope sc){
-		if(sstate==SemState.pre){
-			auto ps=presemantic(sc);
-			if(ps!is this) return ps.semantic(sc);
-		}
-		sstate = SemState.completed;
-		return this;
-	}
-	mixin DownCastMethods!(
-	    FunctionDecl,
-	    // purely semantic nodes
-	    OverloadableDecl,
-	    OverloadSet,
-	    FwdRef,
-	    MutableAliasRef,
-	);
 
 	@property string kind(){return "declaration";}
+
+	mixin DownCastMethods!(
+		VarDecl,
+		FunctionDecl,
+		// purely semantic nodes
+		OverloadableDecl,
+		OverloadSet,
+		FwdRef,
+		MutableAliasRef,
+		ErrorDecl,
+	);
+
+	mixin Visitors;
 }
 
 class ErrorDecl: Declaration{
 	this(){super(STC.init, null);}
+	override ErrorDecl isErrorDecl(){return this;}
 	override string toString(){return "__error ;";}
 }
 
@@ -241,9 +233,11 @@ class VarDecl: Declaration{
 	Expression init;
 	this(STC stc, Expression type, Identifier name, Expression initializer){this.stc=stc; this.type=type; init=initializer; super(stc,name);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~(type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
-	VarDecl presemantic(Scope sc){return cast(VarDecl)cast(void*)Declaration.presemantic(sc);}
-	VarDecl semantic(Scope sc){return cast(VarDecl)cast(void*)Declaration.semantic(sc);}
+
+	override VarDecl isVarDecl(){return this;}
 	override @property string kind(){return "variable";}
+
+	mixin Visitors;
 }
 class Declarators: Declaration{
 	VarDecl[] decls;
@@ -256,22 +250,7 @@ class Declarators: Declaration{
 		foreach(x;decls[0..$-1]) r~=x.name.toString()~(x.init?"="~x.init.toString():"")~",";
 		return r~decls[$-1].name.toString()~(decls[$-1].init?"="~decls[$-1].init.toString():"")~";";
 	}
-	override Declaration presemantic(Scope sc){
-		if(sstate>SemState.pre) return this;
-		foreach(ref x; decls) x=x.presemantic(sc);
-		sstate=SemState.begin;
-		return this;
-	}
-	override Declaration semantic(Scope sc){
-		if(sstate==SemState.pre) return presemantic(sc).semantic(sc);
-		auto newstate=SemState.completed;
-		foreach(ref x; decls){
-			x=x.semantic(sc);
-			newstate = min(newstate, x.sstate);
-		}
-		sstate = newstate;
-		return this;
-	}
+	mixin Visitors;
 }
 
 class Parameter: VarDecl{ // for functions, foreach etc
@@ -289,7 +268,7 @@ class FunctionDecl: OverloadableDecl{
 	FunctionType type;
 	BlockStm pre,post;
 	Identifier postres;
-	this(FunctionType type,Identifier name,BlockStm pr,BlockStm po,Identifier pres){
+	this(FunctionType type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
 		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
 	}
 	override string toString(){
@@ -307,19 +286,8 @@ class FunctionDef: FunctionDecl{
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();
 	}
-	override FunctionDef semantic(Scope sc){
-		if(sstate == SemState.completed) return this;
-		Scope fsc = New!FunctionScope(sc);
-		if(sstate == SemState.pre) presemantic(sc); // add self to parent scope
-		foreach(p; type.params) p.presemantic(fsc); // add parameters to function scope
-		foreach(p; type.params){
-			p.semantic(fsc);
-			sstate = min(sstate, p.sstate);
-		}
-		bdy.semanticNoScope(fsc);
-		sstate = min(sstate, bdy.sstate);
-		return this;
-	}
+
+	mixin Visitors;
 }
 
 class UnitTestDecl: Declaration{
@@ -333,6 +301,8 @@ class PragmaDecl: Declaration{
 	Statement bdy;
 	this(STC stc,Expression[] a, Statement b)in{assert(b&&1);}body{args=a; bdy=b; super(stc,null);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"pragma("~join(map!(to!string)(args),",")~")"~bdy.toString();}
+
+	mixin Visitors;
 }
 
 enum LinkageType{

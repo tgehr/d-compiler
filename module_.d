@@ -1,5 +1,5 @@
 
-import lexer, parser, error, scope_, util;
+import lexer, parser, error, scope_, semantic, util;
 
 import core.memory;
 import std.stdio, std.algorithm;

@@ -1,33 +1,34 @@
-import std.array, std.algorithm, std.range, std.conv;
+import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, declaration, statement, type;
-import scope_, semantic;
-
-
-enum SemState{
-	pre,
-	begin,
-	fwdRefs,
-	completed,
-}
+import scope_, semantic, visitors, util;
 
 
 abstract class Node{
 	Location loc;
 	SemState sstate = SemState.begin;
-	Node semantic(Scope s)in{assert(sstate>=SemState.begin);}body{ s.error("unimplemented feature",loc); sstate = SemState.completed; return this;}
+
+	mixin Visitors;
 }
+
 
 class Expression: Node{ // empty expression if instanced
 	int brackets=0;
 	override string toString(){return _brk("{}()");}
 	protected string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
 
-	Type type;
-	Expression semantic(Scope sc){ sc.error("unimplemented feature",loc); sstate = SemState.completed; return this; }
+	mixin DownCastMethods!(
+		Identifier,
+		Type,
+		ErrorExp,
+	);
+
+	mixin Visitors;
 }
 
 class ErrorExp: Expression{
+	this(){sstate = SemState.error;}
+	override ErrorExp isErrorExp(){return this;}
 	override string toString(){return _brk("__error");}
 }
 
@@ -36,49 +37,8 @@ class LiteralExp: Expression{
 	Token lit;
 	this(Token literal){lit=literal;} // TODO: suitable contract
 	override string toString(){return _brk(lit.toString());}
-	Expression semantic(Scope sc){
-		sstate = SemState.completed;
-		switch(lit.type){ // TODO: remove some boilerplate
-			case Tok!"``": //TODO: this needs to have a polysemous type
-				type=Type.get!(immutable(char)[])(); break;
-			case Tok!"``c":
-				type=Type.get!(immutable(char)[])(); break;
-				return this;
-			case Tok!"``w":
-				type=Type.get!(immutable(wchar)[])(); break;
-			case Tok!"``d":
-				type=Type.get!(immutable(dchar)[])(); break;
-			case Tok!"''":
-				if(lit.int64<128) type=Type.get!char();
-				else type=Type.get!dchar(); break;
-			case Tok!"0":
-				type=Type.get!int(); break;
-			case Tok!"0U":
-				type=Type.get!uint(); break;
-			case Tok!"0L":
-				type=Type.get!long(); break;
-			case Tok!"0LU":
-				type=Type.get!ulong(); break;
-			case Tok!".0f":
-				type=Type.get!float(); break;
-			case Tok!".0":
-				type=Type.get!double(); break;
-			case Tok!".0L":
-				type=Type.get!real(); break;
-			case Tok!".0fi":
-				type=Type.get!ifloat(); break;
-			case Tok!".0i":
-				type=Type.get!idouble(); break;
-			case Tok!".0Li":
-				type=Type.get!ireal(); break;
-			case Tok!"null":
-				type=Type.get!Null(); break;
-			case Tok!"true", Tok!"false":
-				type=Type.get!bool(); break;
-			default: return Expression.semantic(sc);
-		}
-		return this;
-	}
+	
+	mixin Visitors;
 }
 
 class ArrayAssocExp: Expression{
@@ -100,6 +60,7 @@ class FunctionLiteralExp: Expression{
 	bool isStatic;
 	this(FunctionType ft, BlockStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
 	override string toString(){return _brk((isStatic?"function"~(type&&type.ret?" ":""):type&&type.ret?"delegate ":"")~(type?type.toString():"")~bdy.toString());}
+	mixin Visitors;
 }
 
 class Identifier: Symbol{
@@ -112,10 +73,10 @@ class Identifier: Symbol{
 		else this.name = uniq[name] = name;
 	}
 	override string toString(){return _brk(name);}
-	override Symbol semantic(Scope sc){
-		meaning=sc.lookup(this);
-		return super.semantic(sc);
-	}
+
+	override Identifier isIdentifier(){return this;}
+
+	mixin Visitors;
 }
 
 // special symbols that can be used like identifiers in some contexts
@@ -189,6 +150,8 @@ class IndexExp: Expression{ //e[a...]
 	Expression[] a;
 	this(Expression exp, Expression[] args){e=exp; a=args;}
 	override string toString(){return _brk(e.toString()~(a.length?'['~join(map!(to!string)(a),",")~']':"[]"));}
+
+	mixin Visitors;
 }
 class SliceExp: Expression{//e[l..r]
 	Expression e;
@@ -202,17 +165,7 @@ class CallExp: Expression{
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
 	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
 
-	override Expression semantic(Scope sc){
-		if(sstate == SemState.completed) return this;
-		e.semantic(sc); // semantically analyze the left part
-		auto newstate = e.sstate;
-		foreach(ref x;args){
-			x = x.semantic(sc);
-			newstate = min(newstate, x.sstate);
-		}
-		sstate = newstate;
-		return this;
-	}
+	mixin Visitors;
 }
 class TemplateInstanceExp: Expression{
 	Expression e;
@@ -228,6 +181,8 @@ class BinaryExp(TokenType op): Expression{
 		else return _brk(e1.toString() ~ TokChars!op ~ e2.toString());
 	}
 	//override string toString(){return e1.toString() ~ " "~ e2.toString~TokChars!op;} // RPN
+
+	mixin Visitors;
 }
 
 class TernaryExp: Expression{

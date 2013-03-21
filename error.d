@@ -14,7 +14,7 @@ abstract class ErrorHandler{
 		if(_lines !is null) return _lines;
 		return _lines=code.splitLines(); // TODO: implement manually. (this can throw on invalid character sequences)
 	}
-	void error(string err, Location loc){nerrors++;}   // in{assert(loc.rep);}body
+	void error(string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
 	void note(string note, Location loc)in{assert(loc.rep);}body{};
 	this(string s, string c){
 		tabsize=getTabSize();
@@ -81,6 +81,7 @@ import terminal;
 class FormattingErrorHandler: VerboseErrorHandler{
 	this(string source,string code){super(source,code);}
 	override void error(string err, Location loc){
+		assert(loc.line!=0, "this should not happen... error message was '"~err~'\'');
 		if(isATTy(stderr)){
 			nerrors++;
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];

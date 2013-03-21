@@ -1,7 +1,7 @@
 
 import std.array, std.algorithm, std.range, std.conv;
 
-import lexer, parser, expression, scope_, semantic, util;
+import lexer, parser, expression, scope_, semantic, visitors, util;
 
 class Statement: Node{ // empty statement if instanced
 	override string toString(){return ";";}
@@ -16,7 +16,7 @@ class BlockStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
-	mixin Semantic!(typeof(this));
+	mixin Visitors;
 }
 
 class LabeledStm: Statement{
@@ -61,7 +61,7 @@ class ForStm: Statement{
 	this(Statement init, Expression cond, Expression next, Statement statement){s1=init; e1=cond; e2=next; s2=statement;}
 	override string toString(){return "for("~s1.toString()~(e1?e1.toString():"")~";"~(e2?e2.toString:"")~") "~s2.toString();}
 
-	mixin Semantic!(typeof(this));
+	mixin Visitors;
 }
 class ForeachStm: Statement{
 	Parameter[] vars;
@@ -114,6 +114,8 @@ class ReturnStm: Statement{
 	Expression e;
 	this(Expression exp){e=exp;}
 	override string toString(){return "return"~(e?" "~e.toString():"")~";";}
+
+	mixin Visitors;
 }
 enum WhichGoto{
 	identifier,

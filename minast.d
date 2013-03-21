@@ -364,7 +364,7 @@ class BasicType: Type{
 	override string toString(){return _brk(TokenTypeToString(type));}
 }
 
-class Pointer: Type{
+class PointerTy: Type{
 	Expression e;
 	this(Expression next)in{assert(next&&1);}body{e=next;}
 	override string toString(){return _brk(e.toString()~'*');}

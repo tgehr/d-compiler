@@ -74,7 +74,6 @@ enum binaryOps=mixin({string r="[";
         return r~"]";
 	}());
 
-enum basicTypes=["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar","float","double","real","ifloat","idouble","ireal","cfloat","cdouble","creal","void"];
 
 enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"scope","shared","static","synchronized"]; // ref and auto ref taken to the front for easier handling by STCtoString
 
@@ -309,7 +308,7 @@ private struct Parser{
 			loc=code.buffer[code.n-1&code.buffer.length-1].loc;
 			loc.rep=(loc.rep.ptr+loc.rep.length)[0..utf.stride(loc.rep.ptr[loc.rep.length..loc.rep.length+4],0)];
 		}
-		if(!isClosingToken(ttype) || isClosingToken(type)){
+		if(!isClosingToken(ttype) || isClosingToken(type) && type!=Tok!";"){
 			auto tt=peek().type;
 			if(tt!=Tok!"i"&&tt==type){
 				error("stray '"~tok.toString()~"' in program",tok.loc);
@@ -488,8 +487,8 @@ private struct Parser{
 				auto which = WhichIsExp.type;
 				if(ttype==Tok!":") which = WhichIsExp.implicitlyConverts;
 				else if(ttype==Tok!"==") which = WhichIsExp.isEqual;
-				else if(ttype==Tok!"*=" && peek().type==Tok!"=") type = New!Pointer(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
-				else{expect(Tok!")");return New!IsExp(which,type,ident,cast(Expression)null,Tok!"",cast(TemplateParameter[])null);}
+				else if(ttype==Tok!"*=" && peek().type==Tok!"=") type = New!PointerTy(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
+				else{expect(Tok!")");mixin(rule!(IsExp,Existing,q{which,type,ident,cast(Expression)null,Tok!"",cast(TemplateParameter[])null}));}
 				nextToken();
 				Expression typespec=null;
 				TokenType typespec2=Tok!"";
@@ -533,7 +532,7 @@ private struct Parser{
 				foreach(type;typeQualifiers){
 					r~=q{case Tok!}`"`~type~`":`q{
 						nextToken(); expect(Tok!"(");
-						auto e=parseType(); e.brackets++;
+						auto e=parseType(); //e.brackets++;
 						expect(Tok!")");
 						return res=New!(QualifiedType!(Tok!}"`"~type~"`"q{))(e);
 					};
@@ -679,7 +678,9 @@ private struct Parser{
 				auto r=parseBlockStm();
 				if(ttype!=Tok!"(") return r;
 				else{
-					auto e=parseExpression2(New!FunctionLiteralExp(cast(FunctionType)null,r));
+					auto f=New!FunctionLiteralExp(cast(FunctionType)null,r);
+					f.loc=r.loc;
+					auto e=parseExpression2(f);
 					expect(Tok!";");
 					mixin(rule!(ExpressionStm,Existing,"e"));
 				}
@@ -852,8 +853,8 @@ private struct Parser{
 			mixin({string r;
 				foreach(x;typeQualifiers) r~=q{
 					case Tok!}`"`~x~`":`q{nextToken();
-						if(ttype==Tok!"(") brk=true, nextToken();
-						auto e=parseType(); e.brackets+=brk; tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
+					if(ttype==Tok!"(") brk=true, nextToken();
+					auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
 						if(ttype==Tok!".") tt=parseIdentifierList(tt); // ENHANCEMENT
 						break;
 				};
@@ -864,7 +865,7 @@ private struct Parser{
 		}
 		for(;;){
 			switch(ttype){
-				case Tok!"*": nextToken(); tt=New!Pointer(tt); continue;
+				case Tok!"*": nextToken(); tt=New!PointerTy(tt); continue;
 				case Tok!"[":
 					auto save = saveState();
 					bool isAA=skip()&&skipType()&&ttype==Tok!"]";
@@ -1273,7 +1274,7 @@ private struct Parser{
 				if(ttype==Tok!":"){
 					nextToken(); spec=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
 				if(ttype==Tok!"=") {parseinit: nextToken(); init=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
-				else if(ttype==Tok!"*=" && spec){spec = New!Pointer(spec); goto parseinit;} // EXTENSION
+				else if(ttype==Tok!"*=" && spec){spec = New!PointerTy(spec); goto parseinit;} // EXTENSION
 			}
 			auto p=New!TemplateParameter(isAlias,isTuple,type,name,spec,init); p.loc=loc.to(ptok.loc);
 			r.put(p);
