@@ -78,7 +78,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return New!ErrorDecl();
 	}
 
-
+	import std.stdio;
 	FunctionDef getFunction(){return null;}
 	// control flow structures:
 	BreakableStm getBreakableStm(){return null;}
@@ -92,11 +92,15 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		assert(stm.t==WhichGoto.identifier);
 	}body{ assert(0); }
 	int unresolvedLabels(scope int delegate(GotoStm) dg){return 0;}
+
+	// functionality handy for closures:
+	size_t functionScopeNestingLevel(){ return 0; }
+
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
 
 
-	string toString(){return "scope{"~join(map!(to!string)(symtab.values),",")~"}";}
+	string toString(){return to!string(typeid(this))~"{"~join(map!(to!string)(symtab.values),",")~"}";}
 
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
@@ -130,11 +134,14 @@ abstract class NestedScope: Scope{
 		return parent.unresolvedLabels(dg);
 	}
 
+	override size_t functionScopeNestingLevel(){ return parent.functionScopeNestingLevel(); }
+
+
 	override FunctionDef getFunction(){return parent.getFunction();}
 
 }
 
-class FunctionScope: NestedScope{ // Forward references don't get resolved
+final class FunctionScope: NestedScope{ // Forward references don't get resolved
 	this(Scope parent, FunctionDef fun){
 		super(parent);
 		this.fun=fun;
@@ -162,6 +169,11 @@ class FunctionScope: NestedScope{ // Forward references don't get resolved
 		if(auto lbll = lookupLabel(l)) stm.resolveLabel(lbll);
 		else _unresolvedLabels~=stm;
 	}
+
+	override size_t functionScopeNestingLevel(){
+		return parent.functionScopeNestingLevel()+1;
+	}
+
 	override FunctionDef getFunction(){return fun;}
 	alias Scope.lookup lookup; // overload lookup
 protected:

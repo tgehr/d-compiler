@@ -19,9 +19,9 @@ void baz(immutable(int) x, double y){}+/
 
 //int bar(typeof(lol)*x){pragma(msg,typeof(x));return 2;}
 
-//int duh(typeof(guh) duh){} // no error, investigate
+int duh(typeof(guh) duh){}
 //typeof(duh)* duh(typeof(duh)* duh){return 1;}
-//int duh(typeof(guh)){return 1;}
+int duh(typeof(guh)){return 1;}
 //int guh(typeof(duh)){return 2;}
 
 //auto a(){return a(1);}
@@ -31,13 +31,17 @@ int foo(immutable(char)[] s){return 0;}
 double foo(immutable(wchar)[] d){return 0;}
 double foo(immutable(dchar)[] s){return 0;}
 
+void testref(int y){}
+void testref(out int x){const(int) d=x;testref(d);}
+void testref(ref immutable int y){}
 
-immutable bar = "hello";
+
+immutable str = "hello";
 void main(){
-	enum bar=bar;
+	enum str=str;
 	pragma(msg, typeof("hello"));
 	pragma(msg, typeof(foo("hello"d)));
-	pragma(msg, typeof(foo(bar))); // oO
+	pragma(msg, typeof(foo(str)));
 	/+qux(1);
 	qux2(2);
 

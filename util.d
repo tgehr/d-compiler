@@ -218,7 +218,7 @@ string toEngNum(uint i){ // pure
 	                   "twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
 	static string[] b=[null,"ten","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
 	if(i>=1000000) return to!string(i);
-	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%100?" "~toEngNum(i%1000):"");
+	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%1000?" "~toEngNum(i%1000):"");
 	if(i>=100) return toEngNum(i/100)~" hundred"~(i%100?" and "~toEngNum(i%100):"");
 	if(i>=10) return i<20?a[i]:b[i/10]~(i%10?"-"~toEngNum(i%10):"");
 	return a[i];
@@ -300,11 +300,11 @@ template XX(string x){
 // Versions from Phobos do not work. TODO: reduce and file bug report
 
 import std.range;
-bool any(alias a,R)(R range) if(is(typeof(a(R.init)): bool) && isInputRange!R){
+bool any(alias a,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(/+auto+/ref x;range) if(a(x)) return true;
 	return false;
 }
-bool all(alias a,R)(R range){// if(is(typeof(a(R.init)): bool) && isInputRange!R){
+bool all(alias a,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(/+auto+/ref x;range) if(!a(x)) return false;
 	return true;
 }

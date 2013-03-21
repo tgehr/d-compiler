@@ -1,13 +1,242 @@
+
+//pragma(msg, bar());
+pragma(msg, typeof([[[]],[[1]]]));
+pragma(msg, typeof(2?[[]]:[[1]]));
+
+pragma(msg, typeof([[[]],[[]],[[1]]]));
+pragma(msg, typeof(1?1?[[]]:[[]]:[[1]]));
+
+static assert({return rettrue();}());
+auto rettrue(){return {return {return true;}();}();}
+
+
+
+immutable int immu=2;
+int refp(ref immutable int x){
+	return x;
+}
+pragma(msg, refp(immu));// TODO
+
+int testaddr(){
+	immutable int x;
+	auto p = &immu;// TODO
+	immutable(int*) id(immutable int* x){return x;}
+	return *id(p);
+	//return *(((immutable int* p)=>p)(p));
+}
+static assert(testaddr()==2);
+
+void testlocal1(){ // (should not compile)
+	int x = 2;
+	immutable y = x;
+	bool tt(){return 2==y;}
+	static assert(tt());
+}
+
+int testlocal2(){ // (should compile)
+	immutable x = 2;
+	immutable y = x;
+	bool tt(){return 2==y;}
+	static assert(tt());
+}
+
+
+
+int testrefoutlazy(){
+	int x=1;
+	void testout(out int x){
+		x=2;
+	}
+	void testref(ref int x){
+		(++x)++;
+		//x+=2;
+	}
+	//int testlazy(lazy int x){
+	int testlazy(lazy int x){
+		return x+x;
+	}
+	void testptr(int* x){*x+=2; x+=2;}
+	testout(x);
+	testref(x);
+	testptr(&x);
+	assert(x==6);
+	auto t=testlazy(x++);
+	assert(t==6+7);
+	return x;
+}
+pragma(msg, "testrefoutlazy: ",testrefoutlazy());
+static assert(testrefoutlazy()==8);
+
+
+
+int[] createclosure(){
+	int[] x;
+	void delegate() foo(int start, int step){
+		int i = start;
+		return { x~=(i+=step); };
+	}
+	auto dg = foo(0,1);
+	auto dg2 = foo(22,-2);
+	for(int i=0;i<20;i++)
+		((i&1)?dg:dg2)();
+	return x;
+}
+pragma(msg, "createclosure: ",createclosure());
+
+
+int casts(){
+	int[] a = null;
+	immutable(int)[] b = cast(immutable)a;	// TODO: disallow unsafe cast
+	a[0]=2;
+	//int* x = &a[0];
+	return 0;
+}
+pragma(msg, casts());
+
+
+int twiceinterpret(){
+	int accessible = 2; // only accessible from 'foo'  on the second invocation
+	immutable zero = 0; // always accessible from 'foo'
+	int foo(bool first){return first?zero:accessible;}
+	enum y = foo(true);
+	return foo(false);
+}
+static assert(twiceinterpret()==2);
+
+
+
+void invtest(){
+	bool x = false;
+	bool foo(){return true&&x;}
+	bool ttt(){return foo();}
+	static assert(ttt());
+}
+static assert({invtest(); return true;}());
+
+
+
+
+
 //enum a = "mixin(a); mixin(a);";
 //mixin(a);
+
+int dggg(){
+	int x=2;
+	int foo(){return x;}
+	static int bar(){return 2;}
+	auto a = &foo;
+	auto b = &bar;
+	static assert(is(typeof(a): int delegate()));
+	static assert(!is(typeof(a): int function()));
+	static assert(is(typeof(b): int function()));
+	static assert(!is(typeof(b): int delegate()));
+	return a()+b();
+}
+pragma(msg, "dggg: ",dggg());
+static assert(dggg()==4);
+
+
+int[] testdelegate(){
+	void doall(int delegate(int) dg, int[] a, int n){
+		for(int i=0;i<n;i++) a[i]=dg(a[i]);
+	}
+	int t = 100;
+	int squareplust(int x){return x*x+t;}
+	int[] a = [1,2,3,4,5,2,1928];
+	doall(&squareplust, a, 7);
+	return a;
+	// static assert(testdelegate()==[]);
+}
+static assert(testdelegate()==[101,104,109,116,125,104,3717284]);
+pragma(msg, "testdelegate: ",testdelegate());
+
+
+int testnested2(){
+	int y=3;
+	int foo(){
+		int x;
+		int bar(){
+			return x+y--;
+		}
+		int qux(){
+			auto yp = &y;
+			int foo(){
+				x = 2;
+				return ++*yp +bar()+(*yp)++;//*yp++; // ok, but DMD cannot do this
+			}
+			return foo();
+		}
+		return qux();
+	}
+	return foo();
+}
+
+pragma(msg, "testnested2: ", testnested2());
+static assert(testnested2()==13);
+
+int testnested(){
+	int x,y;
+	int *p;
+	(){p=&x;}();
+	(){*p=3;}();
+
+	(){int a=3;(){int z=--a;(){y=(){return z++;}();}();}();}();
+	(){x++;}();
+	return (){return (int x){return (int y){return x+y;}(y);}(x);}();
+	//return (){return x+y;}();
+}
+pragma(msg, "testnested: ",testnested());
+static assert(testnested()==6);
+
+int* aliasinp(int* x){
+	auto y = &x;
+	return x;
+}
+int testalias(){
+	int a, b;
+	auto p = aliasinp(&a);
+	auto q = aliasinp(&b);
+	*p=2;
+	*q=3;
+	return a+b;
+}
+static assert(testalias()==5);
+pragma(msg, "testalias: ",testalias());
+
+
+int* escapestackref(int x){
+	int y = x;
+	//return aliasinp(&*&y); // this crashes DMD :o)
+	return &y;
+}
+int testescape(){
+	int a = 11;
+	int* p = escapestackref(a);
+	a = 12;
+	int* q = escapestackref(a);
+	return *p+*q;
+}
+static assert(testescape() == 23); // TODO: should this be an error instead?
+pragma(msg, "testescape: ", testescape());
+
+
+int addr(int a){
+	int* x;
+	int**y = &x;
+	int***z = &y;	
+	a=2;
+	x = &a;
+	return a;
+}
+
+pragma(msg, "addr: ",addr(3));
 
 int tailcalls(int n, int x){
 	if(!n) return x;
 	return tailcalls(n-1, x+n);
 }
 
-pragma(msg, tailcalls(10000,0));
-
+pragma(msg, "tailcalls: ",tailcalls(10000,0));
 
 immutable(char)[] toEngNum(uint i){ // pure
 	immutable static a=["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven",
@@ -15,18 +244,17 @@ immutable(char)[] toEngNum(uint i){ // pure
 	immutable static b=[null,"ten","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
 	//static auto foo(int i)
 	if(i>=1000000) return (uint i){immutable(char)[] s; while(i) s=(i%10+'0')~s, i/=10; return s;}(i);
-	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%100?" "~toEngNum(i%1000):"");
+	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%1000?" "~toEngNum(i%1000):"");
 	if(i>=100) return toEngNum(i/100)~" hundred"~(i%100?" and "~toEngNum(i%100):"");
 	if(i>=10) return i<20?a[i]:b[i/10]~(i%10?"-"~toEngNum(i%10):"");
 	return a[i];
 }
 
-pragma(msg, toEngNum(123562222));
+pragma(msg, "toEngNum: ",toEngNum(123562222));
 
-
-pragma(msg, {
+pragma(msg, "toEngNum in a loop: ",{
 		immutable(char)[][] r;
-		for(int i=0;i<1000;i++) r~=toEngNum(i);
+		for(int i=0;i<=1100;i++) r~=toEngNum(i);
 		return r;
 	}());
 
@@ -141,6 +369,7 @@ bool strchr(immutable(char)[] haystack, immutable(char)[] needle){
 		}
 		if(!*p) break;
 	}
+	((p))=p;
 	return false;
 }
 
@@ -176,8 +405,8 @@ pragma(msg, toestr(19));
 long testvoid(){
 	long a = 0;
 	long b = 0;
-	b || (a = 1); // TODO: replace with lambda call
-	a && (b = 1); // TODO: replace with lambda call
+	b || function(long*a){*a = 1;}(&a); // TODO: use closure instead
+	a && function(long*b){*b = 1;}(&b); // TODO: use closure instead
 	return a+b;
 }
 
@@ -224,6 +453,9 @@ int ptrstore(){
 }
 
 pragma(msg, "ptrstore: ",ptrstore());
+
+
+//static assert(ptrr(4) == 13);
 
 
 int ptrr(int x){
@@ -310,13 +542,14 @@ real multiindex(){
 pragma(msg, "multiindex: ",multiindex());
 
 
-/+int[][][] ttlit(int n){
+int[][][] ttlit(int n){
 	int[][][] r = [[[1]]];
 	for(int i=0;i<n;i++) r~=[[[],[1,2]],[[]]];
 	return r;
 }
 
-pragma(msg, "ttlit: ", ttlit(4));+/
+pragma(msg, "ttlit: ", ttlit(4));
+
 
 int[][][][] arraylit(int n){
 	int[][][][] r;
@@ -440,7 +673,7 @@ int[] erathos(int x){
 	return r;
 }
 
-pragma(msg, "erathos: ",erathos(10000));
+pragma(msg, "erathos: ",erathos(1000));
 
 /+
 int[] primes(int x){
@@ -461,7 +694,7 @@ int[] primes(int x){
 }
 
 pragma(msg, primes(10000)); // TODO!: array boundschecks (in interpretV?)
-+/
+
 
 //mixin("s");
 
@@ -496,7 +729,7 @@ static assert(!is(typeof({enum _ = (assert(!bar()),1);})));
 pragma(msg, assert(bar()));+/
 
 
-/+
+
 immutable int xx = 10;
 auto foo(int x){
 	real y,z;

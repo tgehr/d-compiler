@@ -11,9 +11,11 @@ import interpret, error; // byteCompile
 
 abstract class Declaration: Statement{
 	STC stc;
+	immutable STC astStc; // storage classes as they occur in the code
 	Identifier name;
 	this(STC stc,Identifier name){
 		this.stc=stc;
+		astStc = stc;
 		this.name=name;
 		sstate = SemState.pre;
 	}
@@ -309,8 +311,8 @@ class FunctionDecl: OverloadableDecl{
 	FunctionTy type;
 	BlockStm pre,post;
 	Identifier postres;
-	this(FunctionTy type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
-		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
+	this(STC stc, FunctionTy type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
+		this.type=type; pre=pr, post=po; postres=pres; super(stc, name);
 	}
 	final string signatureString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
@@ -327,8 +329,10 @@ class FunctionDecl: OverloadableDecl{
 
 class FunctionDef: FunctionDecl{
 	BlockStm bdy;
-	this(FunctionTy type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
-		super(type,name, precondition, postcondition, pres); bdy=fbody;}
+	this(STC stc, FunctionTy type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody,bool deduceStatic=false){
+		super(stc, type, name, precondition, postcondition, pres); bdy=fbody;
+		this.deduceStatic = deduceStatic;
+	}
 	override string toString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();

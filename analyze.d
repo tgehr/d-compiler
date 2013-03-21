@@ -21,12 +21,12 @@ mixin template Analyze(){
 				static assert(!is(typeof(_idfododi)));
 				static assert(!is(typeof(_idfododi2)));
 				foreach(_idfododi; __traits(allMembers, T)){
-					static if(_idfododi.length && _idfododi!="meaning"){ // hack
+					static if(_idfododi.length && _idfododi!="meaning" && _idfododi!="circ"){ // hack
 						mixin(`alias `~_idfododi~` _idfofodi2;`);
 						static if(is(typeof(_idfofodi2): Node) && !is(typeof(_idfofodi2): Type)){
 						if(_idfofodi2) dg(_idfofodi2);
 						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl") // hack, annotations will solve this
-							foreach(x; _idfofodi2) dg(x);
+						      foreach(x; _idfofodi2) if(x) dg(x);
 					}
 				}
 			}

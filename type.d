@@ -87,6 +87,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		DynArrTy,
 		ArrayTy,
 		FunctionTy,
+		DelegateTy,
 	);
 	
 	mixin Visitors;
@@ -151,21 +152,21 @@ class FunctionTy: Type{
 	mixin Visitors;
 }
 
-class FunctionPtr: Type{ // TODO: get rid of this class, merge functionality into PointerTy
+/+class FunctionPtr: Type{ // merged into PointerTy. TODO: invariant ft.rret !is null
 	FunctionTy ft;
 	this(FunctionTy ft)in{assert(ft !is null&&ft.rret !is null);}body{this.ft=ft;}
 	override string toString(){return ft.rret.toString()~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
 
 	mixin Visitors;
-}
+}+/
 
 class DelegateTy: Type{
 	FunctionTy ft;
-	this(FunctionTy ft)in{assert(ft !is null&&ft.rret !is null);}body{this.ft=ft;}
-	override string toString(){return ft.rret.toString()~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+	this(FunctionTy ft)in{assert(ft !is null&&(ft.ret !is null||ft.rret !is null));}body{this.ft=ft;}
+	override string toString(){return (ft.rret?ft.rret.toString():ft.ret?ft.ret.toString:"auto")~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
 
+	mixin DownCastMethod;
 	mixin Visitors;
-
 }
 
 class TypeofExp: Type{
@@ -235,9 +236,12 @@ final class BasicType: Type{
 class PointerTy: Type{
 	Expression e;
 	this(Expression next)in{assert(next&&1);}body{e=next;}
-	override string toString(){return _brk(e.toString()~'*');}
+	override string toString(){
+		if(auto tt=e.isType())if(auto ft=tt.isFunctionTy()) return (ft.rret?ft.rret.toString():ft.ret?ft.ret.toString():"auto")~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");
+		return _brk(e.toString()~'*');
+	}
 	override PointerTy isPointerTy(){return this;}
-
+	
 	mixin Visitors;
 }
 

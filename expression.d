@@ -99,9 +99,14 @@ class ArrayLiteralExp: Expression{
 class FunctionLiteralExp: Expression{
 	FunctionTy fty;
 	BlockStm bdy;
-	bool isStatic;
-	this(FunctionTy ft, BlockStm b, bool s=false){ fty=ft; bdy=b; isStatic=s;}
-	override string toString(){return _brk((isStatic?"function"~(fty&&fty.rret?" ":""):fty&&fty.rret?"delegate ":"")~(fty?fty.toString():"")~bdy.toString());}
+	enum Kind{
+		none,
+		function_,
+		delegate_,
+	}
+	Kind which;
+	this(FunctionTy ft, BlockStm b, Kind w=Kind.none){ fty=ft; bdy=b; which=w;}
+	override string toString(){return _brk((which==Kind.function_?"function"~(fty&&fty.rret?" ":""):which==Kind.delegate_?fty&&fty.rret?"delegate ":"":"")~(fty?fty.toString():"")~bdy.toString());}
 
 	mixin Visitors;
 }

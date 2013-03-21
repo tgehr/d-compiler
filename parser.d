@@ -34,6 +34,8 @@ private string STCEnum(){
 }
 //enum{STC...}; Solved this way because most storage classes are keywords and composition will be sane
 mixin(STCEnum());
+enum STCbyref = (STCref|STCout);
+enum STCrvalue = (STCenum|STClazy);
 static assert(storageClasses.length+attributeSTC.length<64);
 alias long STC;
 string STCtoString(STC stc){
@@ -562,7 +564,7 @@ private struct Parser{
 				r.loc=e.loc;
 				auto b = New!BlockStm([cast(Statement)r]);
 				b.loc=e.loc;
-				return res=New!FunctionLiteralExp(ftype,b,false);
+				return res=New!FunctionLiteralExp(ftype,b,FunctionLiteralExp.Kind.none);
 				break;
 			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",OrOrExp));
 			case Tok!"[":
@@ -670,15 +672,10 @@ private struct Parser{
 		switch(ttype){
 			case Tok!";": mixin(rule!(EmptyStm,"_"));
 		    case Tok!"{":
+			    auto loc = tok.loc;
 				auto r=parseBlockStm();
-				if(ttype!=Tok!"(") return r;
-				else{
-					auto f=New!FunctionLiteralExp(cast(FunctionTy)null,r);
-					f.loc=r.loc;
-					auto e=parseExpression2(f);
-					expect(Tok!";");
-					mixin(rule!(ExpressionStm,Existing,"e"));
-				}
+				r.loc = loc.to(tok.loc);
+				return r;
 			mixin(pStm!("if","(",Condition,")","NonEmpty",Statement,"OPT"q{"else","NonEmpty",Statement}));
 			mixin(pStm!("while","(",Condition,")","NonEmpty",Statement));
 			mixin(pStm!("do","NonEmpty",Statement,"while","(",Expression,")",";"));
@@ -888,7 +885,7 @@ private struct Parser{
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
 					STC stc=parseSTC!functionSTC();
-					tt=New!FunctionPtr(New!FunctionTy(stc,tt,params,vararg));
+					tt=New!PointerTy(New!FunctionTy(stc,tt,params,vararg));
 					tt.loc=loc.to(ptok.loc);
 					continue;
 				case Tok!"delegate":
@@ -1047,6 +1044,7 @@ private struct Parser{
 		expect(Tok!"}");
 		return res=New!BlockStm(s.data);
 	}
+	// @BUG!: Cannot parse alias to a function type or alias to extern(C) type 
 	Declaration parseDeclaration(STC stc=STC.init){ // Helper function for parseDeclDef.
 		Expression type;
 		Declaration d;
@@ -1100,6 +1098,8 @@ private struct Parser{
 			return e;
 		}
 	}
+
+	//@BUG!: Cannot parse C array parameters 
 	Parameter[] parseParameterList(out VarArgs vararg){
 		vararg=VarArgs.none;
 		auto params=appender!(Parameter[])();
@@ -1196,10 +1196,10 @@ private struct Parser{
 			if(pre||post) expect(Tok!"body");
 			else if(ttype==Tok!"body") nextToken();
 			bdy=parseBlockStm();
-			r=New!FunctionDef(New!FunctionTy(stc,ret,params,vararg),name,pre,post,pres,bdy);
+			r=New!FunctionDef(stc,New!FunctionTy(STC.init,ret,params,vararg),name,pre,post,pres,bdy);
 		}else{
 			if(!pre&&!post) expect(Tok!";");
-			r=New!FunctionDecl(New!FunctionTy(stc,ret,params,vararg),name,pre,post,pres);
+			r=New!FunctionDecl(stc,New!FunctionTy(stc,ret,params,vararg),name,pre,post,pres);
 		}
 		return isTemplate ? New!TemplateFunctionDecl(stc,tparam,constr,r) : r;
 	}
@@ -1210,11 +1210,12 @@ private struct Parser{
 		mixin(SetLoc!Expression);
 		STC stc;
 		Expression ret;
-		bool isStatic = ttype==Tok!"function";
+		alias FunctionLiteralExp.Kind Kind;
+		auto kind = ttype==Tok!"function" ? Kind.function_ : ttype==Tok!"delegate" ? Kind.delegate_ : Kind.none;
 		VarArgs vararg;
 		Parameter[] params;
 		bool hastype=false;
-		if(isStatic || ttype==Tok!"delegate"){
+		if(kind != Kind.none){
 			nextToken();
 			if(ttype!=Tok!"(" && ttype!=Tok!"{"){
 				stc=parseSTC!toplevelSTC();
@@ -1233,7 +1234,7 @@ private struct Parser{
 			bdy=New!BlockStm([cast(Statement)r]);
 			bdy.loc=e.loc;
 		}
-		return res=New!FunctionLiteralExp(hastype?New!FunctionTy(stc,ret,params,vararg):null,bdy,isStatic);
+		return res=New!FunctionLiteralExp(hastype?New!FunctionTy(stc,ret,params,vararg):null,bdy,kind);
 	}
 	Declaration parseDeclarators(STC stc, Expression type){
 		if(peek().type==Tok!"[") return parseCArrayDecl(stc,type);

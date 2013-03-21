@@ -30,14 +30,14 @@ class Module: Node{
 	Module semantic(){
 		// return null;
 		mixin(SemPrlg);
-		if(sstate == SemState.pre) foreach(ref x;decls) x=x.presemantic(sc); // add all to symbol table
+		if(sstate == SemState.pre) foreach(ref x;decls){
+			x.stc|=STCstatic;
+			x=x.presemantic(sc); // add all to symbol table
+		}
 		do{
 			gRetryAgain = false; // TODO: fix this
 			//mixin(SemChld!q{decls});
 			foreach(ref x;decls){
-				if(x.isVarDecl() || x.isFunctionDecl()){
-					x.stc|=STCstatic;
-				}
 				x = x.semantic(sc);
 			}
 			// import std.stdio;writeln("round complete!");

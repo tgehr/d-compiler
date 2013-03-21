@@ -1,5 +1,5 @@
 //alias void foo(){};
-
+bool match(Group!DataIndex matches[]);
 void main(){
 	//auto x = r"\ ";
 	//import std.stdio;
