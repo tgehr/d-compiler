@@ -53,8 +53,8 @@ pragma(msg, "testList2: ", testList().brange().map!(a=>a*2).array);
 auto map(alias a, R)(R range) if(isInputRange!R && is(typeof(a(range.front())))){
 	static struct Map{
 		R range;
-		auto front()    => a(range.front());
-		auto empty()    => range.empty();
+		@property auto front()    => a(range.front);
+		@property auto empty()    => range.empty;
 		auto popFront() => range.popFront();
 		//static if(isForwardRange!R){}
 	}
@@ -67,16 +67,16 @@ template filter(alias a, R){// if(isInputRange!R && is(typeof(cast(bool)a(R.fron
 	auto filter(R range){
 		// auto r = Filter(range); // TODO!
 		auto r = Filter(); r.range = range;
-		if(!range.empty() && !a(range.front())) r.popFront();
+		if(!range.empty && !a(range.front)) r.popFront();
 		return r;
 	}
 	struct Filter{
 		R range;
-		auto front()=>range.front();
-		auto empty()=>range.empty();
+		auto front()=>range.front;
+		auto empty()=>range.empty;
 		void popFront(){
 			do range.popFront();
-			while(!range.empty()&&!a(range.front()));
+			while(!range.empty&&!a(range.front));
 		}
 	}
 }
@@ -85,8 +85,8 @@ auto take(R)(R range, size_t num){
 	static struct Take{
 		R range;
 		size_t num;
-		auto front()=>range.front();
-		auto empty()=>!num||range.empty();
+		auto front()=>range.front;
+		auto empty()=>!num||range.empty;
 		auto popFront()=>(num--,range.popFront());
 	}
 	// return Take(range, num); // TODO!
@@ -102,6 +102,87 @@ auto reduce(alias a, T, R)(T start, R range) if(isInputRange!R && is(typeof(a(st
 	return result;
 }
 
+auto joiner(RR, S...)(RR r, S sep)
+if(isInputRange!RR && isInputRange!(ElementType!RR) &&
+   S.length<=1 && (S.length==0 || isForwardRange!(S[0]) && 
+   is(typeof(sep[0].empty?r.front.front:sep[0].front))))
+{
+	static struct Result{
+		@property auto ref front(){
+			static if(S.length) return c.empty ? cs.front : c.front;
+			else return c.front;
+		}
+		@property bool empty(){ return rr.empty && c.empty; }
+		void popFront(){
+			static if(S.length){
+				if(c.empty) cs.popFront();
+				else{ c.popFront(); if(!c.empty) return; }
+				if(!cs.empty) return;
+				else cs=s.save;
+			}else{ c.popFront(); if(!c.empty) return; }
+			do{
+				if(rr.empty) return;
+				static if(isForwardRange!(typeof(this))) c=rr.front.save;
+				else{
+					static assert(!isForwardRange!RR || !isForwardRange!(ElementType!RR));
+					c=rr.front;
+				}
+				rr.popFront();
+				static if(S.length) if(!cs.empty) break;
+			}while(c.empty);
+		}
+		static if(isForwardRange!RR && isForwardRange!(ElementType!RR)) @property Result save(){
+			/+static if(S.length) return Result(rr.save,c.save,s,cs.save);
+			else return Result(rr.save,c.save); // TODO +/
+			Result res;
+			static if(S.length){
+				res.rr = rr.save;
+				res.c = c.save;
+				res.s = s;
+				res.cs = cs.save;
+			}else{
+				res.rr = rr.save;
+				res.c = c.save;
+			}
+			return res;
+		}
+	//private: // TODO
+		RR rr;
+		ElementType!RR c;
+		static if(S.length) S[0] s, cs;
+	}
+	//auto res = Result(r);// TODO
+	Result res;
+	res.rr = r;
+	// with(res) // TODO
+	do{
+		if(res.rr.empty) break;
+		res.c=res.rr.front;
+		res.rr.popFront();
+	}while(res.c.empty);
+	// with(res) // TODO
+	static if(S.length){
+		res.s = sep[0];
+		res.cs = sep[0].save;
+	}
+	return res;
+}
+
+static assert([[1,2,3],[1,2,3]].joiner.array==[1,2,3,1,2,3]);
+pragma(msg, "joiner: ", [[1,2,3],[1,2,3]].joiner.array);
+static assert([[1,2,3],[1,2,3]].joiner([0,8]).array==[1,2,3,0,8,1,2,3]);
+pragma(msg, "joiner2: ", [[1,2,3],[1,2,3]].joiner([0,8]).array);
+static assert([[1,2,3],[1,2,3]].joiner([0.8]).array==[1,2,3,0.8,1,2,3]);
+pragma(msg, "joiner3: ", [[1,2,3],[1,2,3]].joiner([0.8]).array);
+
+static assert([[[[1],[2,3]],[[2]],[[1],[3,3,4]]]].joiner.joiner.joiner.array==
+              [1,2,3,2,1,3,3,4]);
+pragma(msg, "joiner4: ", [[[[1],[2,3]],[[2]],[[1],[3,3,4]]],[[[1]]]].joiner.joiner.joiner.array);
+
+static assert([[[[1],[2,3]],[[2]],[[1],[3,3,4]]],[[[1]]]].joiner([[[0]]]).joiner([[5]]).joiner([10]).array==[1,10,2,3,10,5,10,2,10,5,10,1,10,3,3,4,10,5,10,0,10,5,10,1]);
+pragma(msg, "joiner5: ", [[[[1],[2,3]],[[2]],[[1],[3,3,4]]],[[[1]]]].joiner([[[0]]]).joiner([[5]]).joiner([10]).array);
+
+
 static assert(array(iota(0,100)) == [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99]);
 pragma(msg, "iota:   ", array(iota(0,100)));
 static assert(array(map!(a=>a*2)(iota(0,26))) == [0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50]);
@@ -112,6 +193,7 @@ static assert(array(take(iota(0,20),10)) == [0,1,2,3,4,5,6,7,8,9]);
 pragma(msg, "take: ", array(take(iota(0,20),10)));
 static assert(reduce!((a,b)=>a+b)(iota(1,101)) == 5050);
 pragma(msg, "reduce: ", reduce!((a,b)=>a+b)(iota(1,101)));
+
 
 auto valueTypeRanges(){
 	auto x = map!(a=>a*a)(iota(0,100));
@@ -125,16 +207,18 @@ pragma(msg, "valueTypeRanges: ", valueTypeRanges());
 
 
 struct DynRange(T){
-	T delegate() front;
-	bool delegate() empty;
+	T delegate() frontImpl;
+	bool delegate() emptyImpl;
 	DynRange!T delegate() popFrontImpl;
+	@property T front(){ return frontImpl(); }
+	@property bool empty(){ return emptyImpl(); }
 	void popFront(){ this = popFrontImpl(); }
 }
 
 DynRange!(typeof(R.front())) dynRange(R)(R range)if(isInputRange!R){
 	DynRange!(typeof(range.front())) result;
-	result.front = ()=>range.front();
-	result.empty = ()=>range.empty();
+	result.frontImpl = ()=>range.front;
+	result.emptyImpl = ()=>range.empty;
 	result.popFrontImpl = (){
 		static if(is(typeof(range.tail())) && isInputRange!(typeof(range.tail()))){
 			auto newRange = range.tail();
@@ -315,7 +399,6 @@ auto zipWith(alias a, R...)(R r)if(All!(isInputRange, R)){// TODO: constraint fo
 	return map!(x=>a(x.expand))(zip(r));
 }
 
-pragma(msg, "wrap: ", array(wrap([1,2,3,4,5])));
 pragma(msg, "zipWith: ", array(zipWith!((a,b)=>a+b)(wrap([1,2,3]),wrap([4,5,6]))));
 
 
@@ -324,13 +407,16 @@ pragma(msg, "zipWith: ", array(zipWith!((a,b)=>a+b)(wrap([1,2,3]),wrap([4,5,6]))
 // +/
 // +/
 
+alias immutable(char)[] string;
 
+pragma(msg, "wrap: ", array(wrap([1,2,3,4,5])));
+static assert(array(wrap([1,2,3,4,5]))==[1,2,3,4,5]);
 
 
 auto array(R)(R range){
-	typeof(R.front())[] arr;
-	for(; !range.empty(); range.popFront())
-		arr ~= range.front();
+	typeof(R.front)[] arr;
+	for(; !range.empty; range.popFront())
+		arr ~= range.front;
 	return arr;
 }
 
@@ -367,7 +453,175 @@ alias typeof(int[].length) size_t;
 template isInputRange(R){
 	enum isInputRange=is(typeof({
 		R r;
-		if(!r.empty()) r.popFront();
-		auto f = r.front();
+		if(!r.empty) r.popFront();
+		auto f = r.front;
 	}));
 }
+
+template isForwardRange(R){
+	enum isForwardRange=isInputRange!R&&is(typeof({
+		R r;
+		r=r.save;
+	}));
+}
+
+template ElementType(R)if(isInputRange!R){
+	// alias typeof({foreach(x;r)return x;}()) ElementType // TODO (also adapt constraint)
+	alias typeof({R r; return r.front; }()) ElementType;
+}
+
+@property auto front(T)(T[] a){ return a[0]; }
+@property bool empty(T)(T[] a){ return !a.length; }
+void popFront(T)(ref T[] a){ a=a[1..$]; }
+@property T[] save(T)(T[] a){ return a; }
+
+
+
+string trace(){
+	string r;
+	void write(string s){ r~=s; }
+	void writeln(string s){ write(s); write("\n"); }
+	struct LoggingRange(R)if(isInputRange!R){
+		R rng;
+		string name;
+		@property front(){ writeln(name~": front"); return rng.front; }
+		@property empty(){ writeln(name~": empty"); return rng.empty; }
+		void popFront(){ writeln(name~": popFront"); return rng.popFront(); }
+		static if(isForwardRange!R){
+			@property save(){
+				writeln(name~": save");
+				// return LoggingRange(rng.save,name); // TODO
+				LoggingRange res;
+				res.rng=rng.save;
+				res.name=name~"'";
+				return res;
+			}
+		}
+	}
+	auto mkLog(T)(string name, T rng)if(isInputRange!T){
+		// return LoggingRange(rng, name); // TODO
+		LoggingRange!T res;
+		res.rng=rng;
+		res.name=name;
+		return res;
+	}
+	int[] x = mkLog("joined",[mkLog("e0",[1,2,3]),mkLog("e1",[4,5,6]),mkLog("e2",[1,2,3])]).joiner(mkLog("sep",[1,2,3])).array;
+	return r;
+}
+static assert(trace()==
+"joined: empty
+joined: front
+joined: popFront
+e0: empty
+sep: save
+joined: empty
+e0: empty
+e0: front
+e0: empty
+e0: popFront
+e0: empty
+joined: empty
+e0: empty
+e0: front
+e0: empty
+e0: popFront
+e0: empty
+joined: empty
+e0: empty
+e0: front
+e0: empty
+e0: popFront
+e0: empty
+sep': empty
+joined: empty
+e0: empty
+sep': front
+e0: empty
+sep': popFront
+sep': empty
+joined: empty
+e0: empty
+sep': front
+e0: empty
+sep': popFront
+sep': empty
+joined: empty
+e0: empty
+sep': front
+e0: empty
+sep': popFront
+sep': empty
+sep: save
+joined: empty
+joined: front
+e1: save
+joined: popFront
+sep': empty
+joined: empty
+e1': empty
+e1': front
+e1': empty
+e1': popFront
+e1': empty
+joined: empty
+e1': empty
+e1': front
+e1': empty
+e1': popFront
+e1': empty
+joined: empty
+e1': empty
+e1': front
+e1': empty
+e1': popFront
+e1': empty
+sep': empty
+joined: empty
+e1': empty
+sep': front
+e1': empty
+sep': popFront
+sep': empty
+joined: empty
+e1': empty
+sep': front
+e1': empty
+sep': popFront
+sep': empty
+joined: empty
+e1': empty
+sep': front
+e1': empty
+sep': popFront
+sep': empty
+sep: save
+joined: empty
+joined: front
+e2: save
+joined: popFront
+sep': empty
+joined: empty
+e2': empty
+e2': empty
+e2': front
+e2': empty
+e2': popFront
+e2': empty
+joined: empty
+e2': empty
+e2': empty
+e2': front
+e2': empty
+e2': popFront
+e2': empty
+joined: empty
+e2': empty
+e2': empty
+e2': front
+e2': empty
+e2': popFront
+e2': empty
+sep': empty
+joined: empty
+e2': empty
+");

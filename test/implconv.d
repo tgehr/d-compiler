@@ -1,18 +1,53 @@
+void contextpointerqualimplconv(){
+
+	void delegate()inout w;
+	void delegate()immutable i;
+	void delegate()const c;
+	void delegate() m;
+	void delegate()const inout wc;
+	
+	// The following cases should be disallowed:
+	
+	i=c; // error: there may be mutable references to context
+	c=m; // error: m may modify context
+	i=m; // error: m may modify context
+	w=i; // error: cannot use immutable as const or mutable
+	w=m; // error: cannot use mutable as immutable
+	w=c; // error: cannot use const as immutable
+	wc=m;// error: cannot use mutable as immutable
+	wc=c;// error: wc will access context as const or immutable
+	i=w; // error: inout could mean const or mutable
+	c=w; // error: inout could mean mutable
+	i=wc; // error: inout const could mean const
+
+	// These should be allowed:
+	
+	c=i; // certainly const if only immutable data accessed
+	c=wc;// TODO: certainly const if only const inout data accessed
+	m=c; // just loses guarantees to caller
+	m=i; // TODO: ditto
+	m=w; // TODO: ditto
+	m=wc;// TODO: ditto
+	w=wc;// m=c, c=c and i=i are valid
+	wc=i;// TODO: c=i and i=i are valid
+	wc=w;// TODO: c=m is not valid, but can be interpreted as c=c
+}
+
 static assert(is(int delegate() immutable : int delegate() const));
 static assert(!is(int delegate() : int delegate() const));
 
 static assert(!is(int[2]: int[1]));
-/+
-static assert(is(typeof([1,1L])==long[]));
 
-//byte b = 0b11110000; // TODO: find a case to prove inconsistency of DMD
-
-enum x = 2i*1;
+enum x = 2i*1; // TODO
 pragma(msg, x);
 pragma(msg, typeof(x));
 
 
 static assert(is(typeof(x)==idouble)); // TODO!
+/+
+static assert(is(typeof([1,1L])==long[]));
+
+//byte b = 0b11110000; // TODO: find a case to prove inconsistency of DMD
 
 
 enum y = 1i*2;

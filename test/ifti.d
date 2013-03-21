@@ -1,4 +1,16 @@
 
+int ambigtmplfun(double a)(int b){ return 1; }
+int ambigtmplfun(int a)(double b){ return 2; }
+
+void main(){ pragma(msg, "ambigtmplfun: ", ambigtmplfun!1(1)); } // TODO: error
+
+
+auto func(T)(T[2] arg){ return arg; }
+static assert(is(typeof(func([1,2]))==int[2]));
+auto deduceLengthFromLit(T,int n)(T[n] a){ return a; }
+pragma(msg, typeof(deduceLengthFromLit([1,2,3]))); // TODO (?)
+
+
 template G(S,T){ alias T delegate(S) G; }
 
 C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){

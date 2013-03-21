@@ -159,7 +159,7 @@ abstract class Scope{ // SCOPE
 	}
 
 
-	bool nestedIn(Scope rhs){ return rhs is this; }
+	bool isNestedIn(Scope rhs){ return rhs is this; }
 
 	VarDecl getDollar(){return null;}
 	FunctionDef getFunction(){return null;}
@@ -181,7 +181,7 @@ abstract class Scope{ // SCOPE
 	int unresolvedLabels(scope int delegate(GotoStm) dg){return 0;}
 
 	// functionality handy for closures:
-	size_t getFrameNesting(){ return 0; }
+	int getFrameNesting(){ return 0; }
 
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
@@ -240,7 +240,7 @@ class NestedScope: Scope{
 		return this.independent!Scope;
 	}
 
-	override bool nestedIn(Scope rhs){ return this is rhs || parent.nestedIn(rhs); }
+	override bool isNestedIn(Scope rhs){ return this is rhs || parent.isNestedIn(rhs); }
 
 	override bool insertLabel(LabeledStm stm){
 		return parent.insertLabel(stm);
@@ -255,7 +255,7 @@ class NestedScope: Scope{
 		return parent.unresolvedLabels(dg);
 	}
 
-	override size_t getFrameNesting(){ return parent.getFrameNesting(); }
+	override int getFrameNesting(){ return parent.getFrameNesting(); }
 
 	override VarDecl getDollar(){return parent.getDollar();}
 	override FunctionDef getFunction(){return parent.getFunction();}
@@ -294,7 +294,7 @@ class AggregateScope: NestedScope{
 	override AggregateDecl getAggregate(){ return aggr; }
 	override AggregateDecl getDeclaration(){ return aggr; }
 
-	override size_t getFrameNesting(){ return parent.getFrameNesting()+1; }
+	override int getFrameNesting(){ return parent.getFrameNesting()+1; }
 private:
 	AggregateDecl aggr;
 }
@@ -364,7 +364,7 @@ class TemplateScope: NestedScope{
 		this.tmpl=tmpl;
 	}
 
-	override size_t getFrameNesting(){ return iparent.getFrameNesting(); }
+	override int getFrameNesting(){ return iparent.getFrameNesting(); }
 
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
@@ -418,7 +418,7 @@ final class FunctionScope: OrderedScope{
 		else _unresolvedLabels~=stm;
 	}
 
-	override size_t getFrameNesting(){ return parent.getFrameNesting()+1; }
+	override int getFrameNesting(){ return parent.getFrameNesting()+1; }
 
 	override FunctionDef getFunction(){return fun;}
 	override FunctionDef getDeclaration(){return fun;}

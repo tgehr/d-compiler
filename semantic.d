@@ -1745,14 +1745,14 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		Scope instanceScope = parent.scope_;
 
-		size_t maxn = 0;
+		int maxn = -1;
 		foreach(i,x;args){
 			if(i<parent.tuplepos && parent.params[i].which != WhichTemplateParameter.alias_)
 				continue;
 			Declaration decl = null;
 			if(auto sym = x.isSymbol()) decl=sym.meaning;
-			//else if(auto ty = x.isType()) // DMD 2.060 does not do this:
-				// if(auto at = ty.isAggregateTy()) decl=at.decl;
+			else if(auto ty = x.isType()) // DMD 2.060 does not do this:
+				if(auto at = ty.isAggregateTy()) decl=at.decl;
 			if(!decl) continue;
 			assert(!!decl && decl.scope_,x.to!string);
 			// TODO: find out if it is reasonable to make this assertion pass:
@@ -4014,9 +4014,10 @@ class Symbol: Expression{ // semantic node
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
 		}
-		// TODO: simple pointer-chaing expression alias?
+		// TODO: simple pointer-chain expression alias?
 		if(!inContext.among(InContext.fieldExp,InContext.passedToTemplateAndOrAliased) &&
-		   thisType() && maybeThisContext()
+		   thisType() && maybeThisContext() &&
+		   !meaning.isFunctionDecl().maybe!(a=>a.isConstructor())
 		){
 			auto t = New!ThisExp();
 			t.loc = loc;
@@ -4541,7 +4542,6 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		// TODO: sanity checks etc.
 		mixin(SemPrlg);
 		mixin(SemChldExp!q{e});
-
 		// TODO: check if rewrite to implicit conversion required
 
 		if(!ty) {
@@ -4596,7 +4596,6 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		mixin CreateBinderForDependent!("CheckConv","checkConv");
 		mixin(CheckConv!q{bool conversionLegal; this, sc});
 		if(!conversionLegal) mixin(ErrEplg);
-
 
 		auto el = type.getElementType();
 		if(el && el.getHeadUnqual() !is Type.get!void()){
@@ -5441,7 +5440,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		mixin(ErrEplg);
 	}
 
-	void noHope(){
+	override void noHope(Scope sc){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
 			mixin(GetUnresolved!q{auto unresolved; e1.getMemberScope(), i});
@@ -9814,7 +9813,10 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		propagateSTC();
 		if(sstate == SemState.pre){
 			presemantic(sc); // add self to parent scope
-			if(sstate == SemState.error) needRetry=false;
+			if(sstate == SemState.error){
+				needRetry=false;
+				scope_=sc;
+			}
 		}
 		analyzeType();
 		if(auto nr=type.needRetry) { needRetry = nr; return; }

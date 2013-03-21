@@ -64,5 +64,10 @@ void main(){
 	
 }
 
+/+
+
+auto tmpl(S...)(S sep) if((S.length==0){ } // TODO: better diagnostic
+
++/
 
 // +/

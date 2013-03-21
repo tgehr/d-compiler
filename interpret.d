@@ -1640,7 +1640,7 @@ Ltailcall:
 	ulong[5] tmp;
 	auto tmpstack = Stack(tmp[]);
 	import std.stdio;
-	scope(exit) if(_displayByteCodeIntp) writeln("stack: ",stack);
+	scope(success) if(_displayByteCodeIntp) writeln("stack: ",stack);
 	for(;;){
 		if(_displayByteCodeIntp){
 			writeln("stack: ",stack);
@@ -1721,13 +1721,13 @@ Ltailcall:
 				if(def.sstate != SemState.completed)
 					def.resetByteCode;
 
-				if(newstack.stack.ptr!=stack.stack.ptr+stack.stp){
+				if(newstack.stack.ptr!=stack.stack.ptr+stack.stp+1){
 					stack.stack = stack.stack[0..stack.stp+1];
 					void[] va = stack.stack;
 					va.assumeSafeAppend();
 					va~=newstack.stack;
 					stack.stack = cast(typeof(stack.stack))va;
-				}
+				}else stack.stack=stack.stack.ptr[0..stack.stp+1+newstack.stack.length];
 				stack.stp+=newstack.stp+1;
 				break;
 			case I.ret:
@@ -2265,7 +2265,6 @@ Ltailcall:
 			case I.makearray:
 				auto els = cast(size_t)byteCode[ip++];
 				auto len = cast(size_t)stack.pop();
-				assert(els<=32); // todo; fix
 				auto siz=((els+ulong.sizeof-1)/ulong.sizeof);
 				auto stlen = len*siz;
 				assert(nargs+stlen<=stack.stp+1);
@@ -2772,11 +2771,21 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		alias Instruction I;
 
+		auto siz = getCTSizeof(type);
+		if(e.type.getHeadUnqual().isArrayTy()){ // static arrays
+			// TODO: this is a little hacky
+			auto lv=e.byteCompileLV(bld);
+			lv.emitPointer(bld);
+			bld.emitUnsafe(I.ptrtoa, this);
+			if(!a.length) return;
+			a[0].byteCompile(bld);
+			goto Lload;
+		}
+
 		e.byteCompile(bld);
-		if(!a.length) return; // TODO: static arrays
+		if(!a.length) return;
 
 		assert(a.length == 1);
-		auto siz = getCTSizeof(type);
 		mixin(byteCompileDollar);
 
 		a[0].byteCompile(bld);
@@ -2795,6 +2804,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			bld.emit(I.push);
 			bld.emitConstant(0);
 		}
+	Lload:
 		if(type.getHeadUnqual().isDynArrTy()){
 			bld.emitUnsafe(I.loadaa, this);
 			return;
@@ -2805,11 +2815,18 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		alias Instruction I;
-		e.byteCompile(bld);
-		// TODO: static arrays
 		// TODO: slice assign
 		assert(a.length == 1);
 		auto siz = getCTSizeof(type);
+		if(e.type.getHeadUnqual().isArrayTy()){ // static arrays
+			// TODO: this is a little hacky
+			auto lv=e.byteCompileLV(bld);
+			lv.emitPointer(bld);
+			bld.emitUnsafe(I.ptrtoa, this);
+			a[0].byteCompile(bld);
+			return LVstorea(type, this);
+		}
+		e.byteCompile(bld);
 		mixin(byteCompileDollar);
 
 		a[0].byteCompile(bld);
@@ -3446,7 +3463,21 @@ void emitMakeArray(ref ByteCodeBuilder bld, Type ty, ulong elems)in{
 mixin template CTFEInterpret(T) if(is(T==ArrayLiteralExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		foreach(x; lit) x.byteCompile(bld);
-		emitMakeArray(bld, type, cast(ulong)lit.length);
+		emitMakeArray(bld, type, lit.length);
+		if(type.isArrayTy()){ // static array literal (TODO: this is a horrible kludge)
+			bld.emit(Instruction.push);
+			bld.emitConstant(0);
+			bld.emitUnsafe(Instruction.loada,this);
+			bld.emitConstant(getCTSizeof(type));
+		}
+	}
+
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert(type.isArrayTy()); // static array literal, also kludgy
+		foreach(x; lit) x.byteCompile(bld);
+		emitMakeArray(bld, type, lit.length);
+		bld.emit(Instruction.ptra);
+		return LVpointer(type, this);
 	}
 }
 
@@ -3621,9 +3652,6 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 				this_.byteCompile(bld);
 				LVfield(off, len, this).emitLoad(bld);
 			}
-			return;
-			// TODO!
-			bld.error("member access not supported during CTFE yet",loc);
 			return;
 		}
 		auto fun = e2.meaning.isFunctionDecl();
@@ -4058,6 +4086,7 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	}
 	if(type.isDynArrTy() || type is Type.get!EmptyArray())
 		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
+	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSiz;
 	ptr: return bcPointerBCSize;
@@ -4072,7 +4101,7 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 			goto ptr;
 		}
 	}
-	return -1;
+	assert(0, "type "~type.toString~" not yet supported in CTFE");
 }
 // get compile time size of a type in bytes
 size_t getCTSizeof(Type type){
@@ -4327,6 +4356,11 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			void perform(UnaryExp!(Tok!"&") self){
 				runAnalysis!MarkHeapContext(self.e);
 			}
+			void perform(IndexExp self){
+				// TODO: remove this, do not require static arrays to reside on the heap!
+				if(self.e.type&&self.e.type.isArrayTy())
+					runAnalysis!MarkHeapContext(self.e);
+			}
 			void perform(Symbol self){
 				if(self.sstate!=SemState.completed) return;
 				if(self.scope_.getFrameNesting()       >
@@ -4499,6 +4533,10 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 					case Tok!(T.stringof): return Variant(stack.pop!T());
 				default: break;
 			}
+		}
+		if(ret.isArrayTy){
+			auto slice = (cast(void*)stack.stack.ptr)[0..getCTSizeof(ret)];
+			return Variant.fromBCSlice(BCSlice(slice,slice),ret);			
 		}
 		if(ret.getElementType()) return Variant.fromBCSlice(stack.pop!BCSlice(),ret);
 		else if(ret is Type.get!(typeof(null))) return Variant(null);

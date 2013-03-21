@@ -1,11 +1,22 @@
 
-/+
+template hasSave(R){
+	enum hasSave=is(typeof({
+		R r;
+		r=r.save;
+	}));
+}
+
+static struct DontKnowIfHasSave{
+	static if(!hasSave!(typeof(this))) @property void save(){ } // error
+}
+
+
 struct TryEscapeInout{
 	void foo()inout{ }
 	auto bar(){ return &foo; }
 }
 static assert(is(typeof(TryEscapeInout.bar)==void delegate()));
-pragma(msg, typeof(TryEscapeInout.bar));+/
+pragma(msg, typeof(TryEscapeInout.bar));
 
 struct DelegateFromMemberFunc {
 	char c[];
@@ -36,7 +47,7 @@ struct DelegateFromMemberFunc {
 		void delegate()const inout dg = &this.goo;
 	}
 }
-/+
+
 struct TestMutDelegateFromConstRcvr{
 	struct S{
 		int delegate() dg;
@@ -75,7 +86,7 @@ void main(){
 auto loc1(){
 	int x = 2;
 	struct Loc1{
-		int getX(){ return x; } // error (TODO: better message?)
+		int getX(){ return x; } // error // TODO: better message?
 	}
 	return Loc1();
 }

@@ -3,17 +3,6 @@ import expression, type, statement;
 
 import util: ID;
 
-/+
-template isASTNode(T,string member){
-	enum isASTNode=x.length &&
-		(!is(T:Symbol)||x!="meaning" && x!="circ")               &&
-		(!is(T==FunctionDef)||x!="ctfeCallWrapper")              &&
-		(!is(T==FunctionLiteralExp)||x!="bdy")                   &&
-		(!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="decl") &&
-		true;
-}
-+/
-
 mixin template Analyze(){
 	alias typeof(this) T;
 	static if(is(T==Node)){

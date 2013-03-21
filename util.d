@@ -6,7 +6,7 @@ void dw(T...)(T args){
 	debug writeln(args);
 	else static assert(0,"debugging output call in release mode");
 }
-int crash(int x=0){
+int crash()(int x=0){
 	debug return 1/x;
 	else static assert(0, "crash instruction in release mode");
 }

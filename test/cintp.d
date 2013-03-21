@@ -160,6 +160,23 @@ int testNew(){
 static assert(testNew()==5);
 pragma(msg, "testNew: ", testNew());
 
+auto transferContext() {
+	int x = 2;
+    struct Foo {
+        size_t data;
+	    this(size_t data){ this.data = data; }
+        @property
+        auto clone() {
+            return Foo(data);
+        }
+	    @property int xx(){ return x; }
+    }
+
+    return Foo(0).clone.clone;
+}
+pragma(msg, "transferContext: ", transferContext().clone.xx);
+static assert(transferContext().clone.xx==2);
+
 int testInvalidContext(){
 	auto s(){ int x=2; struct S{ int foo(){ return x; }} return S(); } // error
 	typeof(s()) ss;
@@ -372,7 +389,7 @@ pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1))
 // Haskell-Like CPS //
 template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
-auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
+auto ret(R=A,A)(A arg){ return (R delegate(A) k)=>k(arg); }
 auto bind(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
 	return (R delegate(B) k)=>me(r=>f(r)(k));
 }
@@ -436,14 +453,13 @@ auto testcallCC2(){
 static assert(testcallCC2()(x=>x)==1338);
 pragma(msg, "testcallCC2: ", testcallCC2()(x=>x));
 
-auto testcps(){
-	return
-		bind(ret!int(1), a =>
-		bind(ret!int(2), b =>
-		bind(ret!int(3), c =>
-		ret!int(a+b+c))))
-		(x=>x);
-}
+auto testcps()
+=>	bind(1.ret, a =>
+	bind(2.ret, b =>
+	bind(3.ret, c =>
+	ret!int(a+b+c))))
+	(x=>x);
+
 
 static assert(testcps()==6);
 pragma(msg, "testcps: ", testcps());
@@ -818,21 +834,21 @@ template binaryFun(alias fun,T){
 auto sort(alias p,T)(T[] arg){
 	alias binaryFun!(p,T) pred;
 	if(arg.length <= 1) return arg;
-	bool low(T x){return !!pred(x,arg[0]);}
-	bool high(T x){return !pred(x,arg[0]);}
+	bool low(T x)=>!!pred(x,arg[0]);
+	bool high(T x)=>!pred(x,arg[0]);
 	return sort!(pred,T)(filter!(low,T)(arg))
 	~ arg[0] ~ sort!(pred,T)(filter!(high,T)(arg[1..arg.length]));
 }
 
 
-auto mod(int x){return (int y)=>y%x;}
+auto mod(int x)=>(int y)=>y%x;
 
 
-auto mod10(int y){return mod(10)(y);}
+auto mod10(int y)=>mod(10)(y);
 
 enum unsorted = [3,28,1,29,33,828,11,282,34,378,122,122];
 
-bool less(int a,int b){return a<b;}
+bool less(int a,int b)=>a<b;
 pragma(msg, "sort1: ", sort!(less,int)(unsorted));
 
 pragma(msg, "sort2: ",sort!less(unsorted));
@@ -840,6 +856,21 @@ pragma(msg, "sort3: ",sort!"a>b"(unsorted));
 
 pragma(msg, "sort4: ",sort!"a<b"(map!mod10(unsorted)));
 //pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
+
+auto testStaticArrayValueType(T)(T[2] x){
+	int[2] y=x;
+	x[0]=2;
+	x[0]++;
+	y[1]++;
+	assert(x[0]==3 && x[1]==2);
+	x=(()=>y)();
+	assert(x[0]==1 && x[1]==3);
+	y[0]++;
+	return y;
+}
+static assert(testStaticArrayValueType([1,2])==[2,3]);
+pragma(msg, "testStaticArrayValueType: ", testStaticArrayValueType([1,2]));
+
 
 auto testarrayptrlength(){
 	int[] x = [1,2,4];

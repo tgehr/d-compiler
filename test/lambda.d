@@ -1,3 +1,4 @@
+
 static assert(is(int delegate()auto==int delegate()));
 
 void delegateArrayInference() {

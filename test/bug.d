@@ -1,3 +1,20 @@
+int testStructMemberAliasParam(){
+	int x;
+	struct S{
+		int y;
+		void bar(int x){ foo!((ref a)=>a=x)(); }
+		void foo(alias a)(){ a(x); }
+		void baz(alias a)(){ a(y); } // TODO!
+	}
+	S s;
+	s.bar(2);
+	s.baz!(function(ref a)=>a=3)();
+	s.baz!((ref a)=>a=3)();
+	return x+s.y;
+}
+static assert(testStructMemberAliasParam()==5);
+pragma(msg, "testStructMemberAliasParam: ", testStructMemberAliasParam());
+
 /+
 
 struct Exp(string code, A...){
