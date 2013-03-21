@@ -1,4 +1,4 @@
-int[""] saa;
+int[""] saa; // error
 
 enum x=(()=>5)();
 int[(()=>5)()] sa;
@@ -23,10 +23,10 @@ pragma(msg, {
 
 immutable int[2] i2 = [1,2];
 immutable int[4] i3 = [1,2,3,43];
-immutable int[5] i5 = i2~i3; // TODO: should be error
+immutable int[5] i5 = i2~i3; // error
 
 pragma(msg, i5);
 
-enum int[$] t = [2,3,4];
+enum int[$] t = [2,3,4]; // error
 
 pragma(msg, t);

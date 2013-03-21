@@ -185,7 +185,7 @@ auto cons(E,R)(E e,R range)if(isInputRange!R && is(typeof(1?e:range.front()))){
 	return cn;
 }
 
-static struct Delay(R){
+struct Delay(R){
 	R delegate() dg;
 	R range;
 	bool init = false;
@@ -230,13 +230,13 @@ template All(alias pred, T...){
 	else enum All = false;
 }
 
-struct Tuple(T...){
+/+struct Tuple(T...){
 	T expand;
 	this(T args){
 		expand = args; // TODO!
 	}
 }
-auto tuple(T...)(T args){ return Tuple!T(args); }
+auto tuple(T...)(T args){ return Tuple!T(args); }+/
 
 /+template ID(alias a){ alias a ID; }
 template naryFun(size_t n, alias a)if(n<=26){
@@ -334,7 +334,6 @@ auto array(R)(R range){
 	return arr;
 }
 
-// TODO: UFCS
 auto wrap(T)(T[] arr){
 	static struct Wrap{
 		T[] arr;

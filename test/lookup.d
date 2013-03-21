@@ -1,4 +1,42 @@
 
+/+
+struct TryEscapeInout{
+	void foo()inout{ }
+	auto bar(){ return &foo; }
+}
+static assert(is(typeof(TryEscapeInout.bar)==void delegate()));
+pragma(msg, typeof(TryEscapeInout.bar));+/
+
+struct DelegateFromMemberFunc {
+	char c[];
+	void foo() { }
+	int delegate() ddd;
+	void bar() const {
+		static assert(!is(typeof(ddd)));
+		foo; // error
+		static assert(!is(typeof(foo)));
+		static assert(is(typeof(&foo)));
+		static assert(is(typeof(&this.foo)));
+		static assert(is(typeof(this)));
+		void delegate() dg = &this.goo;
+		dg=&this.foo; // error
+		dg=&foo; // error
+		dg();
+		pragma(msg, typeof(&goo));
+		static assert(is(typeof(&goo)==void delegate()const));
+		static assert(is(typeof(&this.goo)==void delegate()const));
+	}
+	void goo()inout{
+		pragma(msg, typeof(&goo));
+	}
+	void baz()immutable{
+		//static assert(is(typeof(&goo)))
+		pragma(msg, typeof(&goo));
+		// void delegate()immutable dg = &this.goo; // TODO
+		void delegate()const inout dg = &this.goo;
+	}
+}
+/+
 struct TestMutDelegateFromConstRcvr{
 	struct S{
 		int delegate() dg;
@@ -17,7 +55,7 @@ struct TestMutDelegateFromConstRcvr{
 
 //pragma(msg, is(int delegate()immutable:const(int delegate()immutable)));
 
-const(int delegate()immutable) foo;
+const(int delegate()immutable) foofo;
 //pragma(msg, typeof(cast()foo));
 
 
@@ -286,5 +324,6 @@ struct S{
 	}
 }
 
+// +/
 // +/
 // +/

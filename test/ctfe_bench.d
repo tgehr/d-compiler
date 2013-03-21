@@ -2,8 +2,8 @@
 // TODO list:
 
 - import declarations
-- UFCS
-- Optional parens on function calls
+// - UFCS
+// - Optional parens on function calls
 - Struct literals
 - Static struct data
 - debug declarations
@@ -20,7 +20,7 @@
     The code does typical Unicode character sets manipulations.
 */
 
-import std.algorithm, std.range, std.typetuple, std.format;
+/+import std.algorithm, std.range, std.typetuple, std.format;
 import core.bitop;
 
 enum Iterations = 1;
@@ -1930,4 +1930,4 @@ immutable(CodepointSet) unicodePc = CodepointSet([
     0x0fe4d, 0x0fe50,
     0x0ff3f, 0x0ff40,
 ]);
-	
+	+/

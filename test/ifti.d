@@ -11,7 +11,7 @@ pragma(msg, foo(1, x=>2.0*x, x=>toString(cast(int)x)));
 auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
 static assert(testTupleExpandIFTI(1,2,3,4)==4);
 
-// TODO: match template instantiations
+/+ TODO: match template instantiations +/
 struct A(T, int N){ }
 
 struct B(T, int N, int M){ alias B!(T, N, 1) C; }
@@ -30,9 +30,9 @@ void matchTemplateInstantiation(){
 struct DefaultParamsNo{
 	auto exec(T)(T arg){
 		pragma(msg, T);
-		return arg();
+		return arg(); // TODO: strip default params
 	}
-	pragma(msg, exec((int x=2)=>x));// TODO: strip default params
+	pragma(msg, exec((int x=2)=>x));
 	pragma(msg, exec((int x=3)=>x));
 }
 
@@ -54,10 +54,16 @@ pragma(msg, "queueDG: ", queueDG(2, a=>b=>b&&a==2,true));+/
 
 template FooDg(Z,A,B...) { alias Delegate!(Z,A) delegate(B) FooDg; }
 
-bool instFooDg(S,T,R=T)(S x, FooDg!(T,T,S) dg, T y){ // TODO: why does FooDg!(R,T,S) not work?
+bool instFooDg(S,T,R=T)(S x, FooDg!(T,T,S) dg, T y){
 	return dg(x)(y);
 }
 pragma(msg, "instFooDg: ", instFooDg(2, a=>b=>b&&a==2,true));
+
+bool instFooDgTODO(S,T,R=T)(S x, FooDg!(R,T,S) dg, T y){
+	return dg(x)(y);
+}
+pragma(msg, "instFooDgTODO: ", instFooDgTODO(2, a=>b=>b&&a==2,true)); // TODO!
+
 
 
 template ElementType(T){ alias typeof({T t; return t[0];}()) ElementType; } // display e
@@ -105,7 +111,7 @@ template tmpl(T){
 pragma(msg, "tmpl!int: ",tmpl!int(2),"\ntmpl!float: ",tmpl!float(2),"\ntmpl!double",tmpl!double(2),"\ntmpl!real: ",tmpl!real(22));
 
 auto potentiallyambiguous3(R,A...)(R delegate(A) a, R delegate(A) b){}
-pragma(msg, potentiallyambiguous3!()(y=>2.0*y, (long z)=>z/2)); // error (TODO: should it work?)
+pragma(msg, potentiallyambiguous3!()(y=>2.0*y, (long z)=>z/2)); // error // TODO: should it work?
 
 auto potentiallyambiguous2(R)(R delegate(int) a, R b){
 	pragma(msg,"notambiguous21R: ", R);
@@ -236,8 +242,8 @@ int test2(alias a)(){ return test(&a); }
 
 pragma(msg, test2!(x=>x)());+/
 
-//T idint(T: int)(T arg){ return arg;}
-//pragma(msg, idint!()(1.0); // error
+T idint(T: int)(T arg){ return arg;}
+pragma(msg, "idint: ",idint!()(1.0)); // TODO: error
 //T idfloat(T : float)(T arg){ return arg;}
 //pragma(msg, idfloat!()(1.0));
 

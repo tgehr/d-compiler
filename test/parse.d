@@ -12,9 +12,9 @@ void main(){
 
 
 //alias void foo(){};
-bool match(int matches[]); // TODO
+bool match(int matches[]);
 
-pragma(msg, typeof(match));
+pragma(msg, typeof(&match));
 
 void main(){
 	auto d = new A().B(); // error

@@ -6,7 +6,7 @@ void goooo(int){}
 alias goooo foooo; // TODO: fix
 //alias double foooo;
 
-pragma(msg, foooo);
+pragma(msg, foooo); // error
 
 
 
@@ -25,16 +25,16 @@ static assert(!is(typeof({
 
 pragma(msg, typeof(cast(immutable)true~a));
 
-immutable typeof(*{z v;return v;}()) a = [1,2,3];
+immutable typeof(*{z v;return v;}()) a = [1,2,3]; // error
 pragma(msg, a);
 
 void main(){
 	z x;
-	const typeof(*{typeof(x) v;return v;}()) a = [2,3,4];
+	const typeof(*{typeof(x) v;return v;}()) a = [2,3,4]; // error
 	pragma(msg, a);
 }
 
-alias aa bb;
+alias aa bb; // error
 alias bb cc;
 alias cc aa;
 

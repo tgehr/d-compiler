@@ -23,7 +23,7 @@ class B{
 }
 class C{
 	void d(C args){
-		d(C);
+		d(C); // error
 	}
 }
 

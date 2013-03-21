@@ -34,7 +34,8 @@ int testmultirefret(){
 pragma(msg, "testmultirefret: ", testmultirefret());
 
 T seq(T...)(T args){ return args; }
-pragma(msg, (()=>[seq(1,2,3,4)])()); // TODO: make work without lambda
+pragma(msg, (()=>[seq(1,2,3,4)])());
+pragma(msg, [seq(1,2,3,4)]); // TODO
 
 /+
 

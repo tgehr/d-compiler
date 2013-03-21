@@ -1,5 +1,5 @@
 void main(){
-	// TODO: static assertions
+	/+ TODO: static assertions+/
 	pragma(msg, typeof(""));
 	pragma(msg, typeof(""c));
 	pragma(msg, typeof(""w));

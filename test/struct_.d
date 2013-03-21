@@ -36,7 +36,7 @@ class Inaccessible{
 		//int x;
 		auto foo(){
 			pragma(msg, x);
-			return &z;
+			return &z; // error
 		}
 	}
 }
@@ -94,7 +94,7 @@ pragma(msg, "testStrIntp: ",testStrIntp());
 struct Funny2{
 	int x;
 	enum foofo=10;
-	static foo(){Funny2 f; f.x=2; return x;}
+	static foo(){Funny2 f; f.x=2; return x;} // error
 	static if(foo())
 		int y;
 }
@@ -121,7 +121,7 @@ struct S{
 	int x = 2;
 	int y;
 	G f;
-	alias f.g foo;
+	alias f.g foo; // TODO
 	alias x bar;
 }
 
@@ -180,7 +180,7 @@ struct SS{
 
 
 
-mixin("mixin(`dod`);");
+mixin("mixin(`dod`);"); // error
 
 
 void main(){

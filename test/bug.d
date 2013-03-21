@@ -1,6 +1,35 @@
+/+
 
+struct Exp(string code, A...){
+	A a; 
+	auto eval(){ return mixin(code); }
+	auto opBinary(string op,B)(B b){
+		return Exp!("(a[0].eval()"~op~"a[1].eval())",typeof(this),B)(this,b);
+	}
+}
+auto eval(A)(A a){ return a; }
+auto val(A)(A a){ return Exp!("a[0]",A)(a); }
+auto var()(string name){ return Exp!("d[a[0]].eval(d)",string)(name); }
 
+//import std.stdio;
+void main(){
+	//(1.val+2.val*"x".var).eval(["x":22.val]).writeln;
+	//1.val;
+	Exp!("a[0]",int)(1);
+}
++/
 
+/+struct FoFo{
+	struct S2{
+		void x()(int a) { }
+		void y() const {
+			x(42); // error
+			auto u=&x!(); // error
+			pragma(msg, typeof(&x!())); // TODO: ok
+		}
+	}
+}+/
+/+
 /+int dontTouchThis(alias a)(){
 
 	static struct S{
@@ -180,7 +209,7 @@ auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
 static assert(indexOf2("aba",'b')==1); // spurious error message+/
 
 
-// improve error messages!
+/+improve error messages!+/
 
 /+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
@@ -202,9 +231,8 @@ auto testcallCC(){
 	assert(callCC(&f,3)(x=>x)==4);
 	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
 }+/
-
+/+
 // ok now
-
 struct MixinAccessCheck{
 	struct S{
 		immutable int x = 2;
@@ -262,7 +290,6 @@ void testMemberFunctionTemplate(){
 
 enum x = (cast(ulong)0x10009 >> 1) == 0x8004;
 
-
 void testOverrideSkip(){
 	class P{ int foo(){ return 2; }}
 	class C6: P{}
@@ -292,7 +319,6 @@ struct TupleExpand{
 		assert(callCC(1)(x=>x)==1);
 	}
 }
-
 
 
 static assert(!is(typeof({
@@ -330,6 +356,7 @@ struct DynRange(T){
 		auto u = popFrontImpl();
 	}
 }
+
 
 DynRange!int dynRange(){
 	DynRange!int result;
@@ -423,7 +450,7 @@ static assert(balancedIndexOf("(,),",',')==3);
 string nqueens(int n){
 	string r;
 	void write(){}
-	void write(T...)(T args) { r~=args[0]; write(args[1..$]); } // shouldn't show any errors
+	void write(T...)(T args) { r~=args[0]; write(args[1..$]); }
 
 	write("123");
 	return r;

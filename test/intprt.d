@@ -17,16 +17,16 @@ pragma(msg, [1,1337,3][(int delegate() dg){return $-dg()+1;}(()=>cast(int)$)]);
 
 
 immutable int i = 3;
-pragma(msg, [1,2,3][(()=>i)()]);
-pragma(msg, [1,2,3][$]);
+pragma(msg, [1,2,3][(()=>i)()]); // error
+pragma(msg, [1,2,3][$]); // error
 pragma(msg, [1,2,3][$-1]);
 
-pragma(msg, [1,2][0..$+1]);
-pragma(msg, [1,2][$+1..0]);
-pragma(msg, [0,1][1..0]);
+pragma(msg, [1,2][0..$+1]); // error
+pragma(msg, [1,2][$+1..0]); // error
+pragma(msg, [0,1][1..0]);   // error
 
 
-int fail(){int x; return x/x;}
+int fail(){int x; return x/x;} // error
 
 pragma(msg, [fail()][$/($-1)]);
 pragma(msg, [0][fail()]);
@@ -62,7 +62,7 @@ void main(){
 	*cast(int*)&x[0] = 2;
 	immutable int x=a;
 	//pragma(msg, x);
-	enum y = x; // TODO: FIX!
+	enum y = x;
 
 	int[] foo;
 	//foo[1]=2;
@@ -89,7 +89,7 @@ void main(){
 
 	//pragma(msg, fun(10)+10);
 
-	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d";
+	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d"; // TODO!
 	pragma(msg, idc);
 
 	enum cic = cast(dchar[][])["test"];
@@ -100,9 +100,10 @@ void main(){
 	pragma(msg, (cast(dchar[])zz)[2]);
 
 	pragma(msg, [zz,zz2[0]],"\n","hallo",zz2,cast(dchar[][])[q{2}]);
-	pragma(msg, /*cast(int)*/[][y]);
-	pragma(msg, [][y]);
+	pragma(msg, /*cast(int)*/[][y]); // error
+	pragma(msg, [][y]); // error
 }
-mixin("pragma(msg)");
+mixin("pragma(msg) //error
+");
 
 // +/

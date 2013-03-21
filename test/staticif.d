@@ -31,7 +31,7 @@ static assert(is(typeof(c)));
 //	enum theOther = 1;
 //}
 static if(!is(typeof(theOther))){
-	enum theOne = 1;
+	enum theOne = 1337;
 	pragma(msg, "theOne");
 	static if(!is(typeof(asdf))) enum theOther=2;
 }
@@ -53,8 +53,10 @@ pragma(msg, "b ",is(typeof(b)));
 pragma(msg, "c ",is(typeof(c)));
 
 //pragma(msg, 2 !is 1);
-auto test(){return theOne;} // TODO: this should be OK
-static if(test()){pragma(msg, "!!!");} 
+auto test(){return theOne;}
+static if(test()){pragma(msg, test(), "!!!");} 
+
+static assert(test()==1337);
 
 //static if(!is(typeof(asdf)))
 void main(){

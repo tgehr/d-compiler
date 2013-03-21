@@ -1,14 +1,54 @@
 
+struct MatchLevels{
+	enum foos=[
+		q{static int fooN(int x)(int y){ return M; }},
+		q{static int fooN(int x)(const int y){ return M; }},
+		q{static int fooN(int x)(float y){ return M; }},
+		q{static int fooN(const int x)(int y){ return M; }},
+		q{static int fooN(const int x)(const int y){ return M; }},
+		q{static int fooN(const int x)(const int y){ return M; }},
+		q{static int fooN(float x)(int y){ return M; }},
+		q{static int fooN(float x)(const int y){ return M; }},
+		q{static int fooN(float x)(float y){ return M; }},
+		q{static int fooN()(){ return M; }},
+	];
+	enum assrt=q{static assert(fooN!1(1)==M);};
+	static string replace(string s, string a, string b){
+		string r;
+	Louter:for(ulong i=0;i<=s.length-a.length;){
+			for(ulong j=0;j<0+a.length;j++)
+				if(s[i+j]!=a[j]){r~=s[i],i++;continue Louter;}
+			r~=b;
+			i+=a.length;
+		}
+		return r;
+	}
+	static string replNM(string s,int i, int j){
+		return replace(replace(s,"N",i.toString),"M",(i?i.toString:"")~j.toString);
+	}
+	static string generate(){
+		string r;
+		for(int i=0;i<foos.length-1;i++){
+			for(int j=i;j<foos.length;j++)
+				r~=replNM(foos[j],i,j)~"\n";
+			r~=replNM(assrt,i,i)~'\n';
+		}
+		return r;
+	}
+	mixin(generate()); // TODO!
+}
+
+
 template Ambiguous(int a){ enum Ambiguous = "moo"; }
 template Ambiguous(int a){enum Ambiguous = "foo"; }
 
-pragma(msg, Ambiguous!2);
+pragma(msg, Ambiguous!2); // TODO
 
 
 template T(int a) if(!T!a){  // error
 	enum a = false;
 }
-pragma(msg, T!1);            // TODO: show it here!
+pragma(msg, T!1);            // // TODO: show it here!
 
 template factorial(int n){
 	static if(n<=1) enum factorial = 1.0L;
@@ -60,7 +100,7 @@ auto testtemplatefunclit(fun...)(){
 struct FunContainer{
 	static fun(int x,double y,string z)=>()=>z~"hi1";
 }
-pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
+pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)()); // TODO!
 pragma(msg, "testtemplatefunclit 2: ",testtemplatefunclit!((int x,double y,string z)=>()=>z~"hi2")());
 immutable u = "123";
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~" hi3")());
@@ -75,7 +115,7 @@ pragma(msg, "Deflt: ",Deflt!int);
 
 template CircCirc(a...){
 	template F(A){}
-	alias F!(CircCirc!(1,2,3)) CircCirc;
+	alias F!(CircCirc!(1,2,3)) CircCirc; // error
 }
 pragma(msg, CircCirc!());
 
@@ -137,7 +177,7 @@ template AA(string xx){
 	enum x = mixin(xx);
 	static assert(x>0);
 	template BB(int y) if(x<y){
-		static assert(y<10);
+		static assert(y<10); // error
 		enum BB = "hello world";
 	}
 }
@@ -148,7 +188,7 @@ pragma(msg, AA!"3".BB!13~' '~AA!"3".BB!4);
 
 auto to(T,F)(F arg){
 	static if(is(F==int) && is(T==string)) return toString(arg);
-	else static assert(0, "not implemented!");
+	else static assert(0, "not implemented!"); // error
 }
 
 pragma(msg, [to!(string,int)(1337)]);
@@ -158,7 +198,7 @@ pragma(msg, [to!(string,uint)(1337u)]);
 template Ov(const(int) x){pragma(msg, 1);}
 template Ov(uint x){pragma(msg, 2);}
 
-mixin Ov!2u; 
+mixin Ov!2u; // TODO
 
 template isInputRange(R){
 	enum isInputRange=is(typeof({
@@ -198,7 +238,7 @@ auto array(R)(R arg) if(isInputRange!R) {
 struct PRange(alias a){
 	bool empty(){return false;}
 	void popFront(){}
-	auto front(){return a;}
+	auto front(){return a;}// error
 }
 
 PRange!r pr;
@@ -233,19 +273,19 @@ pragma(msg, "Range*: ",ElementType!(Range*));
 
 
 pragma(msg, ElementType!Range);
-pragma(msg, ElementType!NonRange);
+pragma(msg, ElementType!NonRange); // error
 pragma(msg, isInputRange!Range);
 pragma(msg, isInputRange!NonRange);
 
 
 template TT(int x) if(x>22){ immutable int TT = x; }
 
-pragma(msg, TT!21);
-pragma(msg, TT!23);
+pragma(msg, TT!21); // error
+pragma(msg, TT!23); // ok
 
 bool iloop(){return iloop();}
 template LoL(int x) if(x>22&&iloop()){ immutable int LoL=x; }
-pragma(msg, LoL!21);
+pragma(msg, LoL!21); // error
 
 
 auto foo3(){
@@ -258,7 +298,7 @@ auto foo3(){
 pragma(msg, foo3());
 
 
-version(DigitalMars){}
+version(DigitalMars){} // TODO
 else mixin(q{
 int testaliasparam(){
 	int x;
@@ -273,16 +313,17 @@ pragma(msg, "testaliasparam: ",testaliasparam());
 });
 
 
-class TemplatedLocalVariable{ // TODO: make it illegal
+class TemplatedLocalVariable{
 	int x;
 	template foo(){
-		int z;
+		int z; // TODO: error
 	}
 	static void fooz(){
 		TemplatedLocalVariable s;
-		TemplatedLocalVariable.foo!().z=2;
-		s.foo!(33).z=2;
+		TemplatedLocalVariable.foo!().z=2; // TODO!
+		s.foo!(33).z=2; // error
 		foo!().z=2;
+		s.foo!().z=2;
 	}
 	void bar(){
 		foo!().z=3;
@@ -338,7 +379,7 @@ void foo(){
 class D{
 	int x;
 	static template test(){
-		mixin(q{
+		mixin(q{ // error
 
 	int foo(){
 			return x;
@@ -426,9 +467,9 @@ static assert(!is(typeof(tt2!(1))));
 
 
 
-struct S{
+/+struct S{
 	immutable foo = "222";
-}
+}+/
 
 
 auto test(){
@@ -443,12 +484,12 @@ pragma(msg, test());
 
 auto foo(alias a)(){
 	//pragma(msg, typeof(a));
-	return a();
+	return a(); // error
 }
 T foo123(T)(T arg){
 	return arg>0?arg+foo!T(arg-1):0;
 }
-void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
+void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);} // error
 
 pragma(msg, foo123!double(42.23));
 
@@ -503,11 +544,10 @@ struct S{
 	//pragma(msg, "get: ", get!a());
 	//pragma(msg, "foo: ", foo());
 	static int foo(int){
-		S s; // TODO: fix
-		//return s.TT!().SS!().TT;
-		return 0;
+		S s;
+		return s.TT!().SS!().TT;
 	}
-	pragma(msg, foo(2));
+	pragma(msg, foo(2),"28282");
 }
 
 

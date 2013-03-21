@@ -5,7 +5,7 @@ struct S{
 	struct G{
 		//pragma(msg, typeof(s));
 		void foo(){
-			pragma(msg, S.s!());// = 2;
+			pragma(msg, S.s!());// TODO
 			s!();
 		}
 	}

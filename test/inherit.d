@@ -16,7 +16,7 @@ struct TestVirtualCall{
 	}
 	class D: X!(){
 		int foo(int x){ X!() y=new X!(); return x+y.bar();}
-		override .string foo(){ // TODO: make work without the '.'
+		override .string foo(){ /+ TODO: make work without the '.'+/
 			return "B";
 		}
 	}
@@ -86,7 +86,7 @@ auto testLocalStruct(){
 		enum x = 2;
 	}
 	static int foo(){
-		S s; // error
+		S s; // TODO: error
 		return s.foo();
 	}
 	S s; // ok
@@ -128,7 +128,6 @@ void testOvStatic(){
 	OvStatic.foo(2);
 }
 
-
 class ConstructorP{
 	this(int x){}
 }
@@ -137,7 +136,7 @@ class ConstructorC: ConstructorP{ // error TODO!
 }
 
 void testConsC(){
-	auto c = new ConstructorC(2); // error TODO!
+	auto c = new ConstructorC(2); // error
 	auto x = new int(2);
 	auto y = new int(3.0f); // error
 }
@@ -183,22 +182,22 @@ void testConstructor(){
 	auto s = new Foo.NonStatic.Static(2);
 
 	auto fo1 = new Foo;
-	auto q = fo1.new NonStatic(2);
+	auto q = fo1.new NonStatic(2); // TODO
 
-	/+/// TODO
+	/// // TODO
 	auto fo2 = new immutable(Foo);
 	auto qq = fo2.new NonStatic; // error
-	auto qqq = fo2.new const(NonStatic)(2); // ok
-	auto qq2 = fo2.new immutable(NonStatic)(2); // ok
+	auto qqq = fo2.new const(NonStatic)(2); // TODO: ok
+	auto qq2 = fo2.new immutable(NonStatic)(2); // TODO: ok
 	auto qq3 = fo2.new const(HazConstructor); // error
 	auto qq4 = fo2.new immutable(NonStatic.Static)(2); // error
 	auto qq5 = fo2.new immutable(NonStatic.NStatic)(); // error
-	/// +/
-	new Foo().new NonStatic;
+	///
+	new Foo().new NonStatic; // TODO
 
 	auto a = new int[2];
 	auto b = new int[](2);
-	auto c = new int[](1,2);
+	auto c = new int[](1,2); // error
 	auto d = new int[][](1,2);
 	auto e = new int[][](2);
 	struct S{}
@@ -272,8 +271,10 @@ class Infty{
 		static assert(is(typeof(this.bzz(x))==Infty));
 	}
 	auto bbz(inout(int[])x)immutable{
-		static assert(is(typeof(bzz(x))==const(Infty)));
-		static assert(is(typeof(this.bzz(x))==const(Infty)));
+		static assert(is(typeof(bzz(x))==inout(const(Infty))));
+		static assert(is(typeof(this.bzz(x))==inout(const(Infty))));
+		static assert(is(typeof(bzz(x))==const(inout(Infty))));
+		static assert(is(typeof(this.bzz(x))==const(inout(Infty))));
 	}
 	auto bbz(inout(int[])x)inout{
 		static assert(is(typeof(bzz(x))==inout(Infty)));
@@ -292,7 +293,8 @@ class OVIC{
 }
 class OVIbICSC: OVIC{
 	override int foo()immutable           { return 2; }
-	mixin(q{override int foo()const shared{ return 2; } /* error */});
+	mixin(q{override int foo()const shared{ return 2; } // error
+});
 	override int foo()const               { return 2;}
 	//int foo()inout{ return 2; }
 }
@@ -305,10 +307,14 @@ class OVIbCCS: OVIC{
 int global;
 class Container{
 	int cont;
+	static int cont2;
+	enum cont3=3;
 	class C{
 		void foo()const{
 			static assert(is(typeof(global)==int));
 			static assert(is(typeof(cont)==const(int)));
+			static assert(is(typeof(cont2)==int));
+			static assert(is(typeof(cont3)==int));
 			static assert(is(typeof(d)==const(D)));
 			static assert(is(typeof(d.u)==const(int)));
 			static assert(is(typeof(Container2.y)==int));
@@ -316,9 +322,12 @@ class Container{
 		void foo()const shared{
 			static assert(is(typeof(global)==int));
 			static assert(is(typeof(cont)==const(shared(int))));
+			static assert(is(typeof(cont2)==int));
+			static assert(is(typeof(cont3)==int));
 			static assert(is(typeof(d)==const(shared(D))));
 			static assert(is(typeof(d.u)==shared(const(int))));
 			static assert(is(typeof(Container2.y)==int));
+			pragma(msg, typeof(Container2.y));
 		}
 		static void foo(){
 			static assert(is(typeof(cont)==int));
@@ -353,11 +362,11 @@ class SomeDecl{
 	int foo()immutable{}
 }
 class AmbigOverride: SomeDecl{
-	override int foo()const{ return 2; } // error: TODO: should it guess from the context?
+	override int foo()const{ return 2; } // error: // TODO: should it guess from the context?
 	override int foo()immutable{ return 2; }
 }
 class CertainlyAmbigOverride: SomeDecl{
-	override int foo()const{ return 2; }
+	override int foo()const{ return 2; } // error
 }
 
 class IHazAllFoo{
@@ -469,11 +478,11 @@ class OverridesFoo3: HasFooOverloads{
 }
 class OverridesFoo4: OverridesFoo3{
 	override foo(int x){ return x; } // error (final in base class)
-	override foo(HasFooOverloads x){ return x; } // error (shadows the final method)
+	override foo(HasFooOverloads x){ return x; } // TODO: error (shadows the final method)
 }
 
 class OverridesFoo5: HasFooOverloads{
-	private int foo(int x){ return x; } // ok (TODO: should private even overload against public?, should functions with the same argument types even be allowed to coexist?)
+	private int foo(int x){ return x; } // ok (// TODO: should private even overload against public?, should functions with the same argument types even be allowed to coexist?)
 	override int foo(int x){ return x; } // ok
 	override auto foo(HasFooOverloads x){ return x; } // ok
 }
@@ -513,7 +522,7 @@ class CC : PP,I{
 
 interface HasX{ int x(); }
 
-// (TODO: traits getMember)
+// (// TODO: traits getMember)
 template IfDoesNotHaveMemberX(alias from, alias A){
 	static if(is(typeof(from.x))) alias Seq!() IfDoesNotHaveMemberX;
 	else alias A IfDoesNotHaveMemberX;

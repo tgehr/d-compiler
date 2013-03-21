@@ -1,26 +1,28 @@
+
+
 enum x = "enum xx = q{int y = 0;};";
 
-struct S{
-	mixin(xx);       
-	mixin(x);
+struct SS{
+	mixin(xx);
+	mixin(x); // TODO
 }
-/+
-}struct S{
+
+struct S{
 	enum z = y;
 	enum x = "enum xx = q{immutable y = 123;};";
 	mixin(xx);
 	mixin(x);
 	static assert(z == 123);
-}+/
+}
 
-/+
+
 
 struct MixinEvalOrder{
 	enum x = "string xx = q{int y = 0;};";
 	
 	struct S{
-		mixin(x);
-		mixin(xx); // TODO: we want this to work (?)
+		mixin(x);  // TODO: we want this to work (?)
+		mixin(xx);
 	}
 }
 
@@ -34,11 +36,11 @@ pragma(msg, typeof(fooz));
 
 void foo(){
 	//mixin(x"abcd"); // TODO: fix utf exception
-	mixin("abcd");
+	mixin("abcd"); // error
 	pragma(msg, is(typeof(bar)));
 }
 
-mixin(q{
+mixin(q{ // error
 	void main(){
 		mixin("pragma(msg,mixin(q{`hooray!`}));pragma(msg,mixin(q{moo}));");
 		mixin("2;");
@@ -56,3 +58,5 @@ mixin(q{
 });
 
 // +/
+
+alias immutable(char)[] string;

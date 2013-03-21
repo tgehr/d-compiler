@@ -1,14 +1,13 @@
 struct IndetCircErr{
-	auto match(alias a, alias b,T)(T[] t){
+	static match(alias a, alias b,T)(T[] t){
 		if(t.length==0) return a();
 		return b(t[0],t[1..$]);
 	}
 	
-	int getLen(T)(T[] t){ return match!(()=>0,(x,xs)=>1+getLen(xs))(t); }
+	static getLen(T)(T[] t){ return match!(()=>0,(x,xs)=>1+getLen(xs))(t); }
 	
 	pragma(msg, getLen([1,2,3,4]));
 	static assert(getLen([1,2,3,4])==4);
-	
 	
 	void main(){ }
 }

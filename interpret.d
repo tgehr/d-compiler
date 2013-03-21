@@ -6,11 +6,11 @@ import std.string;
 import std.conv: to;
 
 private template NotYetImplemented(T){
-	static if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryExp!(Tok!".")) || is(T==ABinaryExp) || is(T==AssignExp))
+	static if(is(T _==BinaryExp!S,TokenType S) || is(T==ABinaryExp) || is(T==AssignExp))
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T==FieldExp) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp);
 }
 
 enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
@@ -21,7 +21,7 @@ template IntFCChldNoEplg(string s){
 		foreach(t; ss){
 			r~=mixin(X!q{
 				@(t)._interpretFunctionCalls(sc);
-				mixin(PropRetry!q{@(t)});
+				mixin(PropRetry!q{@(t)}); // TODO: this now resets sstate, implement better solution
 			});
 		}
 		return r~PropErr!s;
@@ -182,7 +182,25 @@ mixin template Interpret(T) if(is(T==Symbol)){
 
 }mixin template Interpret(T) if(is(T==Identifier)||is(T==ModuleIdentifier)){}
 
-
+mixin template Interpret(T) if(is(T==FieldExp)){
+	override bool checkInterpret(Scope sc){
+		// more or less duplicated above
+		if(e2.meaning.sstate == SemState.error) return false;
+		if(e2.isConstant()) return true;
+		auto this_=e1.extractThis();
+		if(this_&&this_.isConstant()){
+			// return true;
+			sc.error("non-constant field access on constant receiver not supported in CTFE yet.",loc); // TODO!
+			return false;
+		}
+		return super.checkInterpret(sc);
+	}
+	
+	override Variant interpretV(){
+		return e2.interpretV();
+	}
+}
+mixin template Interpret(T) if(is(T==BinaryExp!(Tok!"."))){ } // (workaround for DMD bug)
 
 mixin template Interpret(T) if(is(T==LengthExp)){
 	override bool checkInterpret(Scope sc){
@@ -3578,11 +3596,11 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 	// TODO: validate the 'this' pointer!
 	override void byteCompile(ref ByteCodeBuilder bld){
 		assert(e2.meaning);
+		auto this_=e1.extractThis();
 		if(e2.meaning.stc&STCstatic){
-			if(auto this_=e1.extractThis()) ExpressionStm.byteCompileIgnoreResult(bld, this_);
+			if(this_) ExpressionStm.byteCompileIgnoreResult(bld, this_);
 			return e2.byteCompile(bld);
 		}
-		auto this_=e1.extractThis();
 		bool nonvirtual = false;
 		if(!this_){
 			this_ = New!ThisExp(); // TODO: would prefer not having this
@@ -3849,6 +3867,7 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 		auto sym = New!Symbol(decl);
 		sym.scope_ = scope_;
 		sym.accessCheck = AccessCheck.none;
+		sym.willAlias();
 		return sym;
 	}
 	private Symbol[FunctionDecl] dynSymbols;
@@ -4003,7 +4022,8 @@ mixin template CTFEInterpret(T) if(is(T==NewExp)){
 
 mixin template CTFEInterpret(T) if(is(T==CurrentExp)){
 	private void pushContext(ref ByteCodeBuilder bld){
-		auto diff = scope_.getAggregate().scope_.getFrameNesting()+3-scope_.getFrameNesting();
+		auto diff = scope_.getFrameNesting()-
+			(scope_.getAggregate().scope_.getFrameNesting()+1);
 		bld.emitUnsafe(Instruction.pushcontext, this);
 		bld.emitConstant(diff);
 	}
@@ -4012,7 +4032,8 @@ mixin template CTFEInterpret(T) if(is(T==CurrentExp)){
 		if((cast(AggregateTy)cast(void*)type.getHeadUnqual()).decl.isReferenceAggregateDecl()){
 			return pushContext(bld);
 		}
-		auto diff = scope_.getAggregate().scope_.getFrameNesting()+3 - scope_.getFrameNesting();
+		auto diff = scope_.getFrameNesting()-
+			(scope_.getAggregate().scope_.getFrameNesting()+1);
 
 		bld.emit(Instruction.push); bld.emitConstant(0);
 		if(diff){bld.emit(Instruction.push); bld.emitConstant(diff);}
@@ -4534,7 +4555,6 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 		if(fun.type.getFunctionTy().stc&STCref) LVpointer(type, this).emitLoad(bld);
 	}
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
-		// TODO: struct return values!!!
 		if(!(fun.type.getFunctionTy().stc&STCref)) return super.byteCompileLV(bld);
 		emitCall(bld);
 		return LVpointer(type, this);

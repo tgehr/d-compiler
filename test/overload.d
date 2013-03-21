@@ -19,14 +19,14 @@ alias immutable(char)[] string;
 int fun(int delegate(int,int) a){return a(1,2);}
 auto fun(string delegate(int,string) b){return b(1,"2");}
 
-pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return ""; else return 2;})); // ambiguous
+pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return ""; else return 2;})); // error: ambiguous
 
 
 
 int fun(int delegate(int,int) a, string delegate(int,string) b){return a(1,2);}
 int fun(string delegate(int,string) b, int delegate(int,int) a){return a(1,2);}
 
-pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return 1; else return "";}, (a,b)=>b));// no match
+pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return 1; else return "";}, (a,b)=>b));// error: no match
 
 
 
@@ -52,12 +52,12 @@ static assert(!{immutable int x; return testRefOv2(x);}());
 
 
 
-int foo(typeof(foo(2,3)) x){return x;}
+int foo(typeof(foo(2,3)) x){return x;} // TODO
 int foo(int,int){return 2;}
 
 
-bool foo(undef){return 1;}
-bool foo(undef a,undef b){return e;}
+bool foo(undef){return 1;} // error
+bool foo(undef a,undef b){return e;} // error
 pragma(msg, foo("asdf","asdf"));
 
 void foo(int, int){}

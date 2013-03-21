@@ -16,9 +16,9 @@ struct S{
 	S s;
 	auto x = bar();
 	static if({return 1;}()){};
-	static if(foo()) mixin(xxx());
+	static if(foo()) mixin(xxx()); // error
 	static bool foo(){return 1||bar();}
-	static bool bar(){return !!a;} // error, picks up static declaration from mixin
+	static bool bar(){return !!a;} /+ error, picks up static declaration from mixin +/
 }
 
 /+template foo(T){

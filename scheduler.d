@@ -26,7 +26,7 @@ class Scheduler{
 	}
 	
 	struct WorkingSet{
-		private enum useBuiltin = true;
+		private enum useBuiltin = false; // TODO: when set to true, wrong behaviour results (test/tmplanalysis.d). Wrong code bug? AA bug? Something else?
 		static if(useBuiltin) private template Map(K, V){ alias V[K] Map; }
 		else private template Map(K,V){ alias HashMap!(K, V, "a is b","cast(size_t)cast(void*)a/16") Map; }
 
@@ -130,6 +130,7 @@ class Scheduler{
 				writeln("]");
 			}+/
 
+			// TODO: this is unnecessary because tarjan output is ordered
 			bool[] bad = new bool[component];
 			
 			foreach(dependee,_; asleep){
@@ -182,7 +183,8 @@ class Scheduler{
 				for(auto tmpl=sc.maybe!(a=>a.getTemplateInstance());
 				    tmpl&&tmpl.sstate==SemState.begin;
 				    tmpl=tmpl.instantiation.isSymbol()
-						.maybe!(a=>a.scope_.maybe!(a=>a.getTemplateInstance()))
+					    .maybe!(a=>a.scope_.maybe!(a=>a.getTemplateInstance()))
+					    // TODO: there is no clear reason why the maybe's might work!
 				){
 					tmpl.sstate = SemState.started;
 					tmpls~=tmpl;
@@ -190,7 +192,7 @@ class Scheduler{
 				scope(exit) foreach(tmpl;tmpls) tmpl.sstate = SemState.begin;
 				/////////////////////////////////////////////////////////////////////////////////////////
 
-				//dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
+				//dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite, " ",nd.loc,tmpls);
 				//if(sc) dw("inst",sc," ", sc.getTemplateInstance());
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
@@ -202,7 +204,7 @@ class Scheduler{
 				assert(nd.needRetry != 2,text(nd.toString()," ",nd.loc));
 				assert(!Symbol.circ);
 				//assert(nd.sstate != SemState.started, text(nd, " ", nd.loc," ", typeid(nd)));
-				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
+				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite," ",tmpls);
 			}
 			update();
 		}

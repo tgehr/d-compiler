@@ -17,11 +17,11 @@ template Seq(T...){ alias T Seq; }
 
 template MessStuffUp(){
 	static if(is(C!D:D)) alias Seq!() MessStuffUp;
-	else alias D MessStuffUp;
+	else alias D MessStuffUp; // error
 }
 
 
-class C(T): MessStuffUp!(){
+class C(T): MessStuffUp!(){ // error
 	
 }
 

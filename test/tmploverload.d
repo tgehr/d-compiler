@@ -1,11 +1,11 @@
 
 void container(){
 	void proto();
-	void proto(T...)(T args){return proto();}
-	pragma(msg, {proto!()(2);return 1;}()); // error
+	void proto(T...)(T args){return proto();} // error
+	pragma(msg, {proto!()(2);return 1;}());
 }
 
-/+
+
 //auto fun(alias T)(T args){return 1;}
 auto fun(){return "a function";}
 auto fun(T...)(T args){return 1;}
@@ -54,7 +54,7 @@ void nest(){
 
 template SS(x : int){ enum SS = 1; }
 template SS(y : const(int)){ enum SS = 2; }
-static assert(!is(typeof(SS!(const(int))))); // error
+static assert(!is(typeof(SS!(const(int)))));
 
 auto uu(T : int)(const(T) arg){ return 1; }
 auto uu(T : const(int))(T arg){ return 2; }
@@ -64,6 +64,6 @@ static assert(uu(0)==2);
 pragma(msg, "uu: ",uu(0));
 pragma(msg, "uu: ",uu!int(0));
 
-static assert(!is(typeof(uu(cast(const)0)))); // call is ambiguous
+static assert(uu(cast(const)0)==2); // TODO
 
 // +/

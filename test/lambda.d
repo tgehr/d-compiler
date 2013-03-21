@@ -1,3 +1,4 @@
+static assert(is(int delegate()auto==int delegate()));
 
 void delegateArrayInference() {
 	void writeln(string x);
@@ -49,18 +50,18 @@ static assert(testcontextded()==8);
 
 void testinex(){
 	void foo(int delegate(int) dg){}
-	foo(x=>y); // 'y' is undefined
+	foo(x=>y); // error: 'y' is undefined
 }
 
 
-pragma(msg, (int x, int y){}()); // wrong number of parameters
+pragma(msg, (int x, int y){}()); // error: wrong number of parameters
 
 
-auto testdederr()=>(x,y,z,w)=>{return y;}(2,"hello",4,5)(); // deduction failure
-typeof(x=>x) testdederr2; // deduction failure
+auto testdederr()=>(x,y,z,w)=>{return y;}(2,"hello",4,5)(); // error: deduction failure
+typeof(x=>x) testdederr2; // error: deduction failure
 
 auto testdederr3(){
-	auto a=(x=>x(2))(x=>x); // deduction failure (no inference)
+	auto a=(x=>x(2))(x=>x); // error: deduction failure (no inference)
 	auto b=(cast(int function(int function(int)))x=>x(2))(x=>x); // ok
 	static assert(is(typeof(b)==int));
 }
@@ -143,25 +144,24 @@ void validconversions(){
 struct S{
 	int a;
 	int foo(){return 2;}
-	pragma(msg, (()=>foo())()); // 'this' is missing
-	mixin({
+	pragma(msg, (()=>foo())()); // error: 'this' is missing
+	mixin({ // TODO!
 		auto s="enum a0=0;";
 		for(int i=1;i<100;i++)
 			s~="enum int a"~toString(i)~"=a"~toString(i-1)~"+"~toString(i*2-1)~";";
 		return s;
 	}());
-	pragma(msg, "a5: ", a5); // ok
-	static assert(a5==25);
+	pragma(msg, "a5: ", a5); static assert(a5==25); // TODO
 }
 
 void testfunctiondeduction(){
 	immutable int x = 0;
-	static assert(is(typeof((){enum e=x;return e;}):immutable(int)function()));
+	static assert(is(typeof((){enum e=x;return e;}):immutable(int)function())); // TODO
 }
 
 void main(){
 	int sjisjis;
-	static pure void main()@safe nothrow pure{sjisjis=2;} // context not accessible
+	static pure void main()@safe nothrow pure{sjisjis=2;} // error: context not accessible
 	auto x = &main;
 	static assert(is(typeof(&main)==void function()pure nothrow @safe));
 	static assert(!is(typeof(&x): void function()*));

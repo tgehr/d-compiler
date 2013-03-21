@@ -121,7 +121,6 @@ int[] testQualifiedNonVirtual(){
 static assert(testQualifiedNonVirtual()==[1,2,3,5,8]);
 pragma(msg, "testQualifiedNonVirtual: ", testQualifiedNonVirtual());
 
-
 int testVirtual(){
 	class P{ int foo(){ return 2; }}
 	class C1: P{ override int foo(){ return 1; }}
@@ -211,12 +210,12 @@ int testStructMemberAliasParam(){
 		int y;
 		void bar(int x){ foo!((ref a)=>a=x)(); }
 		void foo(alias a)(){ a(x); }
-		void baz(alias a)(){ a(y); }
+		void baz(alias a)(){ a(y); } // TODO!
 	}
 	S s;
 	s.bar(2);
 	s.baz!(function(ref a)=>a=3)();
-	//s.baz!((ref a)=>a=3)(); // TODO!
+	s.baz!((ref a)=>a=3)();
 	return x+s.y;
 }
 static assert(testStructMemberAliasParam()==5);
@@ -324,7 +323,7 @@ template CommonType(T...){
 
 pragma(msg, "CommonType: ",CommonType!()," ",CommonType!(int,double,real));
 
-int[] bigInt(string s){ // TODO: in contracts
+int[] bigInt(string s){ /+ TODO: in contracts +/
 	int[] r;
 	for(size_t i=0;i<s.length;i++) assert('0'<=s[i] && s[i] <='9');
 	for({size_t i=s.length;while(i>1&&s[--i]=='0'){}};){
@@ -549,6 +548,7 @@ static assert(indexOf("abc",'d')==-1LU);
 	}
 	return -1;
 }+/
+
 size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 	size_t bal1 = 0, bal2 = 0, bal3 = 0, bal4 = 0, bal5 = 0;
 	for(size_t i=0;i<c.length;i++){
@@ -676,7 +676,7 @@ pragma(msg, "compr: ", compr!q{ [x|1,y] | x <- [1,2,3], y <- [4,5,6], x==y-4});
 
 pragma(msg, "compr2: ", compr!q{ [x<y,y<x] | x <- [1,2,3], y <- [1,2,3], x!=y });
 
-pragma(msg, "compr3: ", compr!q{ join(map!toString([a,b,c]),"o") | a<-[1,2], b<-[2,3], c<-[3,4] });
+pragma(msg, "compr3: ", compr!q{ [a,b,c].map!toString.join("o") | a<-[1,2], b<-[2,3], c<-[3,4] });
 
 pragma(msg, "compr4: ", compr!q{ [x,y,z] | x <- [1,2,3], x&1, y <- [1,2,3,4], z <-[1,2,3], x+y+z==7 });
 
@@ -795,7 +795,7 @@ auto testlambda(){
 pragma(msg, "testlambda: ",testlambda());
 
 
-pragma(msg, typeof(map!(toString,int)));
+pragma(msg, typeof(&map!(toString,int)));
 
 
 
@@ -809,10 +809,10 @@ bool pred(string s){
 
 template binaryFun(alias fun,T){
 	static if(is(typeof(fun)==string))
-		auto binaryFun(T a, T b){ // TODO
+		auto binaryFun(T a, T b){
 			return mixin(fun);
 		}
-	else alias fun binaryFun; //TODO
+	else alias fun binaryFun;
 }
 
 auto sort(alias p,T)(T[] arg){
@@ -864,7 +864,7 @@ pragma(msg, "retnull: ",retnull());
 static assert(retnull() is null); // TODO!
 
 static assert([] is null); // TODO!
-static assert([] == null); // TODO!
+static assert([] == null);
 
 immutable a = "hallo";
 immutable b = a;
@@ -1153,7 +1153,7 @@ static assert(twiceinterpret()==2);
 
 void invtest(){
 	bool x = false;
-	bool foo(){return true&&x;} // cannot access x
+	bool foo(){return true&&x;} // error: cannot access x
 	bool ttt(){return foo();}
 	static assert(ttt());
 }
@@ -1406,7 +1406,7 @@ int testbrkcnt(){
 			}
 		}
 
-	// TODO: foreach
+	/+ TODO: foreach +/
 	return h+i+j+k+l;
 }
 static assert(testbrkcnt() == 50);
@@ -1422,9 +1422,9 @@ string testimplconv2ptr(){
 static assert(testimplconv2ptr()=="hello world");
 pragma(msg, "testimplconv2ptr: ",testimplconv2ptr());
 
-static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // TODO: should this be invalid?
+static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // TODO error: should this be invalid?
 
-static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO: cast(char[])"123" currently creates an array literal, should probably be invalid during ctfe instead. if directly assigned to an enum, creates an actual reference to read-only memory
+static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO error: cast(char[])"123" currently creates an array literal, should probably be invalid during ctfe instead. if directly assigned to an enum, creates an actual reference to read-only memory
 
 bool strchr(immutable(char)* haystack, immutable(char)* needle){
 	if(haystack is null) return needle is null;
@@ -1565,7 +1565,7 @@ pragma(msg, "ptr: ", ptr([1,2,3,4,5,6,7,8,9,10]));
 
 immutable(char[]) acast(immutable(char)[] a){
 	auto b = cast(char[])a; // error
-	b[0] = 'b'; // TODO: should this be allowed or not?
+	b[0] = 'b'; // TODO: should this be allowed or not? (error)
 	return cast(immutable)b;
 }
 pragma(msg, "acast: ", acast(`string`));
@@ -1755,6 +1755,7 @@ int[] erathos(int x){
 }
 
 pragma(msg, "erathos: ",erathos(40000));
+pragma(msg, "erathos2: ", erathos(100).map!toEngNum);
 
 int[] primes(int x){
 	int[] r;
@@ -1773,7 +1774,8 @@ int[] primes(int x){
 	return r;
 }
 
-pragma(msg, "primes: ",primes(100)); // TODO!: array boundschecks (in interpretV?)
+pragma(msg, "primes: ",primes(100));
+
 /+
 
 //mixin("s");

@@ -151,8 +151,8 @@ class FunctionTy: Type{
 	Type ret;
 	Parameter[] params;
 	VarArgs vararg;
-	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; rret=retn; params=plist; vararg=va;}
-	override string toString(){return (rret&&!ret?rret.toString():ret?ret.toString():"")~pListToString();}
+	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc&~STCauto; rret=retn; params=plist; vararg=va;}
+	override string toString(){return (rret&&!ret?rret.toString():ret?ret.toString():"auto")~pListToString();}
 	string pListToString(){
 		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")")~STCtoString(stc);
 	}

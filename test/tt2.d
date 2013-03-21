@@ -23,7 +23,7 @@ template Moo(){int Moo(int x){return x;}}
 
 //enum int a=b,b=a;
 
-typeof(z) x;
+typeof(z) x; // error
 typeof(x) y;
 typeof(y) z;
 
@@ -53,22 +53,22 @@ void main(){
 	shared(inout(const(int))) u7;
 
 	fuz(&kkk);
-	pragma(msg,mmo(1));
-	foo(&kkk)+1="bar";
+	pragma(msg,mmo(1)); // TODO
+	foo(&kkk)+1="bar"; // error
 	//A!(a=>b);
 	int[] a; immutable int[] b;
 	const int[] c;
 	immutable(int[]) arrr = [1];
 	pragma(msg, typeof(cast(immutable)[[1]]~[1]));
-	auto dg = delegate int(int x){int[]a;return a;};
+	auto dg = delegate int(int x){int[]a;return a;}; // error
 	pragma(msg, typeof(x));
 	//pragma(msg, typeof(z));
-	moo(1,2000000);
+	moo(1,2000000); // error
 	float x;
-	foo(&x);
+	foo(&x); // error
 	// immutable dchar[] aa,bb=x"AA BB CC DD 32";
 	// pragma(msg, typeof(aa~bb)); // TODO: FIX
-	pragma(msg, bb);
+	pragma(msg, bb); // error
 	//int*[] x;
 	//const(int)*[] y = x~x;
 
@@ -101,8 +101,8 @@ void main(){
 	int y=(1);
 	pragma(msg, typeof(y));
 	//auto mooo = x[];
-	immutable(int[]) a;
-	immutable(int[]) b;
+	immutable(int[]) a; // error
+	immutable(int[]) b; // error
 	shared(int) sx;
 	//(*(&++*cast(int*)&a))++;
 	//pragma(msg, typeof(cast(const shared inout)sx));
@@ -137,4 +137,4 @@ void main(){
 		//printf("%d%d",x,x);
 	}+/
 }
-//pragma(msg) // TODO: error message should be at right place!
+//pragma(msg) // TODO: message should be at right place!

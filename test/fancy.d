@@ -7,4 +7,4 @@ struct S{
 	int foo(){ return 2; }
 }
 
-pragma(msg, S.foo());
+pragma(msg, S.foo()); // error

@@ -10,11 +10,11 @@ struct S{
 
 void main(){
 	//int[][] x=[[],[],[]];
-	immutable(char)[] x;
-	//auto x=1+"";// TODO: investigate spurious error message
+	immutable(char)[] xx;
+	auto x=1+"";// error
 	//foreach(double i,dchar j; x){
-	foreach(double i, j; x){
+	/+foreach(double i, j; x){ // TODO
 		//import std.stdio; writeln(j);
 		//pragma(msg, typeof(j[i][0]+i));
-	}
+	}+/
 }

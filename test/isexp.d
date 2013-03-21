@@ -1,7 +1,7 @@
 //int a;
 void main(){
 	int a;
-	static assert(!is(typeof(function{a=1;})));
+	static assert(is(typeof(function{a=1;}))); 
 	static assert(is(typeof(1)==int));
 	static assert(is(typeof(""): const(shared(char)[])));
 	int function(int) fp;
@@ -14,6 +14,6 @@ void main(){
 	static assert(is(typeof(foo)));
 	static assert(!is(typeof(tmp!())));
 }
-int foo(){return 1=2;}
+int foo(){return 1=2;} // error
 
 int tmp()(){return 1=2;}
