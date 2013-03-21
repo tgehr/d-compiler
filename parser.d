@@ -919,6 +919,7 @@ private template GetStringOf(S: QualifiedType!Y,TokenType Y){enum GetStringOf=S.
 
 private template getParseProc(T...){
 	static if(is(T[0]==AssignExp)) enum prc=`parseExpression(rbp!(Tok!","))`, off=2;
+	else static if(is(T[0]==OrOrExp)) enum prc=`parseExpression(rbp!(Tok!"?"))`, off=2;
 	else static if(is(T[0]==ArgumentList)||is(T[0]==AssocArgumentList)||is(T[0]==Tuple)){ // ArgumentList, AssocArgumentList can take optional parameters
 		static if(T[2][0]=='('&&T[2][$-1]==')')
 			enum prc=`parse`~T[0].stringof~`!`~T[3].stringof~T[2], off=3;
@@ -930,11 +931,11 @@ private template getParseProc(T...){
 //dummy structs for some of the parsing procedures:
 private{
 	struct StorageClass{}   struct ArgumentList{}          struct AssocArgumentList{}
-	struct IdentifierList{} struct AssignExp{}             struct Condition{}
+	struct IdentifierList{} struct AssignExp{}             struct OrOrExp{}
 	struct Existing{}       struct DebugCondition{}        struct VersionCondition{}
 	struct CondDeclBody{}   struct OptTemplateConstraint{} struct TemplateParameterList{}
 	struct Tuple{}          struct TypeOrExpression{}      struct Initializer{}
-	struct DeclDef{}
+	struct DeclDef{}        struct Condition{}
 }
 private template TTfromStr(string arg){ // turns "a,b,c,..." into TypeTuple(a,b,c,...)
 	alias TypeTuple!(mixin("TypeTuple!("~arg~")")) TTfromStr;
@@ -1038,21 +1039,19 @@ private struct Parser{
 	int muteerr=0;
 	this(Code code, ErrorHandler handler){
 		this.code = code;
-		_tok=&code.front();
-		ttype=_tok.type;
+		//_tok=&code.front();
+		ttype=tok.type;
 		this.handler = handler;
 	}
-	@property ref const(Token) tok(){return *_tok;};
-	const(Token)* _tok;
+	@property ref const(Token) tok(){return code.buffer[code.n];};
+	@property ref const(Token) ptok(){return code.buffer[code.n-1&code.buffer.length-1];};
 	TokenType ttype;
 	void nextToken(){
 		if(ttype==Tok!"EOF") return;
 		code.popFront();
-		_tok=&code.buffer[code.n];//_tok=&code.front(); // breaking encapsulation for efficiency
-		ttype=_tok.type;
-
+		ttype=tok.type;
 		if(!code.errors.length || muteerr) return;
-		while(code.errors.length&&code.errors[0].loc.rep.ptr<_tok.loc.rep.ptr){
+		while(code.errors.length&&code.errors[0].loc.rep.ptr<tok.loc.rep.ptr){
 			handler.error(code.errors[0].str,code.errors[0].loc);
 			code.errors.popFront();
 		}
@@ -1065,8 +1064,7 @@ private struct Parser{
 	auto saveState(){muteerr++; return code.pushAnchor();} // saves the state and mutes all error messages until the state is restored
 	void restoreState(Anchor state){
 		muteerr--; code.popAnchor(state);
-		_tok=&code.buffer[code.n];//_tok=&code.front(); // breaking encapsulation for efficiency
-		ttype=_tok.type;
+		ttype=tok.type;
 	}
 	Token peek(int x=1){
 		if(x<code.e-code.s) return code.buffer[code.n+x & code.buffer.length-1]; // breaking encapsulation for efficiency
@@ -1174,7 +1172,7 @@ private struct Parser{
 	Expression[] parseArgumentList(string delim, bool nonempty=false, Entry=AssignExp, T...)(T args){
 		auto e=appender!(Expression[])();
 		foreach(x;args) e.put(x); // static foreach
-		static if(args.length) if(ttype==Tok!",") nextToken(); else return e.data;
+		static if(args.length){if(ttype==Tok!",") nextToken(); else return e.data;}
 		static if(!nonempty) if(ttype==Tok!delim) return e.data;
 		do{
 			mixin(doParse!(Entry,"e1")); e.put(e1);
@@ -1308,7 +1306,12 @@ private struct Parser{
 				res.brackets++;
 				return res;
 			case Tok!"__error": mixin(rule!(ErrorExp,"_"));
-			mixin(getTTCases(basicTypes)); {nextToken(); return parseIdentifierList(New!BasicType(ttype));} // int.max etc // TODO: location
+			mixin(getTTCases(basicTypes)); {
+				auto e=New!BasicType(ttype);
+				e.loc=tok.loc;
+				nextToken();
+				return parseIdentifierList(e);
+			} // int.max etc
 			mixin({string r; // immutable(int).max etc
 				foreach(type;typeQualifiers){
 					r~=q{case Tok!}`"`~type~`":`q{
@@ -1352,7 +1355,7 @@ private struct Parser{
 		scope(exit) if(res) res.loc=loc;
 		switch(ttype){
 			//case Tok!"i": return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));// infix
-			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",Expression));
+			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",OrOrExp));
 			case Tok!"[":
 				nextToken();
 				if(ttype==Tok!"]"){loc=loc.to(tok.loc); nextToken(); mixin(rule!(IndexExp,Existing,q{left,cast(Expression[])null}));}
@@ -1481,9 +1484,8 @@ private struct Parser{
 					TokenType tt;
 					Location loc=tok.loc;
 					if(ttype!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
-					loc=loc.to(tok.loc);
 					auto name=parseIdentifier();
-					auto p=New!Parameter(stc,type,name,cast(Expression)null); p.loc=loc;
+					auto p=New!Parameter(stc,type,name,cast(Expression)null); p.loc=loc.to(ptok.loc);
 					vars.put(p);
 					if(ttype==Tok!",") nextToken();
 					else break;
@@ -1564,7 +1566,7 @@ private struct Parser{
 				do{ // TODO: abstract loop away, as soon as compile memory usage is better
 					Location loc=tok.loc;
 					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
-					auto c=New!CatchStm(type,ident,s); loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
+					auto c=New!CatchStm(type,ident,s); loc=loc.to(ptok.loc);
 					catches.put(c);
 					if(!type) break; // this really should work as loop condition!
 				}while(ttype==Tok!"catch");
@@ -1598,8 +1600,7 @@ private struct Parser{
 				Location loc=tok.loc;
 				mixin(doParse!("_","_",AssignExp,"e",")"));
 				if(ttype != Tok!";"){// is a mixin expression, not a mixin statement
-					loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-					auto m=New!MixinExp(e); m.loc=loc;
+					auto m=New!MixinExp(e); m.loc=loc.to(ptok.loc);
 					auto e2=parseExpression2(m);
 					mixin(rule!(ExpressionStm,Existing,"e2",";"));
 				}
@@ -1642,8 +1643,7 @@ private struct Parser{
 					if(isAA){
 						Location loc=tok.loc;
 						mixin(doParse!("_",Type,"e","]"));
-						loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-						tt=New!IndexExp(tt,[e]); tt.loc=loc;
+						tt=New!IndexExp(tt,[e]); tt.loc=loc.to(ptok.loc);
 					}else tt=led(tt); continue; //'Bug': allows int[1,2].
 				case Tok!"function":
 					auto loc=tt.loc;
@@ -1651,8 +1651,7 @@ private struct Parser{
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
 					STC stc=parseSTC!functionSTC();
-					loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-					tt=New!FunctionPtr(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc;
+					tt=New!FunctionPtr(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc.to(ptok.loc);
 					continue;
 				case Tok!"delegate":
 					auto loc=tt.loc;
@@ -1660,8 +1659,7 @@ private struct Parser{
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
 					STC stc=parseSTC!functionSTC();
-					loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-					tt=New!DelegateType(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc;
+					tt=New!DelegateType(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc.to(ptok.loc);
 					continue;
 				default: break;
 			}
@@ -1849,8 +1847,7 @@ private struct Parser{
 			if(ttype!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp;}
 			nextToken();
 			init=parseExpression(rbp!(Tok!","));
-			loc=loc.to(init.loc);
-			auto e=New!ConditionDeclExp(stc,type,name,init); e.loc=loc;
+			auto e=New!ConditionDeclExp(stc,type,name,init); e.loc=loc.to(init.loc);
 			return e;
 		}
 	}
@@ -1870,8 +1867,7 @@ private struct Parser{
 			type=parseType();
 			if(ttype==Tok!"i"){name=New!Identifier(tok.name); name.loc=tok.loc; nextToken();}
 			if(ttype==Tok!"="){nextToken();init=parseExpression(rbp!(Tok!","));}
-			loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-			auto p=New!Parameter(stc,type,name,init); p.loc=loc;
+			auto p=New!Parameter(stc,type,name,init); p.loc=loc.to(ptok.loc);
 			params.put(p);
 			if(ttype==Tok!",") nextToken();
 			else{
@@ -1967,8 +1963,7 @@ private struct Parser{
 			auto name=parseIdentifier();
 			Expression init;
 			if(ttype==Tok!"=") nextToken(), init=parseInitializerExp(false);
-			loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-			auto v=New!VarDecl(stc,type,name,init); v.loc=loc;
+			auto v=New!VarDecl(stc,type,name,init); v.loc=loc.to(ptok.loc);
 			r.put(v);
 			if(ttype==Tok!",") nextToken();else break;
 		}while(ttype != Tok!";" && ttype != Tok!"EOF");
@@ -2050,8 +2045,7 @@ private struct Parser{
 				if(ttype==Tok!"=") {parseinit: nextToken(); init=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
 				else if(ttype==Tok!"*=" && spec){spec = New!Pointer(spec); goto parseinit;} // EXTENSION
 			}
-			loc=loc.to(code.buffer[code.n-1&code.buffer.length-1].loc); // TODO: make nicer
-			auto p=New!TemplateParameter(isAlias,isTuple,type,name,spec,init); p.loc=loc;
+			auto p=New!TemplateParameter(isAlias,isTuple,type,name,spec,init); p.loc=loc.to(ptok.loc);
 			r.put(p);
 			if(ttype==Tok!",") nextToken();
 			else break;

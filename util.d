@@ -86,6 +86,26 @@ auto mallocAppender(T)(size_t initial=1){
 	return MallocAppender!T.create(initial);
 }
 
+struct NoOpAppender(T:T[]){
+	static NoOpAppender create(size_t initial=16){
+		NoOpAppender app;
+		return app;
+	}
+	void put(const(Unqual!T) x){
+	}
+	static if(is(Unqual!T==char)){
+		void put(const(dchar) x){
+		}
+	}
+	void put(const(Unqual!T)[] x){
+	}
+	@property T[] data(){return null;}
+}
+
+auto noOpAppender(T)(size_t initial=1){
+	return NoOpAppender!T.create(initial);
+}
+
 struct GCAlloc{
 	static:
 	auto New(T,A...)(A args){return new T(args);}

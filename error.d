@@ -36,14 +36,15 @@ abstract class ErrorHandler{
 }
 class SimpleErrorHandler: ErrorHandler{
 	this(string source,string code){super(source,code);}
-	void error(string err, Location loc){
+	override void error(string err, Location loc){
 		stderr.writeln(source,'(',loc.line,"): error: ",err);
 	}
 }
 
 class VerboseErrorHandler: ErrorHandler{
 	this(string source, string code){super(source,code);}
-	void error(string err, Location loc){
+	override void error(string err, Location loc){
+		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
 		stderr.writeln(source,':',loc.line,":",column,": ","error: ",err);
 		if(loc.rep[0]){
@@ -60,8 +61,9 @@ class VerboseErrorHandler: ErrorHandler{
 import terminal;
 class FormattingErrorHandler: VerboseErrorHandler{
 	this(string source,string code){super(source,code);}
-	void error(string err, Location loc){
+	override void error(string err, Location loc){
 		if(isATTy(stderr)){
+			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);
 			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",RED,"error:",RESET,BOLD," ",err,RESET);
 			if(loc.rep[0]){

@@ -114,6 +114,10 @@ string[] keywords = ["abstract", "alias", "align", "asm", "assert", "auto", "bod
 // TODO: Minimize (does not work if enum is left away, or keywordTokens is not a template)
 enum string[2][] tokens = specialTokens ~ complexTokens ~ simpleTokens ~ compoundTokens ~ keywordTokens!();
 }
+
+TokenType[string] kwAA; // TODO: make more efficient. this seems to be faster than string switch though!
+static this(){foreach(i,x;keywords) kwAA[x]=cast(TokenType)(Tok!"abstract"+i);}
+
 private{
 template keywordTokens(){
 	enum keywordTokens={
@@ -166,14 +170,7 @@ struct Token{
 	TokenType type;
 	string toString() const{
 		switch(type){
-			case Tok!"``": 
-				return loc.rep[0]~escape(loc.rep[1..$-1])~loc.rep[$-1];
-			case Tok!"``c",Tok!"``w",Tok!"``d":
-				return loc.rep[0]~escape(loc.rep[1..$-2])~loc.rep[$-2..$];
-			case Tok!"''":
-				return loc.rep[0]~escape(loc.rep[1..$-1],1)~loc.rep[$-1];
-			case Tok!"EOF":
-				return TokenTypeToString(type);
+			case Tok!"EOF": return "EOF";
 			default: return loc.rep;
 		}
 	}
@@ -200,7 +197,7 @@ string caseSimpleToken(string prefix="", bool needs = false){
 	string r;
 	int c=0,d=0;
 	foreach(i;simpleTokens){string s=i[0]; if(s.startsWith(prefix)) c++;}
-	if(c==1) r~=`tok.type = Tok!"`~prefix~'"'~";\nbreak;\n";
+	if(c==1) r~=`res[0].type = Tok!"`~prefix~'"'~";\nbreak;\n";
 	else{
 		if(needs) r~="switch(*p){\n";
 		foreach(i;simpleTokens){
@@ -210,20 +207,20 @@ string caseSimpleToken(string prefix="", bool needs = false){
 				r~=caseSimpleToken(s,true);
 			}
 		}
-		if(needs) r~=`default: tok.type = Tok!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
+		if(needs) r~=`default: res[0].type = Tok!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
 	}
 	return r;
 }
 
-struct Anchor{
-	size_t index;
-}
+
 
 auto lex(string code){
 	return Lexer(code);
 }
 
-import std.c.stdlib;
+struct Anchor{
+	size_t index;
+}
 
 struct Lexer{
 	string code; // Manually allocated!
@@ -303,10 +300,10 @@ struct Lexer{
 		n=n+anchor.index-s&buffer.length-1;
 		s=anchor.index;
 	}
-	Token tokError(string s, string rep) {
+	Token tokError(string s, string rep, int l=0) {
 		auto r = token!"Error";
 		r.str = s;
-		r.loc = Location(rep, line);
+		r.loc = Location(rep, l?l:line);
 		GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
 		return r;
 	}
@@ -317,7 +314,7 @@ struct Lexer{
 		
 		auto p=code.ptr;
 		auto s=p;    // used if the input has to be sliced
-		Token tok;   // scratch space for creating new tokens
+		auto sl=line;// ditto
 		char del;    // used if a delimiter of some sort needs to be remembered
 		size_t len;  // used as a temporary that stores the length of the last UTF sequence
 		size_t num=0;// number of tokens lexed, return value
@@ -333,9 +330,10 @@ struct Lexer{
 			switch(*p++){
 				// whitespace
 				case 0, 0x1A:
-					tok.type = Tok!"EOF";
-					tok.loc.rep=p[0..1];
-					res[0]=tok; res=res[1..$];
+					res[0].type = Tok!"EOF";
+					res[0].loc.rep=p[0..1];
+					res[0].loc.line = line;
+					res=res[1..$];
 					num++;
 					break loop;
 				case ' ', '\t', '\v':
@@ -346,12 +344,12 @@ struct Lexer{
 			
 				// simple tokens
 				mixin(caseSimpleToken());
-			
+				
 				// slash is special
 				case '/':
 					switch(*p){
-						case '=': tok.type = Tok!"/="; p++;
-						break;
+						case '=': res[0].type = Tok!"/="; p++;
+							break;
 						case '/': p++;
 							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
 							continue; // ignore comment
@@ -378,40 +376,40 @@ struct Lexer{
 								}
 							}
 							continue; // ignore comment
-						default: tok.type = Tok!"/";
+						default: res[0].type = Tok!"/"; break;
 					}
 					break;
 				// dot is special
 				case '.':
 					if('0' > *p || *p > '9'){
-						if(*p != '.')      tok.type = Tok!".";
-						else if(*++p!='.') tok.type = Tok!"..";
-						else               tok.type = Tok!"...", p++;
+						if(*p != '.')      res[0].type = Tok!".";
+						else if(*++p!='.') res[0].type = Tok!"..";
+						else               res[0].type = Tok!"...", p++;
 						break;
 					}
 					p++; goto case;
 				// numeric literals
 				case '0': .. case '9':
-					tok = lexNumber(--p);
-					if(tok.type == Tok!"Error") errors~=tok, tok=token!"__error";
+					res[0] = lexNumber(--p);
+					if(res[0].type == Tok!"Error") errors~=res[0], res[0].type=Tok!"__error";
 					break;
 				// character literals
 				case '\'':
-					s = p;
-					tok.type = Tok!"''";
+					s = p; sl = line;
+					res[0].type = Tok!"''";
 					if(*p=='\\'){
-						try p++, tok.int64 = cast(ulong)readEscapeSeq(p);
+						try p++, res[0].int64 = cast(ulong)readEscapeSeq(p);
 						catch(EscapeSeqException e) e.msg?errors~=tokError(e.msg,e.loc):invCharSeq();
 					}else{
 						try{
 							len=0;
-							tok.int64 = utf.decode(p[0..4],len);
+							res[0].int64 = utf.decode(p[0..4],len);
 							p+=len;
 						}catch{invCharSeq();}
 					}
 					if(*p!='\''){
 						//while((*p!='\''||(p++,0)) && *p && *p!=0x1A) mixin(skipUnicodeCont);
-						errors~=tokError("unterminated character constant",(s-1)[0..1]);
+						errors~=tokError("unterminated character constant",(s-1)[0..p-s+1],sl);
 					}else p++;
 					break;
 				// string literals
@@ -422,25 +420,25 @@ struct Lexer{
 					goto skipdel;
 				case '`':
 					del = '`'; skipdel:
-					s = p;
+					s = p; sl = line;
 					readwysiwyg: for(;;){
 						if(*p==del){p++; break;} 
 						switch(*p){
 							mixin(caseNl); // handle newlines
 							case 0, 0x1A:
-								errors~=tokError("unterminated string literal", (s-1)[0..1]);
+								errors~=tokError("unterminated string literal", (s-1)[0..1],sl);
 								break readwysiwyg;
 							default: mixin(skipUnicode);
 						}
 					}
-					tok.type = Tok!"``";
-					tok.str = s[0..p-s-1]; // reference to code
+					res[0].type = Tok!"``";
+					res[0].str = s[0..p-s-1]; // reference to code
 					goto lexstringsuffix;
 				// token string
 				case 'q':
 					if(*p=='"') goto delimitedstring;
 					if(*p!='{') goto case 'Q';
-					p++; s = p;
+					p++; s = p; sl = line;
 					del = 0;
 					p++; s = p;
 					readtstring: for(int nest=1;;){ // TODO: implement more efficiently
@@ -450,19 +448,19 @@ struct Lexer{
 						p=code.ptr;
 						switch(tt.type){
 							case Tok!"EOF":
-								errors~=tokError("unterminated string literal", (s-1)[0..1]);
+								errors~=tokError("unterminated token string literal", (s-2)[0..1], sl);
 								break readtstring;
 							case Tok!"{":  nest++; break;
 							case Tok!"}":  nest--; if(!nest) break readtstring; break;
 							default: break;
 						}
 					}
-					tok.type = Tok!"``";
-					tok.str = s[0..p-s-1]; // reference to code
+					res[0].type = Tok!"``";
+					res[0].str = s[0..p-s-1]; // reference to code
 					goto lexstringsuffix;
 					delimitedstring:
-					tok.type = Tok!"``";
-					s=++p;
+					res[0].type = Tok!"``";
+					s=++p; sl=line;
 					switch(*p){
 						case 'a': .. case 'z':
 						case 'A': .. case 'Z':
@@ -516,8 +514,8 @@ struct Lexer{
 								if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
 								else if(*p=='\n'){line++;p++;}
 							}
-							tok.str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
-							if(*p!='"') errors~=tokError("unterminated heredoc string literal",(s-1)[0..1]);
+							res[0].str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
+							if(*p!='"') errors~=tokError("unterminated heredoc string literal",(s-1)[0..1],sl);
 							else p++;
 							break;
 						default:
@@ -539,7 +537,7 @@ struct Lexer{
 										ddel=utf.decode(p[0..4],len);
 										s=p+=len;
 									}catch{invCharSeq();}
-								default: break;
+								default: p++; break;
 							}
 							if(ddel){
 								while((*p!=0) & (*p!=0x1A)){
@@ -549,41 +547,43 @@ struct Lexer{
 									try{
 										auto x=utf.decode(p[0..4],len);
 										if(ddel==x){
-											tok.str = s[0..p-s]; // reference to code
+											res[0].str = s[0..p-s]; // reference to code
 											p+=len; break;
 										}
 										p+=len;
 									}catch{invCharSeq();}								
 								}
 							}else{
-								for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);p++){
+								for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);){
 									if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
 									else if(*p=='\n'){line++;p++;}
-									else if(*p==rdel) nest--;
-									else if(*p==del) nest++;
+									else if(*p==rdel){nest--; p++;}
+									else if(*p==del){nest++; p++;}
 									else if(*p & 0x80){
 										try{
 											utf.decode(p[0..4],len);
-											p+=len-1;
+											p+=len;
 										}catch{invCharSeq();}
-									}
+									}else p++;
 								}
-								tok.str = s[0..p-s-1]; // reference to code
+								res[0].str = s[0..p-s-1]; // reference to code
 							}
-							if(*p!='"') errors~=tokError("expected '\"' to close delimited string literal",p[0..1]);
-							else p++;
+							if(*p!='"'){
+								if(*p) errors~=tokError("expected '\"' to close delimited string literal",p[0..1]);
+								else errors~=tokError("unterminated delimited string literal",(s-2)[0..1],sl);
+							}else p++;
 							break;
 					}
 					goto lexstringsuffix;
 				// Hex string
 				case 'x':
 					if(*p!='"') goto case 'X';
-					auto r=appender!string(); p++; s=p;
+					auto r=appender!string(); p++; s=p; sl=line;
 					readhexstring: for(int c=0,ch,d;;p++,c++){
 						switch(*p){
 							mixin(caseNl); // handle newlines
 							case 0, 0x1A:
-								errors~=tokError("unterminated hex string literal",(s-1)[0..1]);
+								errors~=tokError("unterminated hex string literal",(s-1)[0..1],sl);
 								break readhexstring;
 							case '0': .. case '9': d=*p-'0'; goto handlexchar;
 							case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
@@ -592,7 +592,7 @@ struct Lexer{
 								if(c&1) r.put(cast(char)(ch|d));
 								else ch=d<<4; break;
 							case '"': // TODO: improve error message
-								if(c&1) errors~=tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""),p[0..1]);
+								if(c&1) errors~=tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""),s[0..p-s]);
 								p++; break readhexstring;
 							default:
 								if(*p<128) errors~=tokError(format("found '%s' when expecting hex digit",*p),p[0..1]);
@@ -608,8 +608,8 @@ struct Lexer{
 								break;
 						}
 					}
-					tok.type = Tok!"``";
-					tok.str = r.data;
+					res[0].type = Tok!"``";
+					res[0].str = r.data;
 					goto lexstringsuffix;
 				// DQString
 				case '"':
@@ -631,13 +631,13 @@ struct Lexer{
 						}
 						r.put(s[0..p-s]);
 					}
-					tok.type = Tok!"``";
-					tok.str = r.data;
+					res[0].type = Tok!"``";
+					res[0].str = r.data;
 					goto lexstringsuffix;
 					lexstringsuffix:
-					if(*p=='c')      tok.type = Tok!"``c", p++;
-					else if(*p=='w') tok.type = Tok!"``w", p++;
-					else if(*p=='d') tok.type = Tok!"``d", p++;
+					if(*p=='c')      res[0].type = Tok!"``c", p++;
+					else if(*p=='w') res[0].type = Tok!"``w", p++;
+					else if(*p=='d') res[0].type = Tok!"``d", p++;
 					break;
 				// identifiers and keywords
 				case '_':
@@ -662,13 +662,14 @@ struct Lexer{
 							default: break readident;
 						}
 					}
-					tok.type = Tok!"i";
-					tok.name = s[0..p-s];
-					switch(tok.name){
+					
+					res[0].name = s[0..p-s];
+					res[0].type=kwAA.get(res[0].name, Tok!"i");
+					/*switch(res[0].name){
 						// TODO: If this is removed, dmd builds an executable, else an object file. reduce.
-						mixin({string r; foreach(kw;keywords) r~="case \""~kw~"\": tok.type=Tok!\""~kw~"\"; break;\n";return r;}());
-						default: break;
-					}
+						mixin({string r; foreach(kw;keywords) r~="case \""~kw~"\": res[0].type=Tok!\""~kw~"\"; break;\n";return r;}());
+						default: res[0].type = Tok!"i";
+						}*/
 					break;
 				case 0x80: .. case 0xFF:
 					len=0; p--;
@@ -683,9 +684,9 @@ struct Lexer{
 					invCharSeq();
 					continue;
 			}
-			tok.loc.rep=begin[0..p-begin];
-			tok.loc.line=sline;
-			res[0]=tok; res=res[1..$];
+			res[0].loc.rep=begin[0..p-begin];
+			res[0].loc.line=sline;
+			res=res[1..$];
 			num++;
 		}
 		code=code[p-code.ptr..$];
