@@ -34,7 +34,7 @@ mixin template DeepDup(T) if(is(T: BasicType)){
 
 mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 	@trusted inout(T) ddup()inout{
-		static if(is(T:Type) && !is(T==FunctionTy)){
+		static if(is(T:Type)){
 			if(sstate==SemState.completed) return this;
 			assert(sstate == SemState.begin);
 		}
@@ -85,7 +85,7 @@ mixin template DeepDup(T: Symbol) {
 		import std.c.string;
 		memcpy(data.ptr, cast(void*)this, siz);
 		auto res = cast(T)data.ptr;
-		if(isStrong) res.meaning = res.meaning.ddup;
+		if(isFunctionLiteral) res.meaning = res.meaning.ddup;
 		return cast(inout)res;
 	}
 }

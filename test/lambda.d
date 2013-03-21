@@ -1,11 +1,42 @@
 
+shared(typeof(delegate()const{})) x;
+pragma(msg,shared(typeof(cast()x)));
+
+//const(const(int)*****) y;
+//pragma(msg, typeof(y));
+
+
+
+
+struct AccessibleImmutable{
+	immutable int xx=2;
+	void foo(){
+		static assert(is(typeof(()=>xx):immutable(int) delegate()));
+	}
+}
+
+auto testdeduction(){
+	auto x=(x=>x)(2);
+	int function(int) foo0=x=>x;
+	auto foo1 = cast(int delegate(int))x=>x;
+	int delegate(int) foo2 = cast(int delegate(int))(int x)=>x;
+	
+	float higho(double delegate(int, double, float) dg){
+		return dg(1,2,3);
+	}
+
+	return foo0(1)+foo1(2)+foo2(3)+x+higho((x,y,z)=>(x+y+z)/3);
+}
+
+static assert(testdeduction()==10.0f);
+pragma(msg, "testdeduction: ",testdeduction());
+
+
 void validconversions(){
 	void delegate()const[] x;
 	const(void delegate())[] y = x;
 }
 
-
-/+
 
 struct S{
 	int a;
@@ -20,7 +51,7 @@ struct S{
 	pragma(msg, a5);
 }
 
-void testdeduction(){
+void testfunctiondeduction(){
 	immutable int x = 0;
 	static assert(is(typeof((){enum e=x;return e;}):immutable(int)function()));
 }
@@ -58,4 +89,5 @@ auto toString(int i){
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
 }
-+/
+
+// +/

@@ -170,7 +170,7 @@ class FunctionTy: Type{
 
 class DelegateTy: Type{
 	FunctionTy ft;
-	this(FunctionTy ft)in{assert(ft !is null&&(ft.ret !is null||ft.rret !is null));}body{this.ft=ft;}
+	this(FunctionTy ft)in{assert(ft !is null);}body{this.ft=ft;}
 	override string toString(){return (ft.rret&&!ft.ret?ft.rret.toString():ft.ret?ft.ret.toString:"auto")~" delegate"~ft.pListToString();}
 
 	mixin DownCastMethod;

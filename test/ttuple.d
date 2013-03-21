@@ -12,10 +12,10 @@ pragma(msg, "$ 1: ", TypeTuple!(1,2,3)[$-1]);
 pragma(msg, "$ 2: ", TypeTuple!(int,double)[$-1]);
 
 pragma(msg, "$ 3: ", TypeTuple!(1,2,3)[1..$]);
-pragma(msg, "$ 3: ", TypeTuple!(int,int,int)[1..$]);
+pragma(msg, "$ 4: ", TypeTuple!(int,int,int)[1..$]);
 
 
-/+
+
 
 template Fst(T...){
 	alias T[0] Fst;

@@ -21,11 +21,18 @@ struct BCSlice{
 		container = cnt;
 		slice = slc;
 	}
+
 	BCPointer getPtr(){
 		return BCPointer(container, slice.ptr);
 	}
 	size_t getLength(){
 		return slice.length;
+	}
+
+	void setLength(size_t len){
+		slice.length = len;
+		if(slice.ptr<container.ptr||slice.ptr>=container.ptr+container.length)
+			container = slice;
 	}
 }
 
@@ -102,6 +109,10 @@ private struct RTTypeID{
 			r.convertTo = function(ref Variant self, Type to){
 				if(to is Type.get!(typeof(null))()) return self;
 				if(to.getElementType()) return Variant(cast(Variant[])null).convertTo(to);
+
+				// TODO: null pointers and delegates
+				// auto tou=to.getHeadUnqual();
+				
 				return cannotConvert(self, to);
 			};
 			r.toString = function(ref Variant self){return "null";};

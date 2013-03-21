@@ -189,7 +189,7 @@ final class TemplateParameter: Node{
 	}
 	override string toString(){
 		bool isAlias = which == WhichTemplateParameter.alias_;
-		bool isTuple = which == WhichTemplateParameter.type;
+		bool isTuple = which == WhichTemplateParameter.tuple;
 		return (isAlias?"alias ":"")~(rtype?rtype.toString()~" ":"")~(name?name.toString():"")~
 			(isTuple?"...":"")~(rspec?":"~rspec.toString():"")~(init?"="~init.toString():"");
 	}
@@ -311,7 +311,7 @@ class VarDecl: Declaration{
 	Expression rtype;
 	Expression init;
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
 
@@ -344,12 +344,25 @@ class Declarators: Declaration{
 
 class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach usage
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
-	override string toString(){return STCtoString(astStc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():"")~
+	override string toString(){return STCtoString(astStc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():type?type.toString()~" ":"")~
 			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
 	override @property string kind(){return "parameter";}
 
 	mixin Visitors;
 }
+
+class CArrayParam: Parameter{
+	Expression postfix; // reverse order until semantic
+	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
+		postfix=pfix; super(stc, rtype, name, initializer);
+	}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"");}
+
+	mixin Visitors;
+}
+
+
+
 class PostblitParameter: Parameter{
 	this(){super(STC.init,null,null,null);}
 	override string toString(){return "this";}

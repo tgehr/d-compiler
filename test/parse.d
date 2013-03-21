@@ -1,5 +1,17 @@
+
+immutable int foo(){}
+
+void main(){
+	auto fun = delegate immutable int delegate()()immutable=>()immutable{return 2;};
+	//pragma(msg, typeof(fun));
+}
+
+
 //alias void foo(){};
-bool match(Group!DataIndex matches[]); // TODO
+bool match(int matches[]); // TODO
+
+pragma(msg, typeof(match));
+
 void main(){
 	//auto x = r"\ ";
 	//import std.stdio;
@@ -7,8 +19,6 @@ void main(){
 	int[]x,y;
 	//1 < 2 < 3;
 	//@@=;
-
-	auto fun = delegate immutable{return 2;};// TODO: ban or make correct
 
 	static assert(!is(typeof({mixin(`auto dg = (int)@ => 2;`);})));
 

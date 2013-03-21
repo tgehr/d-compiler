@@ -1,4 +1,55 @@
 
+/+
+// TODO: do we want deterministic slice aliasing in CTFE?
+auto testsetlengthdet(){
+	auto x = [1,2,3];
+	auto y = x;
+	x.length=4;
+	y=x;
+	x.length=5;
+	y[0]=4;	
+	return x;
+}
+static assert(testsetlengthdet()==[1,2,3,0,0]);
+pragma(msg, "testsetlengthdet: ",testsetlengthdet());
++/
+
+auto testsetlength(){
+	auto x=[1,2,3,4];
+	x.length=3;
+	int[] y;
+	x.length=y.length=4;
+	(x.length+=1)++;
+	assert(x.length==6);
+	x.length=4;
+	assert(x.length==4);
+	return x~y;
+}
+static assert(testsetlength()==[1,2,3,0,0,0,0,0]);
+pragma(msg, "testsetlength: ",testsetlength());
+
+auto testdollarclosure(){
+	int[] x = [1,2,3,4];
+	ulong delegate() dg;
+	x[(dg=()=>$,$-1)]=1; 
+	assert(x[(assert($==4),3)]==1);
+	return dg();
+}
+pragma(msg, "testdollarclosure: ",testdollarclosure());
+
+auto testnulldelegate(){
+	int delegate() dg; // =null; // TODO!
+	return dg();
+}
+
+auto testnullfunpointer(){
+	int function() fp=null;
+	return fp();
+}
+pragma(msg, testnulldelegate());
+pragma(msg, testnullfunpointer());
+
+
 bool bsearch(T)(T[] haystack, T needle){
 	if(haystack.length<=1) return (haystack~(needle+1))[0]==needle;
 	bool b = haystack[$/2]>needle;

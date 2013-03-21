@@ -40,6 +40,7 @@ abstract class Expression: Node{
 		FieldExp,
 		LiteralExp,
 		ArrayLiteralExp,
+		FunctionLiteralExp,
 		TernaryExp,
 		Type,
 		Tuple,
@@ -47,8 +48,13 @@ abstract class Expression: Node{
 		TypeTuple,
 	);
 
+	// UnaryExp!(Tok!"&") isAddressExp(){ return null; } // TODO: reduce bug
+	
 	mixin Visitors;
 }
+
+// workaround for the bug:
+UnaryExp!(Tok!"&") isAddressExp(Expression self){return cast(UnaryExp!(Tok!"&"))self;}
 
 class ErrorExp: Expression{
 	this(){sstate = SemState.error;}
@@ -112,6 +118,7 @@ class FunctionLiteralExp: Expression{
 	this(FunctionTy ft, BlockStm b, Kind w=Kind.none){ fty=ft; bdy=b; which=w;}
 	override string toString(){return _brk((which==Kind.function_?"function"~(fty&&fty.rret?" ":""):which==Kind.delegate_?fty&&fty.rret?"delegate ":"":"")~(fty?fty.toString():"")~bdy.toString());}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -146,10 +153,8 @@ class TildeThisExp: Identifier{
 class InvariantExp: Identifier{
 	this(){ super(q{invariant}); }
 }
-class DollarExp: Expression{
-	this(){ }
-
-	override string toString(){return "$";}
+class DollarExp: Identifier{
+	this(){ super(q{$}); }
 
 	mixin Visitors;
 }
@@ -212,8 +217,10 @@ class UnaryExp(TokenType op): Expression{
 	Expression e;
 	this(Expression next){e = next;}
 	override string toString(){return _brk(TokChars!op~e.toString());}
-	static if(op==Tok!"&") override @property string kind(){return "address";}
-	
+	static if(op==Tok!"&"){
+		override @property string kind(){return "address";}
+		//override UnaryExp!(Tok!"&") isAddressExp(){return this;}
+	}
 	mixin Visitors;
 }
 class PostfixExp(TokenType op): Expression{
@@ -223,7 +230,7 @@ class PostfixExp(TokenType op): Expression{
 
 	mixin Visitors;
 }
-class IndexExp: Expression{ //e[a...]
+class IndexExp: Expression, DollarProvider{ //e[a...]
 	Expression e;
 	Expression[] a;
 	this(Expression exp, Expression[] args){e=exp; a=args;}
@@ -233,7 +240,7 @@ class IndexExp: Expression{ //e[a...]
 	// workaround for DMD bug
 	mixin CTFEInterpretIE!IndexExp;
 }
-class SliceExp: Expression{//e[l..r]
+class SliceExp: Expression, DollarProvider{//e[l..r]
 	Expression e;
 	Expression l,r;
 	this(Expression exp, Expression left, Expression right){e=exp; l=left; r=right;}

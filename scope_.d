@@ -106,7 +106,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return symtab.get(ident.ptr, alt);
 	}
 
-	Expression getArrayExp(){return null;}
+	VarDecl getDollar(){return null;}
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
 	Declaration getDeclaration(){return null;}
@@ -134,8 +134,8 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 	string toString(){return to!string(typeid(this))~"{"~join(map!(to!string)(symtab.values),",")~"}";}
 
-	final Scope clone(){
-		auto r = New!Scope(handler);
+	final Scope cloneNested(Scope parent){
+		auto r = New!NestedScope(parent);
 		r.symtab=symtab.dup;
 		return r;
 	}
@@ -194,23 +194,30 @@ class NestedScope: Scope{
 	override size_t getFunctionNesting(){ return parent.getFunctionNesting(); }
 	override size_t getNesting(){ return parent.getNesting()+1; }
 
+	override VarDecl getDollar(){return parent.getDollar();}
 	override FunctionDef getFunction(){return parent.getFunction();}
 	override AggregateDecl getAggregate(){return parent.getAggregate();}
 	override Declaration getDeclaration(){return parent.getDeclaration();}
 	override Module getModule(){return parent.getModule();}
 }
 
-class ArrayScope: NestedScope{
-	Expression e;
-	bool hasDollarExp;
-	this(Scope parent, Expression e){
+interface DollarProvider{ VarDecl getDollar(); }
+
+class DollarScope: NestedScope{
+	VarDecl dollar;
+	DollarProvider provider;
+
+	this(Scope parent, DollarProvider provider){
 		super(parent);
-		this.e = e;
+		this.provider = provider;
 	}
 
-	override Expression getArrayExp(){
-		hasDollarExp = true;
-		return e;
+	override VarDecl getDollar(){
+		if(!dollar && provider){
+			dollar = provider.getDollar();
+			provider = null;
+		}
+		return dollar;
 	}
 }
 

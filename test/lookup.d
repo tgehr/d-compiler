@@ -1,3 +1,15 @@
+/+
+alias typeof((immutable(void[])).length) size_t;
+
+pragma(msg, size_t);
+
+
+void testpuredollar(){
+	int[] x = [1,2,3];
+	x[(()pure=>$,$-1)]=2; // must work
+}
+
+
 
 template Inex(a...){
 	alias Inex!(1,a[0..n]) Inex;

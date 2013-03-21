@@ -1,4 +1,14 @@
 
+pragma(msg, [1,2,3][0..(()=>$)()]);
+pragma(msg, [1,2,3][(()=>$-1)()..$]);
+pragma(msg, [1,2,3][(()=>$-2)()]);
+
+pragma(msg, [1,2,3,4,5,6][0..(){return ()=>$-[3,1][(()=>()=>$-2)()()];}()()]);
+static assert([1,2,3,4,5,6][0..(){return ()=>$-[3,1][(()=>()=>$-2)()()];}()()]==[1,2,3]);
+
+pragma(msg, [1,1337,3][(int delegate() dg){return $-dg()+1;}(()=>cast(int)$)]);
+
+
 immutable int i = 3;
 pragma(msg, [1,2,3][(()=>i)()]);
 pragma(msg, [1,2,3][$]);
@@ -12,7 +22,8 @@ pragma(msg, [0,1][1..0]);
 int fail(){int x; return x/x;}
 
 pragma(msg, [fail()][$/($-1)]);
-/+
+pragma(msg, [0][fail()]);
+
 pragma(msg, 2/3);
 
 

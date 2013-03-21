@@ -1,3 +1,25 @@
+alias immutable(char)[] string;
+
+auto testtemplatefunclit(fun...)(){
+	static if(!fun.length) return "";
+	else{
+		alias fun[0] tmpl;
+		static if(is(typeof(tmpl!(double,string)))) alias tmpl!(double,string) ff;
+		else alias tmpl ff;
+		pragma(msg, typeof(ff));
+		return ff(0,4.5,"fun ")()~testtemplatefunclit!(fun[1..$])();
+	}
+}
+struct FunContainer{
+	static fun(int x,double y,string z)=>()=>z~"hi1";
+}
+pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
+pragma(msg, "testtemplatefunclit 2: ",testtemplatefunclit!((int x,double y,string z)=>()=>z~"hi2")());
+immutable u = "123";
+pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~" hi3")());
+pragma(msg, "testtemplatefunclit 4: ",testtemplatefunclit!((int x,y,z)=>()=>toString(cast(int)y)~z~" hi4")());
+
+
 
 template CircCirc(a...){
 	template F(A){}
@@ -5,8 +27,6 @@ template CircCirc(a...){
 }
 pragma(msg, CircCirc!());
 
-
-alias immutable(char)[] string;
 
 template Test(alias a){
 	enum Test = a;
@@ -66,7 +86,7 @@ template ttt(int x){
 	pragma(msg, typeof(ttt));
 }
 mixin ttt!2;
-
++/
 
 template AA(string xx){
 	enum x = mixin(xx);
@@ -76,10 +96,9 @@ template AA(string xx){
 		enum BB = "hello world";
 	}
 }
-pragma(msg, AA!"0".BB!1);
-pragma(msg, AA!"0".BB!0);
+//pragma(msg, AA!"0".BB!1);
+//pragma(msg, AA!"0".BB!0);
 pragma(msg, AA!"3".BB!13~' '~AA!"3".BB!4);
-
 
 
 auto to(T,F)(F arg){
@@ -95,10 +114,9 @@ template Ov(const(int) x){pragma(msg, 1);}
 template Ov(uint x){pragma(msg, 2);}
 
 mixin Ov!2u; 
-+/
-/+
+
 template isInputRange(R){
-	enum isInputRange=is(typeof(delegate void(){
+	enum isInputRange=is(typeof({
 		R r;
 		if(!r.empty()) r.popFront();
 		auto f = r.front();
@@ -168,7 +186,13 @@ pragma(msg, "L!L!L!...: ", L!(L!(L!(L!(L!(L!(L!(L!int))))))).t);
 
 pragma(msg, "Range*: ",ElementType!(Range*));
 
-
+static assert({
+		alias Range* R;
+		R r;
+		if(!r.empty()) r.popFront();
+		auto f = r.front();
+		return true;
+	}());
 
 
 
@@ -193,7 +217,7 @@ auto foo3(){
 	auto fooz()(){return y+2;}
 	auto x = (){enum a = fooz!()(); return a;};
 	pragma(msg, typeof(x));
-	return x;
+	return x();
 }
 pragma(msg, foo3());
 
@@ -210,10 +234,10 @@ int testaliasparam(){
 }
 static assert(testaliasparam()==3);
 pragma(msg, "testaliasparam: ",testaliasparam());
- });
+});
 
 
-class S{
+class TemplatedLocalVariable{ // TODO: make it illegal
 	int x;
 	template foo(){
 		int z;
@@ -246,11 +270,8 @@ template test(){
 		test!();
 	}
 }
+void instantiatetest(){test!();}
 
-void main(){
-	test!();
-}
-+/
 
 // TODO: currently, recursive templates have high algorithmic complexity
 // TODO: FIX!
@@ -363,22 +384,23 @@ pragma(msg, Foo!"enum Foo = \"Foo\";");
 
 
 template A(){
-	static if(!is(typeof(B!())==int)) enum A2 = 2;
+	static if(!is(typeof(B!())==int)) enum A = 2; // TODO: should be ok.
 	//enum A = 2;
-	enum A2 = B!().B2;
+	enum A = B!();
 }
 
 
 template B(){
-	static if(!is(typeof(A!().A2)==int)) enum B2 = 2;
-	enum B2 = 2;
+	static if(!is(typeof(A!())==int)) enum B = 2;
+	enum B = 2;
 }
 //alias B!() b;
+
 
 //pragma(msg, b);
 pragma(msg, A!());
 pragma(msg, B!());
-
+/+
 //alias int T;
 
 pragma(msg, mixin({return ['1'];}()));
@@ -428,7 +450,7 @@ auto test(){
 }
 pragma(msg, test());+/
 
-/+
+
 auto foo(alias a)(){
 	//pragma(msg, typeof(a));
 	return a();
