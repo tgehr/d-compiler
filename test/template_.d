@@ -20,7 +20,6 @@ pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~
 pragma(msg, "testtemplatefunclit 4: ",testtemplatefunclit!((int x,y,z)=>()=>toString(cast(int)y)~z~" hi4")());
 
 
-
 template CircCirc(a...){
 	template F(A){}
 	alias F!(CircCirc!(1,2,3)) CircCirc;
@@ -34,7 +33,6 @@ template Test(alias a){
 
 //int delegate() fozo(){return ()=>2;}
 //pragma(msg,Test!(fozo())() // TODO!
-
 
 
 
@@ -65,6 +63,7 @@ template fc(int x){
 	else enum fc = x*fc!(x-1);
 }
 pragma(msg, fc!10);
+
 
 template tmpl(T){
 	static if(is(T==double)){
@@ -103,7 +102,7 @@ pragma(msg, AA!"3".BB!13~' '~AA!"3".BB!4);
 
 auto to(T,F)(F arg){
 	static if(is(F==int) && is(T==string)) return toString(arg);
-	else static assert(0, "not yet implemented!");
+	else static assert(0, "not implemented!");
 }
 
 pragma(msg, [to!(string,int)(1337)]);
@@ -186,15 +185,6 @@ pragma(msg, "L!L!L!...: ", L!(L!(L!(L!(L!(L!(L!(L!int))))))).t);
 
 pragma(msg, "Range*: ",ElementType!(Range*));
 
-static assert({
-		alias Range* R;
-		R r;
-		if(!r.empty()) r.popFront();
-		auto f = r.front();
-		return true;
-	}());
-
-
 
 pragma(msg, ElementType!Range);
 pragma(msg, ElementType!NonRange);
@@ -208,7 +198,7 @@ pragma(msg, TT!21);
 pragma(msg, TT!23);
 
 bool iloop(){return iloop();}
-template LoL(int x) if(x>22 && iloop()){ immutable int LoL=x; }
+template LoL(int x) if(x>22&&iloop()){ immutable int LoL=x; }
 pragma(msg, LoL!21);
 
 
@@ -243,8 +233,8 @@ class TemplatedLocalVariable{ // TODO: make it illegal
 		int z;
 	}
 	static void fooz(){
-		S s;
-		S.foo!().z=2;
+		TemplatedLocalVariable s;
+		TemplatedLocalVariable.foo!().z=2;
 		s.foo!(33).z=2;
 		foo!().z=2;
 	}
@@ -254,12 +244,12 @@ class TemplatedLocalVariable{ // TODO: make it illegal
 }
 
 
-T foo(T)(T arg){
+T foo123(T)(T arg){
 	return arg>0?arg+foo!T(arg-1):0;
 }
-void fooz(){pragma(msg, typeof(foo!int));foo!int(2);}
+void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
 
-pragma(msg, foo!double(42.23));
+pragma(msg, foo123!double(42.23));
 
 
 template test(){
@@ -337,8 +327,8 @@ auto fun(){
 }
 pragma(msg, "fun: ",fun());
 
-T foo(T)(T arg)=>arg+arg;
-pragma(msg, foo!double(32.2));
+T twotimes(T)(T arg)=>arg+arg;
+pragma(msg, twotimes!double(32.2));
 
 
 
@@ -384,7 +374,7 @@ pragma(msg, Foo!"enum Foo = \"Foo\";");
 
 
 template A(){
-	static if(!is(typeof(B!())==int)) enum A = 2; // TODO: should be ok.
+	static if(!is(typeof(B!())==int)) enum A = 2;
 	//enum A = 2;
 	enum A = B!();
 }
@@ -400,7 +390,8 @@ template B(){
 //pragma(msg, b);
 pragma(msg, A!());
 pragma(msg, B!());
-/+
+
+
 //alias int T;
 
 pragma(msg, mixin({return ['1'];}()));

@@ -2363,6 +2363,7 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 			emitAddressOf(bld, e);
 		}else static if(S==Tok!"*"){
 			e.byteCompile(bld);
+			if(type.isFunctionTy()) return;
 			bld.emitUnsafe(I.ptrtoa, this);
 			bld.emit(I.push);
 			bld.emitConstant(0);

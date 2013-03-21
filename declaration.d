@@ -32,10 +32,14 @@ abstract class Declaration: Statement{
 		TemplateInstanceDecl,
 		OverloadableDecl,
 		OverloadSet,
-		OverloadMatcher,
+		SymbolMatcher,
 		GenerativeDecl,
 		AliasDecl,
 		AggregateDecl,
+		ClassDecl,
+		InterfaceDecl,
+		StructDecl,
+		UnionDecl,
 		ValueAggregateDecl,
 		ReferenceAggregateDecl,
 		ErrorDecl,
@@ -211,7 +215,16 @@ class TemplateDecl: OverloadableDecl{
 		return (stc?STCtoString(astStc)~" ":"")~"template "~name.toString()~"("~join(map!(to!string)(params),",")~")"~
 			(constraint?" if("~constraint.toString()~")":"")~bdy.toString();
 	}
-	override string kind(){return "template";}
+	override string kind(){
+		if(eponymousDecl){
+			if(iftiDecl()) return "function template";
+			if(eponymousDecl.isClassDecl()) return "class template";
+			if(eponymousDecl.isStructDecl()) return "struct template";
+			if(eponymousDecl.isInterfaceDecl()) return "interface template";
+			if(eponymousDecl.isUnionDecl()) return "union template";
+		}
+		return "template";
+	}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -247,13 +260,14 @@ class StructDecl: ValueAggregateDecl{
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"struct"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 
 	override @property string kind(){ return "struct"; }
-	//mixin DownCastMethod;
+	mixin DownCastMethod;
 }
 class UnionDecl: ValueAggregateDecl{
 	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"union"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 
 	override @property string kind(){ return "union"; }
+	mixin DownCastMethod;
 }
 struct ParentListEntry{
 	STC protection;
@@ -267,6 +281,9 @@ class ClassDecl: ReferenceAggregateDecl{
 			(parents.length?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
 
 	override @property string kind(){ return "class"; }
+
+	mixin DownCastMethod;
+
 }
 class InterfaceDecl: ReferenceAggregateDecl{
 	ParentListEntry[] parents;
@@ -275,6 +292,8 @@ class InterfaceDecl: ReferenceAggregateDecl{
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
 
 	override @property string kind(){ return "interface"; }
+
+	mixin DownCastMethod;
 }
 /+class TemplateAggregateDecl: Declaration{
 	TemplateParameter[] params;

@@ -24,8 +24,8 @@ class Scheduler{
 
 	bool needComponentUpdate = false;
 
-	void addDependency(Node from, Node to){
-		Node[] e = graph.get(from,[]);
+	final void addDependency(Node from, Node to){
+/+		Node[] e = graph.get(from,[]);
 		if(!e.canFind(to)){
 			//writeln("we have a dependency from ", typeid(from)," ",from," to ",typeid(to)," ",to);
 			e~=to;
@@ -33,13 +33,14 @@ class Scheduler{
 			revs[to]~=from;
 
 			needComponentUpdate = true;
-		}
+		}else redundancy++;+/
 	}
+	//int redundancy;
 
-	void removeNode(Node node){
-		//if(graph.get(node,[])) writeln("done with ",typeid(node)," ",node);
+	final void removeNode(Node node){
+/+		//if(graph.get(node,[])) writeln("done with ",typeid(node)," ",node," ",redundancy);
 		graph.remove(node);
-		revs.remove(node);
+		revs.remove(node);+/
 	}
 	
 	void run(){}

@@ -1,9 +1,25 @@
+alias immutable(char)[] string;
+
+int fun(int delegate(int,int) a){return a(1,2);}
+auto fun(string delegate(int,string) b){return b(1,"2");}
+
+pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return ""; else return 2;})); // ambiguous
+
+
+
+int fun(int delegate(int,int) a, string delegate(int,string) b){return a(1,2);}
+int fun(string delegate(int,string) b, int delegate(int,int) a){return a(1,2);}
+
+pragma(msg, fun((a,b){static if(is(typeof(b)==string)) return 1; else return "";}, (a,b)=>b));// no match
+
+
+
 bool isLvalue(ref int x){return true;}
 bool isLvalue(int x){return false;}
 
 static assert(!isLvalue(1));
 static assert({int x;return isLvalue(x);}());
-/+
+
 bool testRefOv(ref int x, double y){return true;}
 bool testRefOv(int x, int y){return false;}
 
@@ -80,4 +96,6 @@ void main(){
 	bar(1);
 +/
 	//baz(1,1);
-}+/
+}
+
+// +/

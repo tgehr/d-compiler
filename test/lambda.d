@@ -1,4 +1,4 @@
-
+alias immutable(char)[] string;
 
 void testinex(){
 	void foo(int delegate(int) dg){}
@@ -8,8 +8,6 @@ void testinex(){
 
 pragma(msg, (int x, int y){}());
 
-
-alias immutable(char)[] string;
 
 auto testdederr()=>(x,y,z,w)=>{return y;}(2,"hello",4,5)(); // deduction failure
 typeof(x=>x) testdederr2; // deduction failure

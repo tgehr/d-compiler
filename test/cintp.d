@@ -15,6 +15,7 @@ static assert(testsetlengthdet()==[1,2,3,0,0]);
 pragma(msg, "testsetlengthdet: ",testsetlengthdet());
 +/
 
+
 auto testsetlength(){
 	auto x=[1,2,3,4];
 	x.length=3;

@@ -91,6 +91,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		FunctionTy,
 		DelegateTy,
 		AggregateTy,
+		MatcherTy,
 	);
 	
 	mixin Visitors;

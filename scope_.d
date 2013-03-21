@@ -77,7 +77,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
-		Identifier.tryAgain = true; // TODO: is this the right place for this?
+		//Identifier.tryAgain = true; // TODO: is this required?
 		return true;
 	}
 

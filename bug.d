@@ -1,7 +1,8 @@
-
+alias immutable(char)[] string;
 
 void main(){
-	string delegate(int, string) dg = (n, int x){};
+	string delegate(string, double) dg = (n, int x){return "";};
+	import std.stdio; writeln(dg("2",2));
 }
 
 /+int main(){
