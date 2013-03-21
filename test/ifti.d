@@ -1,4 +1,7 @@
 
+auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
+static assert(testTupleExpandIFTI(1,2,3,4)==4);
+
 // TODO: match template instantiations
 struct A(T, int N){ }
 

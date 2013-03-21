@@ -14,7 +14,7 @@ pragma(msg, "seqtak: ", seqtak());
 //pragma(msg, seqret(1,2)); // TODO!
 
 auto compose(alias a, alias b,T...)(T args){
-	return a(b(args)); // TODO!
+	return a(b(args));
 }
 
 auto seqid(T...)(T args){
@@ -26,9 +26,9 @@ pragma(msg, "multiret: ", compose!(add,seqid)(1,2,3));
 int testmultirefret(){
 	int a, b;
 	ref Seq!(int, int) multirefret(){
-		return Seq!(a,b);
+		return Seq!(a,b); // TODO
 	}
-	multirefret()=Seq!(1,2);
+	multirefret()=Seq!(1,2); // TODO
 	return a+b;
 }
 pragma(msg, "testmultirefret: ", testmultirefret());

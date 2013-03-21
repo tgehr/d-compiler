@@ -202,7 +202,7 @@ template InitEntities(T...)
         enum InitEntities = "";
     else
     {
-	    pragma(msg, T[0]," ",T[1]);
+	    pragma(msg, T[0]," ",T[1]," ",mixin('"'~T[1]~'"'));
         enum InitEntities = Format!(`htmlEntities["%s"] = "%s";`, T[0], T[1]) ~
                             InitEntities!(T[2 .. $]);
     }

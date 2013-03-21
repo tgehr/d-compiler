@@ -1,89 +1,88 @@
-struct DynRange(T){
-	T delegate() front;
-	bool delegate() empty;
-	DynRange!T delegate() popFrontImpl;
-	void popFront(){
-		auto u = popFrontImpl();
-		front = u.front;
-		empty = u.empty;
-		popFrontImpl = u.popFrontImpl;
+/+
+struct UndefinedIdentifierError{
+	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message
+	pragma(msg, foo(a=>1,a=>1.0));
+}
++/
+
+/+
+struct TemplatedParserHack(T){
+	this(int a[]){}
+}
+pragma(msg, TemplatedParserHack!int); // TODO: fix assertion failure
++/
+/+
+struct TemplatedConstructor(T){
+	this(T)(T arg){}
+	static create(){
+		return TemplatedConstructor(2); // TODO: should work
 	}
 }
-
-DynRange!int dynRange(R)(R dbg)if(isInputRange!R){
-	DynRange!int result;
-	auto x = dbg;
-	pragma(msg, R," ",typeof(x));
-	return result;
+pragma(msg, TemplatedConstructor!int);
++/
+/+
+template forward(args...)
+{
+	@property forward()(){ return args[0]; }
 }
 
+void main()
+{
+	int a = 1;
+	int b = 1;
+	assert(a == forward!b); // TODO: should work
+}+/
 
-static struct Delay(R){
-	R delegate() dg;
-	R range;
-	bool init = false;
-	auto front()=>(check(), range.front());
-	auto empty()=>(check(), range.empty());
-	auto popFront()=>(check(), range.popFront());
-	//private:
-	void check(){
-		// if(dg) range = dg(); // TODO!
-		// if(dg == dg); // TODO!
-		// dg = null; // TODO!
-		if(!init) range = dg();
-		init = true;
+
+/+template foot(alias a){
+	auto foot(){
+		return a();
 	}
 }
-auto delay(R)(R delegate() dg)if(isInputRange!R){
-	//return Delay!R(dg); // TODO
-	Delay!R r; r.dg = dg;
-	return r;
-}
-
-auto dynRangePrimes(){
-	DynRange!int impl(int start)=>
-		dynRange(delay(()=>iota(0,2)));
-	return impl(2);
-}
-
-int doIt(){
-	dynRangePrimes().popFront();
-	return 2;
-}
-
-pragma(msg, "dynRangePrimes: ", doIt());
-
-
-auto testDynRange(){
-	auto rng=dynRange(iota(0,2));
-	return 2;
-}
-
-
-auto iota(int start, int end){
-	static struct Iota{
-		int start, end;
-		int front(){ return start; }
-		bool empty(){ return start == end; }
-		void popFront(){ start++; }
+int main(){
+	int x=2;
+	int foo(){ return x; }
+	static int bar(){
+		return foot!foo();
 	}
-	assert(isInputRange!Iota);
-	// return Iota(start, end); // TODO!
-	Iota io; io.start = start; io.end = end;
-	return io;
+	return bar();
+}
+pragma(msg, main());+/
+
+
+/+
+struct Foo(_T) {
+	alias _T T;
+}
+void bar(FooT)(FooT foo, FooT.T x){ // TODO: silence
+	pragma(msg, typeof(x));
+}
+void main() {
+	Foo!int foo;
+	bar(foo, 1);
+}+/
+
+/+
+template ReturnType(alias a) { }
+
+struct BinaryOperatorX(string _op, rhs_t,C) {
+	ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T; // <- should not access check!
 }
 
-alias typeof(int[].length) size_t;
-//pragma(msg, size_t);
-
-template isInputRange(R){
-	enum isInputRange=is(typeof({
-		R r;
-		if(!r.empty()) r.popFront();
-		auto f = r.front();
-	}));
+class MyClass {
+	auto opBinary(string op, T)() { }
 }
 
+void PydMain() {
+	BinaryOperatorX!("+", int, MyClass);
+}
+
++/
+
+/+
+// TODO: make interpretation of partially analyzed functions work
+int cdep(){ enum x=cdep2(); return x;}
+int cdep2(){ return cdep(); }+/
 
 
 /+
@@ -172,6 +171,49 @@ auto testcallCC(){
 }+/
 
 // ok now
+
+
+struct MixinAccessCheck{
+	struct S{
+		immutable int x = 2;
+	}
+	pragma(msg, mixin(q{S.x}));
+
+	template ReturnType(func...) if (func.length == 1) {
+		alias int ReturnType;
+	}
+	struct BinaryOperatorX(string _op, rhs_t,C) {
+		ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T; // TODO: should work fine!
+	}
+	class MyClass {
+		auto opBinary(string op, T)() { }
+	}
+	void PydMain() {
+		BinaryOperatorX!("+", int, MyClass) foo;
+	}
+}
+
+struct FOFOFO{
+	enum x = undef;
+	mixin(`float a11=`~foo1~";"); // error
+}
+
+struct TTTTTTTTT{
+	static int fun(T)(){
+		T s;
+		return s.f();
+	}
+	
+	static int main() {
+		int x=2;
+		void f(){}
+		struct R { int f() { return x; } }
+		auto m = fun!(R)();
+		return m;
+	}
+	pragma(msg, main());
+}
+
 
 struct DynRange(T){
 	DynRange!T delegate() popFrontImpl;

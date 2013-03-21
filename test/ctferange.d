@@ -1,4 +1,55 @@
 
+struct List(T){
+	private struct Node{
+		T payload;
+		Node* next;
+		Node* prev;
+	}
+	Node* head;
+	Node* back;
+
+	void add(T arg){
+		if(back !is null){
+			back.next = new Node();
+			back.next.prev=back;
+			back=back.next;
+		}else head = back = new Node();
+		back.payload=arg;
+	}
+
+	auto range(){
+		struct Range{
+			private Node* current;
+			T front()=>current.payload;
+			bool empty()=>current is null;
+			void popFront(){ current=current.next; }
+		}
+		Range range;
+		range.current = head;
+		return range;
+	}
+	auto brange(){
+		struct Range{
+			private Node* current;
+			T front()=>current.payload;
+			bool empty()=>current is null;
+			void popFront(){ current=current.prev; }
+		}
+		Range range;
+		range.current = back;
+		return range;
+	}
+}
+
+auto testList(){
+	List!int list;
+	for(int i=0;i<100;i++)
+		list.add(i);
+	return list;
+}
+pragma(msg, "testList: ", array(testList().range()));
+pragma(msg, "testList2: ", array(map!(a=>a*2)(testList().brange())));
+
 auto map(alias a, R)(R range) if(isInputRange!R && is(typeof(a(range.front())))){
 	static struct Map{
 		R range;

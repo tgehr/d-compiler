@@ -95,7 +95,7 @@ class MultiDep: Node{
 // TODO: this allocation can probably be avoided in many cases
 Dependee multidep(Node[] dep, Scope sc=null)in{assert(dep.length);}body{
 	if(dep.length>1) return Dependee(new MultiDep(dep, sc));
-	dep[0].needRetry = true; // TODO: ok?
+	if(!dep[0].sstate==SemState.error) dep[0].needRetry = true; // TODO: ok?
 	assert(sc||dep[0].isDeclaration());
 	if(!sc) sc = dep[0].isDeclaration().scope_;
 	assert(!!sc);
@@ -114,6 +114,7 @@ abstract class Expression: Node{
 	mixin DownCastMethods!(
 		Symbol,
 		Identifier,
+		LookupIdentifier,
 		FieldExp,
 		SuperExp,
 		TemplateInstanceExp,
@@ -232,8 +233,8 @@ class Identifier: Symbol{
 	mixin Visitors;
 }
 
-class ModuleIdentifier: Identifier{
-	this(string name){ super(name); }
+class ModuleIdentifier: LookupIdentifier{
+	this(string name){ super(name, null); }
 	override string toString(){return !meaning?_brk("."~name):"."~super.toString();}
 
 	mixin Visitors;

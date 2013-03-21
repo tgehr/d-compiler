@@ -1,3 +1,4 @@
+
 struct TestVirtualCall{
 	class A{ string foo(){ return "B"; }}
 	class B: A{ override string foo(){ return "A"; }}

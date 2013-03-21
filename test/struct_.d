@@ -1,7 +1,13 @@
 
+struct TemplatedConstructor{
+	this(T)(T arg){}
+	static create(){
+		return TemplatedConstructor(2);
+	}
+}
 void foo(int){}
 void goo(){}
-alias goo foo;
+alias goo foo; // TODO: overload
 
 
 //int ass(){return 0;}

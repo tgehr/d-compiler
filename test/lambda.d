@@ -1,4 +1,19 @@
 
+struct testLookupConversionError{
+	struct S{
+		int delegate() dg;
+	}
+	static int test(){
+		S s;
+		int x;
+		s.dg = ()=>x=2;
+		const(S) t=s;
+		pragma(msg, typeof(t.dg)); // error
+	}
+}
+
+
+
 class A{}
 class B:A{}
 
@@ -161,6 +176,7 @@ void main(){
 }
 
 
+// +/
 // +/
 
 auto toString(int i){

@@ -1,5 +1,8 @@
 
 
+bool testFwdDecl(int x);
+static assert(testFwdDecl(2) && !testFwdDecl(3));
+bool testFwdDecl(int x)=>x==2;
 
 template iftioverload(T){
 	T iftioverload(T a, float b){return a;}

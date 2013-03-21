@@ -1,6 +1,8 @@
-/+
-static assert(!is(int[2]: int[1]),"TODO"); // TODO!
+static assert(is(int delegate() immutable : int delegate() const));
+static assert(!is(int delegate() : int delegate() const));
 
+static assert(!is(int[2]: int[1]));
+/+
 static assert(is(typeof([1,1L])==long[]));
 
 //byte b = 0b11110000; // TODO: find a case to prove inconsistency of DMD

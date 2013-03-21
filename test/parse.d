@@ -1,5 +1,8 @@
+class C: typeof(new C){}
+class D: immutable(typeof(new D)){}
+class E: int{}
 
-
+/+
 immutable int foo(){}
 
 void main(){
@@ -60,3 +63,6 @@ void main(){
 	}
 	
 }
+
+
+// +/

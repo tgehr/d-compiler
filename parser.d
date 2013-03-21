@@ -21,7 +21,7 @@ immutable protectionAttributes=["export","package","private","protected","public
 
 immutable attributeSTC=["property","safe","trusted","system","disable"];
 
-immutable functionSTC=["const","immutable","inout","nothrow","pure","shared","ref"];
+immutable functionSTC=["auto", "const","immutable","inout","nothrow","pure","shared","ref"];
 
 immutable parameterSTC=["auto","const","final","immutable","in","inout","lazy","out","ref","scope","shared"];
 
@@ -1017,14 +1017,14 @@ private struct Parser{
 	readstc: for(;;){
 			switch(ttype){
 				mixin({string r;
-						foreach(x;which){
-							if(x=="auto ref") continue;
-							else r~="case Tok!\""~x~"\": "~(typeQualifiers.canFind(x)?"if(peek().type==Tok!\"(\") break readstc;":"")~
-								     (x=="auto"&&(cast(immutable(char[])[])which).canFind("auto ref")?
-								      "if(peek().type!=Tok!\"ref\") cstc=STCauto;else{nextToken();cstc=STCautoref;}":
-								      "cstc=STC"~x)~";"~"goto Lstc;";
-						}
-						return r;}());
+					foreach(x;which){
+						if(x=="auto ref") continue;
+						else r~="case Tok!\""~x~"\": "~(typeQualifiers.canFind(x)?"if(peek().type==Tok!\"(\") break readstc;":"")~
+							     (x=="auto"&&(cast(immutable(char[])[])which).canFind("auto ref")?
+							      "if(peek().type!=Tok!\"ref\") cstc=STCauto;else{nextToken();cstc=STCautoref;}":
+							      "cstc=STC"~x)~";"~"goto Lstc;";
+					}
+					return r;}());
 				static if(properties){
 					case Tok!"@":
 						nextToken();
@@ -1288,7 +1288,7 @@ private struct Parser{
 			nextToken();
 			if(ttype!=Tok!"(" && ttype!=Tok!"{") ret=parseType();
 		}
-		if(ttype==Tok!"(") params=parseParameterList(vararg,true), stc|=parseSTC!functionSTC();
+		if(ttype==Tok!"(") params=parseParameterList(vararg,true), stc|=parseSTC!("auto ref"~functionSTC)();
 		CompoundStm bdy;
 		if(ttype != Tok!"=>") bdy=parseCompoundStm();
 		else{
@@ -1444,13 +1444,8 @@ private struct Parser{
 		}else type=Class;
 		if(type>=Class && (!anonclass&&ttype==Tok!":")||(anonclass&&ttype!=Tok!"{")){
 			if(!anonclass) nextToken();
-		readparents: for(;;){
-				// auto s=STC.init;
-				switch(ttype){
-					// mixin({string r; foreach(x;protectionAttributes) r~=`case Tok!"`~x~`": s=STC`~x~`; nextToken(); goto case Tok!"i";`;return r;}());
-					case Tok!".", Tok!"i": parents.put(parseIdentifierList()); break;
-					default: break readparents;
-				}
+			for(;;){
+				parents.put(parseType());
 				if(ttype==Tok!",") nextToken();
 				else break;
 			}

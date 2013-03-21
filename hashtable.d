@@ -18,6 +18,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 
 	enum initialSize = 16;
 	enum maxBucketSize = 32;
+	enum limitfactor = 32;
 	enum incrementFactor = 3;
 	enum decrementFactor = 2;
 	enum compactLimit = 2;
@@ -81,7 +82,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 			}
 		length++;
 		*b~=x;
-		if(b.length>maxBucketSize) realloc();
+		if(b.length>maxBucketSize&&length*limitfactor<b.length) realloc();
 	}
 	
 	void opIndexAssign(V v, K k){

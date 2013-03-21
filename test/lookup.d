@@ -1,3 +1,63 @@
+
+struct TestMutDelegateFromConstRcvr{
+	struct S{
+		int delegate() dg;
+		int delegate()immutable dg2;
+		int delegate()const dg3;
+	}
+	int test(){
+		int x;
+		S s; s.dg = ()=>(x=2);
+		s.dg3 = s.dg2 = ()immutable=>x;
+		const(S) t=s;
+		int y=t.dg2()+t.dg3(); // ok
+		return t.dg()+y; // error
+	}
+}
+
+//pragma(msg, is(int delegate()immutable:const(int delegate()immutable)));
+
+const(int delegate()immutable) foo;
+//pragma(msg, typeof(cast()foo));
+
+
+void foo(alias f,T...)(){
+	T[0] t;
+}
+
+void main(){
+	int x=2;
+	struct S{
+		int getX(){return x;}
+	}
+	int f(){return 2;}
+	foo!(f,S)();
+}
+
+auto loc1(){
+	int x = 2;
+	struct Loc1{
+		int getX(){ return x; } // error (TODO: better message?)
+	}
+	return Loc1();
+}
+auto loc2(){
+	int x = 3;
+	struct Loc2{
+		int getX(){ return x; }
+	}
+	return Loc2();
+}
+
+static int[] build(A,B)(){
+	A a;B b;
+	return [a.getX()];
+}
+
+pragma(msg, build!(typeof(loc1()), typeof(loc2()))());
+
+
+
 int ppccfoo(){ return 1; }
 class PP{
 	int foo(){ return 2; }
@@ -226,4 +286,5 @@ struct S{
 	}
 }
 
+// +/
 // +/

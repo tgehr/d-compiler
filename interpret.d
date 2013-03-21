@@ -544,10 +544,12 @@ mixin template Interpret(T) if(is(T==CallExp)){
 		static struct MakeStrong{
 			void perform(Symbol sym){
 				// allow interpretation of partially analyzed functions
-				if(sym.meaning &&
+				// (TODO: fix implementation)
+/+				if(sym.meaning &&
 				   (!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)){
 					sym.makeStrong();
-				}
+				}+/
+				sym.makeStrong();
 			}
 		}
 		runAnalysis!MakeStrong(this);
@@ -1657,8 +1659,10 @@ Ltailcall:
 				if(!sym) goto Lnullfunction;
 				if(sym.meaning.sstate != SemState.completed){
 					// allow interpretation of partially analyzed function
-					if(!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)
-						sym.makeStrong();
+					// (TODO: fix implementation)
+					/+if(!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)
+						sym.makeStrong();+/
+					sym.makeStrong();
 					// TODO: allow detailed discovery of circular dependencies
 					sym.semantic(sym.scope_);
 					Expression e = sym;
@@ -2472,7 +2476,7 @@ Ltailcall:
 				static struct MakeStrong{
 					void perform(Symbol sym){
 						// TODO: this is a little hacky, is there a more elegant way?
-						if(sym.meaning&&sym.meaning.isFunctionDecl() && sym.meaning.sstate == SemState.started)
+						if(sym.meaning&&sym.meaning.isFunctionDecl() && sym.meaning.sstate <= SemState.started)
 							sym.meaning.sstate = SemState.begin;
 					}
 				}
@@ -2481,7 +2485,7 @@ Ltailcall:
 				stm.semantic(sc); // TODO!
 				throw new UnwindException;
 			case I.errtbl:
-				assert(0);
+				assert(0, "TODO: static definite return analysis");
 		}
 	}
 	ErrorInfo obtainErrorInfo(){
@@ -2561,7 +2565,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2881,12 +2885,12 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 		byteCompileHelper(bld, false);
 	}
 
-	static if(isAssignOp(S) && S!=Tok!"=")
+	static if(isAssignOp(S) && S!=Tok!"=" || S==Tok!",")
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		return byteCompileHelper(bld, true);
 	}
 
-	private LValueStrategy byteCompileHelper(ref ByteCodeBuilder bld, bool isLvalue) in{assert(!isLvalue || isAssignOp(S) && S!=Tok!"=");}body{
+	private LValueStrategy byteCompileHelper(ref ByteCodeBuilder bld, bool isLvalue) in{assert(!isLvalue || isAssignOp(S) && S!=Tok!"=" || S==Tok!",");}body{
 		import std.typetuple;
 		alias Instruction I;
 		static if(S==Tok!"="){
@@ -2896,7 +2900,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 		}else static if(S==Tok!","){
 			e1.byteCompile(bld);
 			bld.ignoreResult(getBCSizeof(e1.type));
-			e2.byteCompile(bld);
+			return isLvalue ? e2.byteCompileLV(bld) : (e2.byteCompile(bld),null);
 		}else static if(isAssignOp(S)&&S!=Tok!"~=" || isArithmeticOp(S) || isShiftOp(S) || isBitwiseOp(S) ||isRelationalOp(S)&&S!=Tok!"in"&&S!=Tok!"!in"){
 			auto ptrt=type.isPointerTy();
 			if(auto ptr = ptrt?ptrt:e1.type.isPointerTy()){
@@ -2951,7 +2955,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 					return null;
 				}
 			}else{
-				assert(type.isBasicType());
+				assert(type.getHeadUnqual().isBasicType(), text(type," ",this));
 				static if(S!=Tok!"<<"&&S!=Tok!">>"&&S!=Tok!">>>") assert(e1.type is e2.type);
 			}
 
@@ -3199,7 +3203,7 @@ mixin template CTFEInterpret(T) if(is(T==CompoundStm)){
 					}
 				}
 				auto sc = runAnalysis!FindScope(x).result;
-				assert(!!sc);
+				assert(!!sc, x.toString());
 				static assert(sc.sizeof <= (void*).sizeof && (void*).sizeof<=ulong.sizeof);
 				bld.emitConstant(cast(ulong)cast(void*)sc);
 				break;
@@ -3655,7 +3659,13 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 			return e2.byteCompileLV(bld);
 		}
 		auto this_=e1.extractThis();
-		assert(!!this_ && cast(AggregateTy)this_.type.getHeadUnqual());
+		if(!this_){
+			this_ = New!ThisExp(); // TODO: would prefer not having this
+			this_.loc = loc;
+			do this_.semantic(e2.scope_);
+			while(this_.sstate != SemState.completed);
+		}
+		assert(!!this_ && cast(AggregateTy)this_.type.getHeadUnqual(), text(this_," ",this));
 		auto aggrt = cast(AggregateTy)cast(void*)this_.type.getHeadUnqual();
 
 		auto vd=e2.meaning.isVarDecl();
@@ -4039,6 +4049,8 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			off = bld.getContextOffset();
 			bld.emit(Instruction.push);
 			bld.emitConstant(off);
+			setBCLoc(off, len);
+			bld.addContextOffset(len);
 		}
 
 		if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
@@ -4049,8 +4061,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		if(inHeapContext){
 			bld.emitUnsafe(Instruction.popcn, this);
 			bld.emitConstant(len);
-			setBCLoc(off, len);
-			bld.addContextOffset(len);
 		}else{
 			off = bld.getStackOffset();
 			if(len){
@@ -4182,7 +4192,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		// import std.stdio; writeln(this," ", len," ", off);
 		byteCodeStackOffset = off;
 		byteCodeStackLength = len;
-
 		// dw("yes ", this," ",off," ",len," ",cast(void*)this);
 	}
 	final size_t getBCLoc(ref size_t len){
@@ -4263,6 +4272,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				}
 			}
 			void perform(CallExp self){
+				if(self.tmpVarDecl) self.tmpVarDecl.inHeapContext = true;
 				if(!self.fun || !self.fun.type) return; // TODO: ok?
 				auto tt=self.fun.type.getFunctionTy();
 				assert(!!tt);
@@ -4281,7 +4291,6 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				if(aggrty.decl.isValueAggregateDecl()){
 					runAnalysis!MarkHeapContext(this_);
 				}
-
 			}
 			void perform(ReturnStm self){
 				if(self.isRefReturn) runAnalysis!MarkHeapContext(self.e);
@@ -4562,5 +4571,10 @@ mixin template CTFEInterpret(T) if(is(T==TemplateInstanceDecl)){
 mixin template CTFEInterpret(T) if(is(T==BlockDecl)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		foreach(decl; decls) decl.byteCompile(bld);
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==PragmaDecl)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		bdy.byteCompile(bld);
 	}
 }

@@ -159,6 +159,8 @@ abstract class Scope{ // SCOPE
 	}
 
 
+	bool nestedIn(Scope rhs){ return rhs is this; }
+
 	VarDecl getDollar(){return null;}
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
@@ -237,6 +239,8 @@ class NestedScope: Scope{
 			return parent.getUnresolved(ident);
 		return this.independent!Scope;
 	}
+
+	override bool nestedIn(Scope rhs){ return this is rhs || parent.nestedIn(rhs); }
 
 	override bool insertLabel(LabeledStm stm){
 		return parent.insertLabel(stm);

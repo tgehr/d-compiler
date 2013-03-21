@@ -1,4 +1,55 @@
 
+string execLenses(){
+	string r;
+	void write(T...)(T x){
+		static if(x.length){
+			r~=to!string(x[0]);
+			write(x[1..$]);
+		}
+	}
+
+	struct Lens(A,T){
+		auto compose(T,S)(Lens!(T,S) rhs){
+			Lens!(A,S) l;
+			l.mod = (a,s)=>mod(a,x=>rhs.mod(x,s));
+			l.get = a=>rhs.get(get(a));
+			return l;
+		}
+		A delegate(A,T delegate(T)) mod;
+		T delegate(A) get;
+	}
+	auto id(S)(){
+		Lens!(S,S) id;
+		id.mod=(a,s)=>s(a);
+		id.get=a=>a;
+		return id;
+	}
+	auto getLens(A,T)(T delegate(ref A)ref dg){
+		Lens!(A,T) l;
+		l.mod=(a,s){auto y=&dg(a);*y=s(*y);return a;};
+		l.get=a=>dg(a);
+		return l;
+	}
+
+	struct Q{ int x=2; }
+	struct S{ Q x; }
+
+	void main(){
+		auto xlens = getLens((ref S s)ref=>s.x);
+		//auto ylens = xlens.compose!(Q,int)(getLens((ref Q q)ref=>q.x));
+		//auto lens = ylens.compose!(int,int)(id!int());
+		auto lens = xlens.compose!(Q,int)(getLens((ref Q q)ref=>q.x)).compose!(int,int)(id!int());
+		auto add13(S x)=>lens.mod(x,x=>x+13);
+		auto mul23(S x)=>lens.mod(x,x=>x*23);
+		write(add13(mul23(add13(S()))).x.x);
+	}
+	main();
+	return r;
+}
+pragma(msg, "execLenses: ",execLenses());
+
+
+/+
 struct TestPartialEvaluation{
 	static foo(string f){
 		if(f[0] == 's')
@@ -18,7 +69,7 @@ struct TestPartialEvaluation{
 		}
 	})));
 }
-static assert(TestPartialEvaluation.foo("3")=="got somestring");
+static assert(TestPartialEvaluation.foo("3")=="got somestring");+/
 
 int testClassConstructor(){
 	class C{
@@ -164,7 +215,8 @@ int testStructMemberAliasParam(){
 	}
 	S s;
 	s.bar(2);
-	s.baz!((ref a)=>a=3)();
+	s.baz!(function(ref a)=>a=3)();
+	//s.baz!((ref a)=>a=3)(); // TODO!
 	return x+s.y;
 }
 static assert(testStructMemberAliasParam()==5);
@@ -317,7 +369,6 @@ pragma(msg, "memfactorial: ", map!memfactorial(iota(0,19)));
 pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
 
 pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1)))); //TODO
-
 
 
 // Haskell-Like CPS //
@@ -773,8 +824,6 @@ pragma(msg, "sort3: ",sort!"a>b"(unsorted));
 pragma(msg, "sort4: ",sort!"a<b"(map!mod10(unsorted)));
 //pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
 
-
-
 auto testarrayptrlength(){
 	int[] x = [1,2,4];
 	assert(x.length==3);
@@ -817,6 +866,7 @@ struct InterpretImmutableField{
 static assert(InterpretImmutableField.y==22);
 static assert((()=>InterpretImmutableField.y==22)());
 +/
+
 
 mixin(`auto foo1="1.0f";`);
 mixin(`float a11=`~foo1~";"); // error
@@ -1804,5 +1854,19 @@ auto join(T,S)(T[] arg, S sep){
 	r~=arg[$-1];
 	return r;
 }
+
+auto to(T,S)(S arg)if(is(S==int)&&is(T==string)){
+	string r="";
+	if(!arg) return "0";
+	bool n = arg<0;
+	if(n) arg=-arg;
+	while(arg) r=('0'+arg%10)~r, arg/=10;
+	if(n) r="-"~r;
+	return r;
+}
+auto to(T,S)(S arg)if(is(S==string)&&is(T==string)){
+	return arg;
+}
+
 
 template Seq(T...){alias T Seq;}
