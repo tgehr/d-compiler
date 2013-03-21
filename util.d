@@ -14,7 +14,7 @@ template Apply(alias a,T...){alias a!T Apply;}
 
 
 // escape a string
-string escape(string i,bool isc=false){ // TODO: replace with std lib one as soon as available
+string escape(string i,bool isc=false){ // TODO: COW, replace with std lib one as soon as available
 	string r;
 	foreach(dchar x;i){
 		switch(x){
@@ -29,6 +29,7 @@ string escape(string i,bool isc=false){ // TODO: replace with std lib one as soo
 			case '\t': r~="\\t"; break;
 			case '\v': r~="\\v"; break;
 			case '\0': r~="\\0"; break;
+			case ' ':  r~=" "; break;
 			default:
 				if(uni.isWhite(x)) r~=format("\\u%4.4X",cast(uint)x); // wtf? 
 				else r~=x; break;
@@ -39,7 +40,7 @@ string escape(string i,bool isc=false){ // TODO: replace with std lib one as soo
 
 // memory allocation stuff
 struct MallocAppender(T:T[]){ // NO RAII. Loosely compatible to the std.array.appender interface.
-	static MallocAppender create(size_t initial=1){
+	static MallocAppender create(size_t initial=16){
 		MallocAppender app;
 		app._length=initial;
 		app._data=cast(Unqual!T*)malloc(T.sizeof*app._length);
@@ -97,8 +98,7 @@ struct ChunkGCAlloc{
 		return emplace!T(NewImpl(__traits(classInstanceSize, T)),args);
 	}
 	void[] NewImpl()(size_t size){
-		import std.c.stdlib;
-		enum size_t alignm=4, chunksize=1024*1024;
+		enum size_t alignm=size_t.sizeof, chunksize=1024*1024;
 		auto offs=cast(void*)(cast(size_t)(_mlp.ptr+alignm-1)&~(cast(size_t)alignm-1))-_mlp.ptr;
 		if(_mlp.length>=size+offs){
 			Lok:
@@ -148,7 +148,6 @@ struct ChunkGCAlloc{
 }
 
 string toEngNum(uint i){
-	import std.conv;
 	static string[] a=["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven",
 	                   "twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
 	static string[] b=[null,"ten","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];

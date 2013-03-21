@@ -33,7 +33,6 @@ string[2][] complexTokens =
 	 [".0fi",  "ImaginaryFloatLiteral"     ],
 	 [".0i",   "ImaginaryDoubleLiteral"    ],
 	 [".0Li",  "ImaginaryLiteral"          ]];
- // TODO: imaginary literals
 string[2][] simpleTokens = 
 	[["/",     "Divide"                    ],
 	 ["/=",    "DivideAssign"              ],
@@ -153,38 +152,36 @@ string TokenTypeToString(TokenType type){
 	return tokens[cast(int)type][0];
 }
 
+string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
+
 struct Location{
-	string mod;
-	uint line;
-	
-	void error(string msg){
-		stderr.writeln(mod, "(", line, "): error: ", msg);
-	}
+	string rep; // slice of the code representing the Location
+	int line;   // line number at start of location
 }
 
-string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
 struct Token{
 	TokenType type;
 	string toString() const{
-		if(rep!is null) return rep;
-		return TokenTypeToString(type);
+		switch(type){
+			case Tok!"``": 
+				return loc.rep[0]~escape(loc.rep[1..$-1])~loc.rep[$-1];
+			case Tok!"``c",Tok!"``w",Tok!"``d":
+				return loc.rep[0]~escape(loc.rep[1..$-2])~loc.rep[$-2..$];
+			case Tok!"''":
+				return loc.rep[0]~escape(loc.rep[1..$-1],1)~loc.rep[$-1];
+			case Tok!"EOF":
+				return TokenTypeToString(type);
+			default: return loc.rep;
+		}
 	}
 	union{
 		string str, name;  // string literals, identifiers
 		ulong int64;       // integer literals
 		real flt80;        // float, double, real literals
 	}
-	string rep; // slice of the code representing this token
+	Location loc;
 }
 template token(string t){enum token=Token(Tok!t);}
-
-Token tokError(string s, string rep) {
-	auto r = token!"Error";
-	r.str = s;
-	r.rep = rep;
-	GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
-	return r;
-}
 
 //TODO: Replace some switches by ifs
 //TODO: Remove this restriction:
@@ -200,7 +197,7 @@ string caseSimpleToken(string prefix="", bool needs = false){
 	string r;
 	int c=0,d=0;
 	foreach(i;simpleTokens){string s=i[0]; if(s.startsWith(prefix)) c++;}
-	if(c==1) r~=`tok = token!"`~prefix~'"'~";\nbreak;\n";
+	if(c==1) r~=`tok.type = Tok!"`~prefix~'"'~";\nbreak;\n";
 	else{
 		if(needs) r~="switch(*p){\n";
 		foreach(i;simpleTokens){
@@ -210,7 +207,7 @@ string caseSimpleToken(string prefix="", bool needs = false){
 				r~=caseSimpleToken(s,true);
 			}
 		}
-		if(needs) r~=`default: tok = token!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
+		if(needs) r~=`default: tok.type = Tok!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
 	}
 	return r;
 }
@@ -228,10 +225,12 @@ import std.c.stdlib;
 struct Lexer{
 	string code; // Manually allocated!
 	Token[] buffer;
+	Token[] errors;
 	size_t n,m; // start and end index in buffer
 	size_t s,e; // global start and end index
 	size_t numAnchors;  // number of existing anchors for this lexer
 	size_t firstAnchor; // first local index that has to remain in buffer
+	int line;
 	/+invariant(){ // useless because DMD does not test the invariant at the proper time...
 		assert(e-s == (m-n+buffer.length)%buffer.length); // relation between (s,e) and (n,m)
 		assert(!(buffer.length&buffer.length-1)); // buffer size is always a power of two
@@ -239,29 +238,28 @@ struct Lexer{
 	}+/
 	this(string c)in{assert(c.length>=4&&!c[$-4]&&!c[$-3]&&!c[$-2]&&!c[$-1]);}body{ // four padding zero bytes required because of UTF
 		code = c;
-		//if(code.length > int.max) return res[0]=tokError("no support for sources exceeding 2GB",null),1; // TODO: move check away from here
-		enum initsize=1;//4096;//685438;//
+		enum initsize=4096;//685438;//
 		buffer = new Token[](initsize);//
 		//buffer = (cast(Token*)malloc(Token.sizeof*initsize))[0..initsize];//
 		numAnchors=0;
 		firstAnchor=size_t.max;
+		line=1;
 		n=s=0;
 		e=lexTo(buffer);
 		m=e&buffer.length-1;
+		if(code.length > int.max) errors~=tokError("no support for sources exceeding 2GB",null),code.length=int.max;
 	}
 	@property ref const(Token) front()const{return buffer[n];}
 	@property bool empty(){return buffer[n].type==Tok!"EOF";}
 	void popFront(){
-		//writeln(buffer.length);
 		assert(!empty,"attempted to popFront empty lexer.");
-		//writeln("popFront"); scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
 		n = n+1 & buffer.length-1; s++;
 		if(s<e) return; // if the buffer still contains elements
 		assert(s==e && n==m);
 		if(!numAnchors){// no anchors, that is easy, just reuse the whole buffer
-			n=0;
-			e+=m=lexTo(buffer);
-			m&=buffer.length-1;
+			buffer[0]=buffer[n-1&buffer.length-1]; // we want at least one token of lookback, for nice error reporting
+			e+=m=lexTo(buffer[n=1..$]);
+			m=m+1&buffer.length-1;
 			return;
 		}
 		assert(firstAnchor<buffer.length);
@@ -292,18 +290,24 @@ struct Lexer{
 		}
 	}
 	Anchor pushAnchor(){
-		//writeln("pushAnchor");scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
 		if(!numAnchors) firstAnchor=n;
 		numAnchors++;
 		return Anchor(s);
 	}
 	void popAnchor(Anchor anchor){
-		//writeln("popAnchor");scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
 		numAnchors--;
 		if(!numAnchors) firstAnchor=size_t.max;
 		n=n+anchor.index-s&buffer.length-1;
 		s=anchor.index;
 	}
+	Token tokError(string s, string rep) {
+		auto r = token!"Error";
+		r.str = s;
+		r.loc = Location(rep, line);
+		GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
+		return r;
+	}
+
 	size_t lexTo(Token[] res)in{assert(res.length);}body{
 		alias mallocAppender appender;
 		if(!code.length) return 0;
@@ -319,20 +323,22 @@ struct Lexer{
 		// text macros:
 		enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}};
 		enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}}; // don't break, continue
-		enum caseNl = q{case '\r':  if(p[1]=='\n') p++; goto case; case '\n': p++; continue;};
+		enum caseNl = q{case '\r':  if(p[1]=='\n') p++; goto case; case '\n': line++; p++; continue;};
 		loop: while(res.length) { // breaks on EOF or buffer full
 			auto begin=p; // start of a token's representation
+			auto sline=line;
 			switch(*p++){
 				// whitespace
 				case 0, 0x1A:
-					tok = token!"EOF";
+					tok.type = Tok!"EOF";
+					tok.loc.rep=p[0..1];
 					res[0]=tok; res=res[1..$];
 					num++;
 					break loop;
 				case ' ', '\t', '\v':
 					continue;   // ignore whitespace
 				case '\r': if(*p=='\n') p++; goto case;
-				case '\n':
+				case '\n': line++;
 					continue;
 			
 				// simple tokens
@@ -341,7 +347,7 @@ struct Lexer{
 				// slash is special
 				case '/':
 					switch(*p){
-						case '=': tok = token!"/="; p++;
+						case '=': tok.type = Tok!"/="; p++;
 						break;
 						case '/': p++;
 							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
@@ -369,29 +375,30 @@ struct Lexer{
 								}
 							}
 							continue; // ignore comment
-						default: tok = token!"/";
+						default: tok.type = Tok!"/";
 					}
 					break;
 				// dot is special
 				case '.':
 					if('0' > *p || *p > '9'){
-						if(*p != '.')      tok = token!".";
-						else if(*++p!='.') tok = token!"..";
-						else               tok = token!"...", p++;
+						if(*p != '.')      tok.type = Tok!".";
+						else if(*++p!='.') tok.type = Tok!"..";
+						else               tok.type = Tok!"...", p++;
 						break;
 					}
 					p++; goto case;
 				// numeric literals
 				case '0': .. case '9':
 					tok = lexNumber(--p);
-					//if(tok.type == Tok!"Error") lexed.put(tok), tok=token!"__error"; // TODO: fix
+					if(tok.type == Tok!"Error") errors~=tok, tok=token!"__error";
 					break;
 				// character literals
 				case '\'':
+					s = p;
 					tok.type = Tok!"''";
 					if(*p=='\\'){
 						try p++, tok.int64 = cast(ulong)readEscapeSeq(p);
-						catch(EscapeSeqException e) e.msg?cast(void)0/*lexed.put(tokError(e.msg))*/:invCharSeq(); // TODO: fix
+						catch(EscapeSeqException e) e.msg?errors~=tokError(e.msg,e.loc):invCharSeq();
 					}else{
 						try{
 							len=0;
@@ -401,7 +408,7 @@ struct Lexer{
 					}
 					if(*p!='\''){
 						//while((*p!='\''||(p++,0)) && *p && *p!=0x1A) mixin(skipUnicodeCont);
-						//lexed.put(tokError("unterminated character constant")); // TODO: fix
+						errors~=tokError("unterminated character constant",(s-1)[0..1]);
 					}else p++;
 					break;
 				// string literals
@@ -418,7 +425,7 @@ struct Lexer{
 						switch(*p){
 							mixin(caseNl); // handle newlines
 							case 0, 0x1A:
-								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+								errors~=tokError("unterminated string literal", (s-1)[0..1]);
 								break readwysiwyg;
 							default: mixin(skipUnicode);
 						}
@@ -431,15 +438,20 @@ struct Lexer{
 					if(*p=='"') goto delimitedstring;
 					if(*p!='{') goto case 'Q';
 					p++; s = p;
-					readtstring: for(int nest=1;;){
-						switch(*p){
-							mixin(caseNl);
-							case 0, 0x1A:
-								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+					del = 0;
+					p++; s = p;
+					readtstring: for(int nest=1;;){ // TODO: implement more efficiently
+						Token tt;
+						code=code[p-code.ptr..$]; // update code to allow recursion
+						lexTo((&tt)[0..1]);
+						p=code.ptr;
+						switch(tt.type){
+							case Tok!"EOF":
+								errors~=tokError("unterminated string literal", (s-1)[0..1]);
 								break readtstring;
-							case '{': p++; nest++; break;
-							case '}': p++; nest--; if(!nest) break readtstring; break;
-							default: mixin(skipUnicode);
+							case Tok!"{":  nest++; break;
+							case Tok!"}":  nest--; if(!nest) break readtstring; break;
+							default: break;
 						}
 					}
 					tok.type = Tok!"``";
@@ -454,7 +466,7 @@ struct Lexer{
 							for(;;){
 								switch(*p){
 									case '\r': if(p[1]=='\n') p++; goto case;
-									case '\n': break;
+									case '\n': line++; break;
 									case 0, 0x1A: break;
 									case 'a': .. case 'z':
 									case 'A': .. case 'Z':
@@ -471,11 +483,11 @@ struct Lexer{
 								}
 								break;
 							}
-							//if(*p!='\n' && *p!='\r') lexed.put(tokError("heredoc identifier must be followed by a new line")); // TODO: fix
+							if(*p!='\n' && *p!='\r') errors~=tokError("heredoc identifier must be followed by a new line",p[0..1]);
 							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont); // mere error handling
 							auto ident=s[0..p-s];
-							if(*p=='\r') p++;
-							if(*p=='\n') p++;
+							if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
+							else if(*p=='\n'){line++;p++;}
 							s=p;
 							readheredoc: while((*p!=0) & (*p!=0x1A)){ // always at start of new line here
 								for(auto ip=ident.ptr, end=ident.ptr+ident.length;;){
@@ -498,11 +510,11 @@ struct Lexer{
 									break;
 								}
 								while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
-								if(*p=='\r') p++;
-								if(*p=='\n') p++;
+								if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
+								else if(*p=='\n'){line++;p++;}
 							}
 							tok.str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
-							if(*p!='"')/*lexed.put(tokError("unterminated heredoc string literal"));*/{} // TODO: fix
+							if(*p!='"') errors~=tokError("unterminated heredoc string literal",(s-1)[0..1]);
 							else p++;
 							break;
 						default:
@@ -512,8 +524,10 @@ struct Lexer{
 								case '(': rdel=')'; s=++p; break;
 								case '<': rdel='>'; s=++p; break;
 								case '{': rdel='}'; s=++p; break;
-								case ' ','\t','\v','\r','\n':
-									//lexed.put(tokError("string delimiter cannot be whitespace")); //TODO: fix
+								case '\r': if(p[1]=='\n') p++; goto case;
+								case '\n': line++; p++; goto case;
+								case ' ','\t','\v':
+									errors~=tokError("string delimiter cannot be whitespace",p[0..1]);
 									goto case;
 								case 0x80: case 0xFF:
 									s=p;
@@ -526,8 +540,8 @@ struct Lexer{
 							}
 							if(ddel){
 								while((*p!=0) & (*p!=0x1A)){
-									if(*p=='\r') p++;
-									if(*p=='\n') p++;
+									if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
+									else if(*p=='\n'){line++;p++;}
 									else if(*p<0x80){p++; continue;}
 									try{
 										auto x=utf.decode(p[0..4],len);
@@ -540,8 +554,8 @@ struct Lexer{
 								}
 							}else{
 								for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);p++){
-									if(*p=='\r') p++;
-									if(*p=='\n') p++;
+									if(*p=='\r'){line++;p++;if(*p=='\n') p++;}
+									else if(*p=='\n'){line++;p++;}
 									else if(*p==rdel) nest--;
 									else if(*p==del) nest++;
 									else if(*p & 0x80){
@@ -553,7 +567,7 @@ struct Lexer{
 								}
 								tok.str = s[0..p-s-1]; // reference to code
 							}
-							if(*p!='"') /*lexed.put(tokError("expected '\"' to close delimited string literal"));*/{} // TODO: fix
+							if(*p!='"') errors~=tokError("expected '\"' to close delimited string literal",p[0..1]);
 							else p++;
 							break;
 					}
@@ -561,12 +575,12 @@ struct Lexer{
 				// Hex string
 				case 'x':
 					if(*p!='"') goto case 'X';
-					auto r=appender!string(); p++;
+					auto r=appender!string(); p++; s=p;
 					readhexstring: for(int c=0,ch,d;;p++,c++){
-						switch(*p){ // TODO: display correct error locations
+						switch(*p){
 							mixin(caseNl); // handle newlines
 							case 0, 0x1A:
-								//lexed.put(tokError("unterminated hex string literal")); // TODO: fix
+								errors~=tokError("unterminated hex string literal",(s-1)[0..1]);
 								break readhexstring;
 							case '0': .. case '9': d=*p-'0'; goto handlexchar;
 							case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
@@ -575,10 +589,10 @@ struct Lexer{
 								if(c&1) r.put(cast(char)(ch|d));
 								else ch=d<<4; break;
 							case '"': // TODO: improve error message
-								//if(c&1) lexed.put(tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""))); // TODO: fix
+								if(c&1) errors~=tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""),p[0..1]);
 								p++; break readhexstring;
 							default:
-								if(*p<128){}// lexed.put(tokError(format("found '%s' when expecting hex digit",*p))); // TODO: fix
+								if(*p<128) errors~=tokError(format("found '%s' when expecting hex digit",*p),p[0..1]);
 								else{
 									s=p;
 									len=0;
@@ -586,7 +600,7 @@ struct Lexer{
 										utf.decode(p[0..4],len);
 										p+=len-1;
 									}catch{invCharSeq();}
-									//lexed.put(tokError(format("found '%s' when expecting hex digit",s[0..len]))); // TODO: fix
+									errors~=tokError(format("found '%s' when expecting hex digit",s[0..len]),s[0..len]);
 								}
 								break;
 						}
@@ -602,12 +616,12 @@ struct Lexer{
 						s = p;
 						switch(*p){
 							case 0, 0x1A:
-								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+								errors~=tokError("unterminated string literal",(start-1)[0..1]);
 								break readdqstring;
 							case '\\':
 								p++;
 								try r.put(readEscapeSeq(p));
-								catch(EscapeSeqException e) e.msg?cast(void)0/*lexed.put(tokError(e.msg))*/:invCharSeq(); // TODO: always error out at the correct location // TODO: fix
+								catch(EscapeSeqException e) e.msg?errors~=tokError(e.msg,e.loc):invCharSeq();
 								continue;
 							case '"': p++; break readdqstring;
 							default: mixin(skipUnicode);
@@ -638,7 +652,7 @@ struct Lexer{
 								break;
 							case 0x80: .. case 0xFF:
 								len=0;
-								try if(isUniUpper(utf.decode(p[0..4],len))) p+=len;
+								try if(isUniAlpha(utf.decode(p[0..4],len))) p+=len;
 									else break readident;
 								catch{break readident;} // will be caught in the next iteration
 								break;
@@ -658,308 +672,310 @@ struct Lexer{
 					try{auto ch=utf.decode(p[0..4],len);
 						s=p, p+=len;
 						if(isUniAlpha(ch)) goto identifier;
-						// lexed.put(tokError(format("unsupported character '%s'",ch))); // TOOD: fix
+						if(!isWhite(ch)) errors~=tokError(format("unsupported character '%s'",ch),s[0..len]);
 						continue;
 					}catch{} goto default; // moved outside handler to make -w shut up
 				default:
 					invCharSeq();
 					continue;
 			}
-			tok.rep=begin[0..p-begin];
+			tok.loc.rep=begin[0..p-begin];
+			tok.loc.line=sline;
 			res[0]=tok; res=res[1..$];
 			num++;
 		}
 		code=code[p-code.ptr..$];
 		return num;
 	}
-}
-/* Lex a number FSM. TDPL p33/35
-	Returns either a valid literal token or one of the following:
-	errExp       = tokError("exponent expected");
-	errsOverflow = tokError("signed integer constant exceeds long.max");
-	errOverflow  = tokError("integer constant exceeds ulong.max");
-	//errRepr      = tokError("numerical constant is not representable in [float|double|real]");
-	errOctDepr   = tokError("octal literals are deprecated");
- */
-private Token lexNumber(ref immutable(char)* _p) {
-	static assert(real.mant_dig <= 64);
-	auto p = _p;
-	enum dlim  = ulong.max / 10; // limit for decimal values (prevents overflow)
-	enum helim = int.max / 10;   // ditto for binary exponent (hex floats)
-	enum elim  = int.max / 10;   // ditto for exponent
-	Token tok;
-	bool leadingzero = 0;
-	bool isfloat = 0;// true if floating point literal
-	bool isimag = 0; // true if imaginary floating point literal. as in DMD, this only works for decimals
-	bool toobig  = 0;// true if value exceeds ulong.max
-	ulong val = 0;   // current literal value
-	real rval = 0.0L;// real value
-	long exp = 0;    // exponent
-	bool neg = 0;    // exponent is negative
-	int dig = 0;     // number of consumed digits
-	int dot = -1;    // position of decimal dot, counted from the left (-1=not encountered yet)
-	int adjexp = 0;  // exponent adjustment due to very long literal
-	enum : int {DEC, BIN, OCT, HEX}
-	int base = DEC;
-	// powers of 2 and 10 for fast computation of rval given the mantissa and exponents. (TODO: Get rid of pw2)
-	static immutable pw2 = mixin("["~{string r; foreach(i;0..16) r~="0x1p"~to!string(1L<<i)~"L,"; return r;}()~"]");
-	static immutable pw10= mixin("["~{string r; for(int i=15;i>=0;i--) r~= "1e"~to!string(1L<<i)~"L,"; return r;}()~"]");
-	static immutable pn10= mixin("["~{string r; for(int i=15;i>=0;i--) r~= "1e-"~to!string(1L<<i)~"L,"; return r;}()~"]");
-	selectbase: switch(*p){
-		case '0':
-			p++;
-			switch(*p){
-				case 'x', 'X':
-					p++;
-					base = HEX;
-					while(*p == '0') p++; // eat leading zeros
-					readhex: for(;dig<16;p++){
-						switch(*p){
-							case '0': .. case '9':
-								val = val << 4 | *p-'0'; dig++;
-								break;
-							case 'a': .. case 'f':
-								val = val << 4 | *p-('a'-0xa); dig++;
-								break;
-							case 'A': .. case 'F':
-								val = val << 4 | *p-('A'-0xA); dig++;
-								break;
-							case '.':
-								if(p[1] != '.' && dot == -1) dot = dig, isfloat=1;
-								else break readhex; goto case;
-							case '_': // ignore embedded _
-								break; 
-							default:
-								break readhex;	
-						}
-					}
-					if(dig == 16 && ('8' <= *p && *p <= '9' || 'a' <= *p && *p <= 'f' || 'A' <=*p && *p <= 'F')){ // round properly
-						val++;
-						if(!val) val = 1, adjexp = 16; // cope with overflow
-					}
-					consumehex: for(;;p++){
-						switch(*p){
-							case '0': .. case '9':
-							case 'a': .. case 'f':
-							case 'A': .. case 'F':
-								dig++; adjexp++;
-								break;
-							case '.':
-								if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
-								else break consumehex; goto case;
-							case '_': // ignore embedded _
-								break;
-							case 'p', 'P':
-								isfloat = 1;
-								p++;
-								neg = 0;
-								switch(*p){
-									case '-': neg = 1; goto case;
-									case '+': p++;     goto default;
-									default:  break; 
-								}
-								if('0'> *p || *p > '9') goto Lexp;
-								readhexp: for(;;p++){
-									switch(*p){
-										case '0': .. case '9':
-											exp = (exp << 1) + (exp << 3) + *p -'0';
-											break;
-										case '_': // ignore embedded _.
-											break;
-										default:
-											break readhexp;
-									}
-									if(exp > helim){p++;break readhexp;}
-								}
-								goto default;
-							default:
-								break consumehex;	
-						}
-					}
-					isfloat |= *p == 'f' || *p == 'F';
-					if(isfloat){ // compute value of hex floating point literal
-						if(dot==-1) dot = dig;
-						if(neg) exp += dig - dot - adjexp << 2L;
-						else    exp -= dig - dot - adjexp << 2L;
-						if(exp<0) neg = !neg, exp=-exp;
-						if('0' <= *p && *p <= '9' || exp>=8184 || !val){
-							p++, rval = neg || !val ? .0L : real.infinity;
-							while('0' <= *p && *p <= '9') p++;
-						}else{ // TODO: Could construct value directly in memory
-							rval = 1.0L;
-							for(int i=0,j=exp&-1u;i<16;i++,j>>=1) if(j&1) rval*=pw2[i];
-							if(neg) rval = val / rval;
-							else rval *= val;
-						}
-					}
-					break selectbase;
-				case 'b', 'B':
-					p++;
-					base = BIN;
-					readbin: for(;dig<64;p++){
-						switch(*p){
-							case '0', '1':
-								val <<= 1; dig++;
-								val |= *p-'0'; goto case;
-							case '_': // ignore embedded _
-								break;
-							default:
-								break readbin;
-						}
-					}
-					break selectbase;
-				/*case 'o': // non-standard
-					base = OCT;*/
-				default: // 0xxx-style octal is deprecated, interpret as decimal and give an error
-					leadingzero = 1;
-					break;
-			}
-			while(*p == '0') p++; // eat leading zeros of decimal
-			if(('1' > *p || *p > '9') && *p != '.'){
-				isfloat |= *p == 'f' || *p == 'F' || (*p=='i'||*p=='L'&&p[1]=='i');
-				leadingzero=0; break;
-			}
-			goto case;
-		case '1': .. case '9':
-			readdec: for(;;p++){
+	
+	/* Lex a number FSM. TDPL p33/35
+		Returns either a valid literal token or one of the following:
+		errExp       = tokError("exponent expected");
+		errsOverflow = tokError("signed integer constant exceeds long.max");
+		errOverflow  = tokError("integer constant exceeds ulong.max");
+		//errRepr      = tokError("numerical constant is not representable in [float|double|real]");
+		errOctDepr   = tokError("octal literals are deprecated");
+	 */
+	private Token lexNumber(ref immutable(char)* _p) {
+		static assert(real.mant_dig <= 64);
+		auto p = _p;
+		enum dlim  = ulong.max / 10; // limit for decimal values (prevents overflow)
+		enum helim = int.max / 10;   // ditto for binary exponent (hex floats)
+		enum elim  = int.max / 10;   // ditto for exponent
+		Token tok;
+		bool leadingzero = 0;
+		bool isfloat = 0;// true if floating point literal
+		bool isimag = 0; // true if imaginary floating point literal. as in DMD, this only works for decimals
+		bool toobig  = 0;// true if value exceeds ulong.max
+		ulong val = 0;   // current literal value
+		real rval = 0.0L;// real value
+		long exp = 0;    // exponent
+		bool neg = 0;    // exponent is negative
+		int dig = 0;     // number of consumed digits
+		int dot = -1;    // position of decimal dot, counted from the left (-1=not encountered yet)
+		int adjexp = 0;  // exponent adjustment due to very long literal
+		enum : int {DEC, BIN, OCT, HEX}
+		int base = DEC;
+		// powers of 2 and 10 for fast computation of rval given the mantissa and exponents. (TODO: Get rid of pw2)
+		static immutable pw2 = mixin("["~{string r; foreach(i;0..16) r~="0x1p"~to!string(1L<<i)~"L,"; return r;}()~"]");
+		static immutable pw10= mixin("["~{string r; for(int i=15;i>=0;i--) r~= "1e"~to!string(1L<<i)~"L,"; return r;}()~"]");
+		static immutable pn10= mixin("["~{string r; for(int i=15;i>=0;i--) r~= "1e-"~to!string(1L<<i)~"L,"; return r;}()~"]");
+		selectbase: switch(*p){
+			case '0':
+				p++;
 				switch(*p){
-					case '0': .. case '9':
-						val = (val << 1) + (val << 3) + *p -'0'; dig++;
-						break;
-					case '.':
-						if(p[1] != '.' && dot == -1) dot = dig, isfloat=1; // break; }
-						else break readdec; goto case;
-					case '_': // ignore embedded _
-						break;
-					default:
-						break readdec;
-				}
-				if(val >= dlim){
-					p++;
-					if(val > dlim) break readdec;
-					if('0' <= *p && *p <= '5') val = (val << 1) + (val << 3) + *p -'0', dig++, p++;
-					break readdec;
-				}
-			}
-			ulong val2=0, mulp=1;
-			enum mlim = ulong.max/10000000;
-			consumedec: for(;;p++){
-				switch(*p){
-					case '0': .. case '9':
-						dig++; adjexp++; toobig=1;
-						if(mulp<mlim) val2 = (val2 << 1) + (val2 << 3) + *p -'0', mulp*=10, adjexp--;
-						break;
-					case '.':
-						if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
-						else break consumedec; goto case;
-					case '_': // ignore embedded _
-						break;
-					case 'e', 'E':
-						isfloat = 1;
+					case 'x', 'X':
 						p++;
-						neg = 0;
-						switch(*p){
-							case '-': neg = 1; goto case;
-							case '+': p++;     goto default;
-							default:  break; 
-						}
-						if('0'> *p || *p > '9') goto Lexp;
-						readexp: for(;;p++){
+						base = HEX;
+						while(*p == '0') p++; // eat leading zeros
+						readhex: for(;dig<16;p++){
 							switch(*p){
 								case '0': .. case '9':
-									exp = (exp << 1) + (exp << 3) + *p -'0';
+									val = val << 4 | *p-'0'; dig++;
 									break;
-								case '_': // ignore embedded _.
+								case 'a': .. case 'f':
+									val = val << 4 | *p-('a'-0xa); dig++;
+									break;
+								case 'A': .. case 'F':
+									val = val << 4 | *p-('A'-0xA); dig++;
+									break;
+								case '.':
+									if(p[1] != '.' && dot == -1) dot = dig, isfloat=1;
+									else break readhex; goto case;
+								case '_': // ignore embedded _
+									break; 
+								default:
+									break readhex;	
+							}
+						}
+						if(dig == 16 && ('8' <= *p && *p <= '9' || 'a' <= *p && *p <= 'f' || 'A' <=*p && *p <= 'F')){ // round properly
+							val++;
+							if(!val) val = 1, adjexp = 16; // cope with overflow
+						}
+						consumehex: for(;;p++){
+							switch(*p){
+								case '0': .. case '9':
+								case 'a': .. case 'f':
+								case 'A': .. case 'F':
+									dig++; adjexp++;
+									break;
+								case '.':
+									if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
+									else break consumehex; goto case;
+								case '_': // ignore embedded _
+									break;
+								case 'p', 'P':
+									isfloat = 1;
+									p++;
+									neg = 0;
+									switch(*p){
+										case '-': neg = 1; goto case;
+										case '+': p++;     goto default;
+										default:  break; 
+									}
+									if('0'> *p || *p > '9') goto Lexp;
+									readhexp: for(;;p++){
+										switch(*p){
+											case '0': .. case '9':
+												exp = (exp << 1) + (exp << 3) + *p -'0';
+												break;
+											case '_': // ignore embedded _.
+												break;
+											default:
+												break readhexp;
+										}
+										if(exp > helim){p++;break readhexp;}
+									}
+									goto default;
+								default:
+									break consumehex;	
+							}
+						}
+						isfloat |= *p == 'f' || *p == 'F';
+						if(isfloat){ // compute value of hex floating point literal
+							if(dot==-1) dot = dig;
+							if(neg) exp += dig - dot - adjexp << 2L;
+							else    exp -= dig - dot - adjexp << 2L;
+							if(exp<0) neg = !neg, exp=-exp;
+							if('0' <= *p && *p <= '9' || exp>=8184 || !val){
+								p++, rval = neg || !val ? .0L : real.infinity;
+								while('0' <= *p && *p <= '9') p++;
+							}else{ // TODO: Could construct value directly in memory
+								rval = 1.0L;
+								for(int i=0,j=exp&-1u;i<16;i++,j>>=1) if(j&1) rval*=pw2[i];
+								if(neg) rval = val / rval;
+								else rval *= val;
+							}
+						}
+						break selectbase;
+					case 'b', 'B':
+						p++;
+						base = BIN;
+						readbin: for(;dig<64;p++){
+							switch(*p){
+								case '0', '1':
+									val <<= 1; dig++;
+									val |= *p-'0'; goto case;
+								case '_': // ignore embedded _
 									break;
 								default:
-									break readexp;
+									break readbin;
 							}
-							if(exp > elim){p++;break readexp;}
 						}
-					goto default;
-					default:
-						break consumedec;
+						break selectbase;
+					/*case 'o': // non-standard
+						base = OCT;*/
+					default: // 0xxx-style octal is deprecated, interpret as decimal and give an error
+						leadingzero = 1;
+						break;
 				}
-			}
-			isfloat |= *p == 'f' || *p == 'F' || *p == 'i';
-			if(isfloat){ // compute value of floating point literal (not perfectly accurate)
-				if(dot==-1) dot = dig;
-				if(neg) exp += cast(long) dig - dot - adjexp;
-				else    exp -= cast(long) dig - dot - adjexp;
-				if(exp<0) neg = !neg, exp=-exp;
-				if('0' <= *p && *p <= '9' || exp>=32768 || !val){
-					rval = neg || !val ? .0L : real.infinity;
-					while('0' <= *p && *p <= '9') p++; // BUGS: Ignores 'overlong' input.
-				}else{
-					//Move some digits from val to val2 for more precise rounding behavior
-					while(val>0x7fffffffffff) val2+=val%10*mulp, val/=10, mulp = (mulp<<1) + (mulp<<3);
-					rval = cast(real)val*mulp+val2;
-					if(neg){for(int i=0,j=1<<15;i<16;i++,j>>=1) if(exp&j) rval*=pn10[i];}
-					else for(int i=0,j=1<<15;i<16;i++,j>>=1) if(exp&j) rval*=pw10[i];
+				while(*p == '0') p++; // eat leading zeros of decimal
+				if(('1' > *p || *p > '9') && *p != '.'){
+					isfloat |= *p == 'f' || *p == 'F' || (*p=='i'||*p=='L'&&p[1]=='i');
+					leadingzero=0; break;
 				}
-			}
-			goto default;
-		default:
-			break;
+				goto case;
+			case '1': .. case '9':
+				readdec: for(;;p++){
+					switch(*p){
+						case '0': .. case '9':
+							val = (val << 1) + (val << 3) + *p -'0'; dig++;
+							break;
+						case '.':
+							if(p[1] != '.' && dot == -1) dot = dig, isfloat=1; // break; }
+							else break readdec; goto case;
+						case '_': // ignore embedded _
+							break;
+						default:
+							break readdec;
+					}
+					if(val >= dlim){
+						p++;
+						if(val > dlim) break readdec;
+						if('0' <= *p && *p <= '5') val = (val << 1) + (val << 3) + *p -'0', dig++, p++;
+						break readdec;
+					}
+				}
+				ulong val2=0, mulp=1;
+				enum mlim = ulong.max/10000000;
+				consumedec: for(;;p++){
+					switch(*p){
+						case '0': .. case '9':
+							dig++; adjexp++; toobig=1;
+							if(mulp<mlim) val2 = (val2 << 1) + (val2 << 3) + *p -'0', mulp*=10, adjexp--;
+							break;
+						case '.':
+							if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
+							else break consumedec; goto case;
+						case '_': // ignore embedded _
+							break;
+						case 'e', 'E':
+							isfloat = 1;
+							p++;
+							neg = 0;
+							switch(*p){
+								case '-': neg = 1; goto case;
+								case '+': p++;     goto default;
+								default:  break; 
+							}
+							if('0'> *p || *p > '9') goto Lexp;
+							readexp: for(;;p++){
+								switch(*p){
+									case '0': .. case '9':
+										exp = (exp << 1) + (exp << 3) + *p -'0';
+										break;
+									case '_': // ignore embedded _.
+										break;
+									default:
+										break readexp;
+								}
+								if(exp > elim){p++;break readexp;}
+							}
+						goto default;
+						default:
+							break consumedec;
+					}
+				}
+				isfloat |= *p == 'f' || *p == 'F' || *p == 'i';
+				if(isfloat){ // compute value of floating point literal (not perfectly accurate)
+					if(dot==-1) dot = dig;
+					if(neg) exp += cast(long) dig - dot - adjexp;
+					else    exp -= cast(long) dig - dot - adjexp;
+					if(exp<0) neg = !neg, exp=-exp;
+					if('0' <= *p && *p <= '9' || exp>=32768 || !val){
+						rval = neg || !val ? .0L : real.infinity;
+						while('0' <= *p && *p <= '9') p++; // BUGS: Ignores 'overlong' input.
+					}else{
+						//Move some digits from val to val2 for more precise rounding behavior
+						while(val>0x7fffffffffff) val2+=val%10*mulp, val/=10, mulp = (mulp<<1) + (mulp<<3);
+						rval = cast(real)val*mulp+val2;
+						if(neg){for(int i=0,j=1<<15;i<16;i++,j>>=1) if(exp&j) rval*=pn10[i];}
+						else for(int i=0,j=1<<15;i<16;i++,j>>=1) if(exp&j) rval*=pw10[i];
+					}
+				}
+				goto default;
+			default:
+				break;
+		}
+		if(isfloat){
+			tok.flt80 = rval;
+			if(*p == 'f' || *p == 'F') p++, tok.type = Tok!".0f";
+			else if(*p == 'L') p++, tok.type = Tok!".0L";
+			else tok.type = Tok!".0"; // TODO: Complain if not representable
+			if(*p == 'i') p++, tok.type += 3; static assert(Tok!".0f"+3==Tok!".0fi" && Tok!".0"+3==Tok!".0i" && Tok!".0L"+3==Tok!".0Li");
+			return _p = p, tok;
+		}
+		// parse suffixes:
+		bool sfxl = 0, sfxu = 0;
+		switch(*p){
+			case 'L':
+				sfxl = 1;
+				p++;
+				if(*p == 'u' || *p == 'U') sfxu = 1, p++;
+				break;
+			case 'u', 'U':
+				sfxu = 1;
+				p++;
+				if(*p=='L') sfxl = 1, p++;
+				break;
+			default:
+				break;
+		}
+		tok.int64 = val;
+		// determining literal type according to TDPL p32
+		switch(sfxl << 1 | sfxu){
+			case 0:
+				if(val <= int.max) tok.type = Tok!"0";
+				else               tok.type = Tok!"0L";
+				break;
+			case 1:         
+				if(val <= uint.max) tok.type = Tok!"0U";
+				else                tok.type = Tok!"0LU";
+				break;
+			case 2:
+				tok.type = Tok!"0L";
+				break;
+			default:
+				tok.type = Tok!"0LU";
+		}
+		if(tok.type == Tok!"0L"){
+			if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
+			else if(val > long.max && base == HEX) tok.type = Tok!"0LU"; // EXTENSION: Just here to match what DMD does
+		}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
+		if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
+		return _p=p, tok;
+		Lexp: return _p=p, tokError("exponent expected",p[0..1]);
 	}
-	if(isfloat){
-		tok.flt80 = rval;
-		if(*p == 'f' || *p == 'F') p++, tok.type = Tok!".0f";
-		else if(*p == 'L') p++, tok.type = Tok!".0L";
-		else tok.type = Tok!".0"; // TODO: Complain if not representable
-		if(*p == 'i') p++, tok.type += 3; static assert(Tok!".0f"+3==Tok!".0fi" && Tok!".0"+3==Tok!".0i" && Tok!".0L"+3==Tok!".0Li");
-		return _p = p, tok;
-	}
-	// parse suffixes:
-	bool sfxl = 0, sfxu = 0;
-	switch(*p){
-		case 'L':
-			sfxl = 1;
-			p++;
-			if(*p == 'u' || *p == 'U') sfxu = 1, p++;
-			break;
-		case 'u', 'U':
-			sfxu = 1;
-			p++;
-			if(*p=='L') sfxl = 1, p++;
-			break;
-		default:
-			break;
-	}
-	tok.int64 = val;
-	// determining literal type according to TDPL p32
-	switch(sfxl << 1 | sfxu){
-		case 0:
-			if(val <= int.max) tok.type = Tok!"0";
-			else               tok.type = Tok!"0L";
-			break;
-		case 1:         
-			if(val <= uint.max) tok.type = Tok!"0U";
-			else                tok.type = Tok!"0LU";
-			break;
-		case 2:
-			tok.type = Tok!"0L";
-			break;
-		default:
-			tok.type = Tok!"0LU";
-	}
-	if(tok.type == Tok!"0L"){
-		if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
-		else if(val > long.max && base == HEX) tok.type = Tok!"0LU"; // EXTENSION: Just here to match what DMD does
-	}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
-	if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
-	return _p=p, tok;
-	Lexp: return _p=p, tokError("exponent expected",p[0..1]);
 }
 
 // Exception thrown on unrecognized escape sequences
-class EscapeSeqException: Exception{this(string msg){super(msg);}}
+class EscapeSeqException: Exception{string loc; this(string msg,string loc){this.loc=loc;super(msg);}}
 
 /* Reads an escape sequence and increases the given pointer to point past the sequence
 	returns a dchar representing the read escape sequence or
 	throws EscapeSeqException if the input is not well formed
  */
-private dchar readEscapeSeq(ref immutable(char)* _p) {
+private dchar readEscapeSeq(ref immutable(char)* _p)in{assert(*(_p-1)=='\\');}body{
 	auto p=_p;
 	switch(*p){
 		case '\'','\?','"','\\':
@@ -975,7 +991,7 @@ private dchar readEscapeSeq(ref immutable(char)* _p) {
 			auto s=p;
 			for(int r=*p++-'0', i=0;;i++, r=(r<<3)+*p++-'0')
 				if(i>2||'0'>*p||*p>'7'){
-					_p=p; if(r>255) throw new EscapeSeqException("escape sequence '\\"~s[0..p-s]~"' exceeds ubyte.max");
+					_p=p; if(r>255) throw new EscapeSeqException(format("escape sequence '\\%s' exceeds ubyte.max",s[0..p-s]),(s-1)[0..p-s+1]);
 					return cast(dchar)r;
 				}
 		case 'x', 'u', 'U':
@@ -990,17 +1006,17 @@ private dchar readEscapeSeq(ref immutable(char)* _p) {
 					default:
 						_p=p;
 						throw new EscapeSeqException(format("escape hex sequence has %s digit%s instead of %s",
-						                                    toEngNum(cast(uint)i),(i!=1?"s":""),toEngNum(numh)));
+						                                    toEngNum(cast(uint)i),(i!=1?"s":""),toEngNum(numh)),(_p-1)[0..p-_p+1]);
 				}
 				p++;
 			}
 			_p=p;
-			if(!utf.isValidDchar(cast(dchar)r)) throw new EscapeSeqException(format("invalid UTF character '\\%s'",s[0..p-s]));
+			if(!utf.isValidDchar(cast(dchar)r)) throw new EscapeSeqException(format("invalid UTF character '\\%s'",s[0..p-s]),(s-1)[0..p-s+1]);
 			return cast(dchar)r;
 		case '&':
 			auto s=++p;
 			while('A'<=*p && *p <='Z' || 'a'<=*p && *p <='z') p++;
-			if(*p!=';') throw new EscapeSeqException("unterminated named character entity");
+			if(*p!=';') throw new EscapeSeqException("unterminated named character entity",p[0..1]);
 			_p=p+1;
 			switch(s[0..p-s]){
 				mixin({
@@ -1010,18 +1026,18 @@ private dchar readEscapeSeq(ref immutable(char)* _p) {
 					foreach(x;entities) r~=`case "`~x.k~`": return cast(dchar)`~to!string(x.v)~`;`;
 					return r;
 				}());
-				default: throw new EscapeSeqException(format("unrecognized named character entity '\\&%s;'",s[0..p-s]));
+				default: throw new EscapeSeqException(format("unrecognized named character entity '\\&%s'",s[0..p-s+1]),(s-1)[0..p-s+2]);
 			}
 		default:
-			if(*p<128){_p=p+1; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",*p));}
+			if(*p<128){_p=p+1; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",*p),p[0..1]);}
 			else{
 				auto s=p;
 				size_t len=0;
 				try{
 					utf.decode(p[0..4],len);
 					p+=len;
-				}catch{throw new EscapeSeqException(null);}
-				_p=p; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",s[0..len]));
+				}catch{throw new EscapeSeqException(null,p[0..1]);}
+				_p=p; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",s[0..len]),s[0..len]);
 			}
 	}
 }

@@ -3,10 +3,10 @@ module parser;
 import std.array, std.range, std.algorithm, std.traits, std.conv: to;
 import std.typetuple;
 
-import lexer, util;
+import lexer, error, util;
 
 abstract class Node{
-	Location loc;
+	string loc;
 }
 
 class Expression: Node{ // empty expression if instanced
@@ -15,7 +15,6 @@ class Expression: Node{ // empty expression if instanced
 	private string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
 }
 class Statement: Node{ // empty statement if instanced
-	Location loc;
 	override string toString(){return ";";}
 }
 class Declaration: Statement{ // empty declaration if instanced
@@ -361,7 +360,6 @@ class TypeidExp: Expression{
 }
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
-  Location loc;
   override string toString(){return "Type";}
 }
 
@@ -912,12 +910,18 @@ template matchingDelimiter(TokenType left) if(isLeftDelimiter){
 		}
 	}();
 }
+
+bool isClosingToken(TokenType type){
+	return type==Tok!")" || type==Tok!"}" || type==Tok!"]" || type==Tok!";";
+}
+
 //private template isCode(R){enum isCode=isForwardRange!R && is(Unqual!(ElementType!R) == Token);}
 private template GetStringOf(T){enum GetStringOf=T.stringof;} // Workaround for strange compiler limitations
 private template GetStringOf(S: UnaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 private template GetStringOf(S: BinaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 private template GetStringOf(S: PostfixExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 private template GetStringOf(S: QualifiedType!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
+//private template GetStringOf(S: S!Y,Y...){enum GetStringOf=S.stringof~"!("~Y.stringof[6..$-1]~")";} // why doesn't that work?
 
 
 private template getParseProc(T...){
@@ -954,7 +958,7 @@ private template doParseImpl(bool d,T...){
 					return `nonEmpty!"`~what~`"();`"\n"~doParseImpl!(d,T[1..$]);
 				case "OPT":
 				static if(T[0]=="OPT")
-					return (d?"auto ":"")~T[2]~" = tok.type==Tok!\""~T[3]~"\" || tok.type==Tok!\")\" ? null : "~
+					return (d?"auto ":"")~T[2]~" = ttype==Tok!\""~T[3]~"\" || ttype==Tok!\")\" ? null : "~
 						getParseProc!(T[1..$]).prc~";\n"~doParseImpl!(d,T[1+getParseProc!T.off..$]);
 				default: return "expect(Tok!\""~T[0]~"\");\n"~doParseImpl!(d,T[1..$]);;
 			}
@@ -976,7 +980,7 @@ private template parseDefOnly(T...){
 }
 private template doOptParse(T...){
 	static assert(is(typeof(T[0]):string));
-	enum doOptParse=parseDefOnly!T~"if(tok.type==Tok!\""~T[0]~"\"){\n"~doParseImpl!(false,"_",T[1..$])~"}\n";
+	enum doOptParse=parseDefOnly!T~"if(ttype==Tok!\""~T[0]~"\"){\n"~doParseImpl!(false,"_",T[1..$])~"}\n";
 }
 
 private template fillParseNamesImpl(int n,string b,T...){ // val: new TypeTuple, off: that many names have been filled in
@@ -1020,31 +1024,49 @@ private template rule(T...){ // applies a grammar rule and returns the result
 
 
 alias Lexer Code;
+alias ChunkGCAlloc Alloc;
 
-private struct Parser(alias Alloc=ChunkGCAlloc){
+private struct Parser{
 	alias Alloc.New New;
 	alias Alloc.appender appender;
 	enum filename = "tt.d";
 	Code code;
+	ErrorHandler handler;
 	int muteerr=0;
-	this(Code code){
+	this(Code code, ErrorHandler handler){
 		this.code = code;
-		//tok=code.front;
-		if(tok.type==Tok!"Error"){error(tok.str);}
-		while(tok.type==Tok!"Error") nextToken();
+		_tok=&code.front();
+		ttype=_tok.type;
+		this.handler = handler;
 	}
-	void error(string msg){Location().error(msg);}
-	@property ref const(Token) tok(){return code.buffer[code.n];} // breaking encapsulation for efficiency
+	@property ref const(Token) tok(){return *_tok;};
+	const(Token)* _tok;
+	TokenType ttype;
 	void nextToken(){
-	tryagain:
-		if(tok.type==Tok!"EOF") return;
+		if(ttype==Tok!"EOF") return;
 		code.popFront();
-		if(tok.type==Tok!"Error" && !muteerr){error(tok.str); goto tryagain;}
+		_tok=&code.buffer[code.n];//_tok=&code.front(); // breaking encapsulation for efficiency
+		ttype=_tok.type;
+
+		if(!code.errors.length || muteerr) return;
+		while(code.errors.length&&code.errors[0].loc.rep.ptr<_tok.loc.rep.ptr){
+			handler.error(code.errors[0].str,code.errors[0].loc);
+			code.errors.popFront();
+		}
+	}
+	void error(string err, Location loc=Location.init){
+		if(code.errors.length&&code.errors[0].loc.rep.ptr==loc.rep.ptr) return; // don't re-report lexer errors
+		if(loc.line==0) loc=tok.loc;
+		handler.error(err,loc);
 	}
 	auto saveState(){muteerr++; return code.pushAnchor();} // saves the state and mutes all error messages until the state is restored
-	void restoreState(Anchor state){muteerr--; code.popAnchor(state);}
+	void restoreState(Anchor state){
+		muteerr--; code.popAnchor(state);
+		_tok=&code.buffer[code.n];//_tok=&code.front(); // breaking encapsulation for efficiency
+		ttype=_tok.type;
+	}
 	Token peek(int x=1){
-		if(x<code.e-code.s) return code.buffer[code.n+x & code.buffer.length-1];
+		if(x<code.e-code.s) return code.buffer[code.n+x & code.buffer.length-1]; // breaking encapsulation for efficiency
 		auto save = saveState();
 		foreach(i;0..x) nextToken();
 		auto t=tok;
@@ -1063,29 +1085,36 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	}
 	static class ParseErrorException: Exception{this(string s){super(s);}} alias ParseErrorException PEE;
 	void expect(TokenType type){
-		if(tok.type==type) nextToken();
+		if(ttype==type){nextToken(); return;}
 		else{ // employ some bad heuristics to avoid cascading error messages. TODO: make this better
-			if(tok.type==Tok!"__error") error("expected '"~TokenTypeToString(type)~"'");
-			else error("found '" ~ tok.toString() ~ "' when expecting '" ~ TokenTypeToString(type) ~"'");
-			if(tok.type!=Tok!")" && tok.type!=Tok!"}" && tok.type!=Tok!"]"){
+			bool rd=isClosingToken(type);
+			Location loc=tok.loc;
+			import utf=std.utf;
+			if(rd){
+				loc=code.buffer[code.n-1&code.buffer.length-1].loc;
+				loc.rep=(loc.rep.ptr+loc.rep.length)[0..utf.stride(loc.rep.ptr[loc.rep.length..loc.rep.length+4],0)];
+			}
+			if(rd||ttype==Tok!"__error") error("expected '"~TokenTypeToString(type)~"'",loc);
+			else error("found '" ~ tok.toString() ~ "' when expecting '" ~ TokenTypeToString(type) ~"'",loc);
+			if(!isClosingToken(ttype) ^ isClosingToken(type)){
 				nextToken();
-				if(tok.type==type) nextToken();
+				if(ttype!=Tok!"i"&&ttype==type) nextToken();
 			}
 		}
 	}
 	void expectErr(string what)(){
-		if(tok.type==Tok!"__error") error("expected "~what);
-		else error("found '" ~ tok.toString() ~ "' when expecting " ~ what);
-		if(tok.type!=Tok!")" && tok.type!=Tok!"}" && tok.type!=Tok!"]") nextToken();
+		if(ttype==Tok!"__error") error("expected "~what,tok.loc);
+		else error("found '" ~ tok.toString() ~ "' when expecting " ~ what,tok.loc);
+		if(ttype!=Tok!")" && ttype!=Tok!"}" && ttype!=Tok!"]" && ttype!=Tok!";") nextToken();
 	}
 	bool skip(TokenType type){
-		if(tok.type != type) return false;
+		if(ttype != type) return false;
 		nextToken(); return true;
 	}
 	bool skip(){nextToken(); return true;}
 	Identifier parseIdentifier(){ // Identifier(null) is the error value
 		string name;
-		if(tok.type==Tok!"i") name=tok.name;
+		if(ttype==Tok!"i") name=tok.name;
 		else expectErr!"identifier"();
 		auto e=New!Identifier(name); nextToken();
 		return e;
@@ -1095,20 +1124,22 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		Expression e;
 		void errori(){expectErr!"identifier following '.'"();}
 		static if(T.length==0){
-			if(tok.type==Tok!"."){nextToken(); e = New!Identifier(""); goto middle;}
-			if(tok.type!=Tok!"i"){expectErr!"identifier"(); mixin(rule!ErrorExp);}
+			if(ttype==Tok!"."){nextToken(); e = New!Identifier(""); goto middle;}
+			if(ttype!=Tok!"i"){expectErr!"identifier"(); mixin(rule!ErrorExp);}
 			e = New!Identifier(tok.str); nextToken();
 		}else{e=args[0]; goto middle;}
 		for(bool multerr=0;;){
-			if(tok.type==Tok!"."){
+			if(ttype==Tok!"."){
 				nextToken(); 
 			middle:
-				if(tok.type!=Tok!"i"){errori(); mixin(rule!(BinaryExp!(Tok!"."),Existing,q{e,New!ErrorExp}));}
+				if(ttype!=Tok!"i"){errori(); mixin(rule!(BinaryExp!(Tok!"."),Existing,q{e,New!ErrorExp}));}
 				e = New!(BinaryExp!(Tok!"."))(e,New!Identifier(tok.str));
 				nextToken();
-			}else if(tok.type==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+			}else if(ttype==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
 				e=led(e);
-				if(tok.type==Tok!"!"&&!multerr && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is") error("multiple '!' arguments are disallowed"), multerr=1;
+				if(ttype==Tok!"!"&&!multerr && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+					error("multiple '!' arguments are disallowed"), multerr=1;
+				}
 			}
 			else break;
 		}
@@ -1120,9 +1151,9 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		if(!skip(Tok!"i")) return false;
 		for(;;){
 			if(skip(Tok!".")){if(!skip(Tok!"i")) return false;}
-			else if(tok.type==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+			else if(ttype==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
 				nextToken();
-				if(tok.type==Tok!"("){
+				if(ttype==Tok!"("){
 					nextToken();
 					if(!skipToUnmatched()||!skip(Tok!")")) return false;
 				}else skip();
@@ -1133,13 +1164,13 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Expression[] parseArgumentList(string delim, bool nonempty=false, Entry=AssignExp, T...)(T args){
 		auto e=appender!(Expression[])();
 		foreach(x;args) e.put(x); // static foreach
-		static if(args.length) if(tok.type==Tok!",") nextToken(); else return e.data;
-		static if(!nonempty) if(tok.type==Tok!delim) return e.data;
+		static if(args.length) if(ttype==Tok!",") nextToken(); else return e.data;
+		static if(!nonempty) if(ttype==Tok!delim) return e.data;
 		do{
 			mixin(doParse!(Entry,"e1")); e.put(e1);
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else break;
-		}while(tok.type!=Tok!delim && tok.type!=Tok!"EOF");
+		}while(ttype!=Tok!delim && ttype!=Tok!"EOF");
 		return e.data;
 	}
 	// allows interspersed associative and non-associative expressions. Entry.key must be a subset of Entry.value
@@ -1150,43 +1181,43 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		else static if(is(ValueType==Expression)) alias AssignExp Value;
 		else alias ValueType Value;
 		auto e=appender!(Expression[])();
-		static if(!nonempty) if(tok.type==Tok!delim) return e.data;
+		static if(!nonempty) if(ttype==Tok!delim) return e.data;
 		do{
 			mixin(doParse!(Value,"e1"));
 			auto e2=cast(Key)e1;
-			if(tok.type==Tok!":" && e2){
+			if(ttype==Tok!":" && e2){
 				mixin(doParse!("_",Value,"e3"));
 				e.put(New!Entry(e2,e3));
 			}else e.put(e1);
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else break;
-		}while(tok.type!=Tok!delim && tok.type!=Tok!"EOF");
+		}while(ttype!=Tok!delim && ttype!=Tok!"EOF");
 		return e.data;
 	}
 	Expression parseTypeOrExpression(){
 		Expression e;
 		auto save=saveState();
-		auto ist=skipType()&&(tok.type==Tok!","||tok.type==Tok!")");
+		auto ist=skipType()&&(ttype==Tok!","||ttype==Tok!")");
 		restoreState(save);
 		e=ist?parseType():parseExpression(rbp!(Tok!","));
 		return e;
 	}
 	Expression[] parseTuple(string delim, bool nonempty=false)(){
 		auto e=appender!(Expression[])();
-		static if(!nonempty) if(tok.type==Tok!delim) return e.data;
+		static if(!nonempty) if(ttype==Tok!delim) return e.data;
 		do{
 			e.put(parseTypeOrExpression());
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else break;
-		}while(tok.type!=Tok!delim && tok.type!=Tok!"EOF");
+		}while(ttype!=Tok!delim && ttype!=Tok!"EOF");
 		return e.data;
 	}
 	Expression parseTemplateSingleArg(){
-		switch(tok.type){
+		switch(ttype){
 			case Tok!"i": 
 				{auto e = New!Identifier(tok.name); nextToken(); return e;}
 			mixin(getTTCases(basicTypes));
-				{auto e = New!BasicType(tok.type); nextToken(); return e;}
+				{auto e = New!BasicType(ttype); nextToken(); return e;}
 			mixin(getTTCases(literals));
 				{auto e = New!LiteralExp(tok); nextToken(); return e;}
 			default: expectErr!"template argument"();
@@ -1196,12 +1227,12 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	// Operator precedence expression parser
 	// null denotation
 	Expression nud() {
-		switch(tok.type){
+		switch(ttype){
 			case Tok!"i",Tok!".": return parseIdentifierList();
 			case Tok!"``", Tok!"``c", Tok!"``w", Tok!"``d": // adjacent string tokens get concatenated
 				Token t=tok;
-				for(nextToken();tok.type==t.type||tok.type==Tok!"``";nextToken()){
-					if(t.type==Tok!"``" && Tok!"``c"<=tok.type && tok.type<=Tok!"``d") t.type=tok.type; // ENHANCEMENT
+				for(nextToken();ttype==t.type||ttype==Tok!"``";nextToken()){
+					if(t.type==Tok!"``" && Tok!"``c"<=ttype && ttype<=Tok!"``d") t.type=ttype; // ENHANCEMENT
 					t.str~=tok.str; // TODO: make more efficient than simple append
 				}
 				mixin(rule!(LiteralExp,Existing,"t"));
@@ -1213,9 +1244,9 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				nextToken(); expect(Tok!"(");
 				STC stc;
 				Expression tt=null;
-				if(tok.type!=Tok!")"){
+				if(ttype!=Tok!")"){
 					stc=parseSTC!toplevelSTC();
-					if(tok.type!=Tok!")") tt=parseType();
+					if(ttype!=Tok!")") tt=parseType();
 				}
 				expect(Tok!")");
 				auto e=nud();
@@ -1223,29 +1254,29 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"is":
 				mixin(doParse!("_","(",Type,"type"));
 				Identifier ident; // optional
-				if(tok.type==Tok!"i") ident=New!Identifier(tok.name), nextToken();
+				if(ttype==Tok!"i") ident=New!Identifier(tok.name), nextToken();
 				auto which = WhichIsExp.type;
-				if(tok.type==Tok!":") which = WhichIsExp.implicitlyConverts;
-				else if(tok.type==Tok!"==") which = WhichIsExp.isEqual;
-				else if(tok.type==Tok!"*=" && peek().type==Tok!"=") type = New!Pointer(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
+				if(ttype==Tok!":") which = WhichIsExp.implicitlyConverts;
+				else if(ttype==Tok!"==") which = WhichIsExp.isEqual;
+				else if(ttype==Tok!"*=" && peek().type==Tok!"=") type = New!Pointer(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
 				else{expect(Tok!")");return New!IsExp(which,type,ident,cast(Expression)null,Tok!"",cast(TemplateParameter[])null);}
 				nextToken();
 				Expression typespec=null;
 				TokenType typespec2=Tok!"";
 				if(which==WhichIsExp.isEqual){
-					switch(tok.type){
+					switch(ttype){
 						case Tok!"const", Tok!"immutable", Tok!"inout", Tok!"shared":
 							auto tt=peek().type; if(tt==Tok!","||tt==Tok!")") goto case; goto default;
 						case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface", Tok!"enum", Tok!"function", Tok!"delegate", 
 							Tok!"super", Tok!"return", Tok!"typedef":
-							typespec2=tok.type; nextToken(); break;
+							typespec2=ttype; nextToken(); break;
 						default: goto parsetype;
 					}
 				}else parsetype: typespec=parseType();
 				TemplateParameter[] tparams = null;
-				if(tok.type==Tok!","){
+				if(ttype==Tok!","){
 					nextToken();
-					if(ident&&tok.type!=Tok!")") tparams = parseTemplateParameterList();
+					if(ident&&ttype!=Tok!")") tparams = parseTemplateParameterList();
 				}
 				expect(Tok!")");
 				mixin(rule!(IsExp,Existing,q{which,type,ident,typespec,typespec2,tparams}));
@@ -1255,7 +1286,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				if(peekPastParen().type==Tok!"{") return parseFunctionLiteralExp();
 				nextToken();
 				auto save=saveState();
-				bool isType=skipType() && tok.type==Tok!")";
+				bool isType=skipType() && ttype==Tok!")";
 				restoreState(save);
 				Expression e;
 				if(isType){mixin(doParseNoDef!(Type,"e",")"));} // does not necessarily parse a type, eg arr[10]
@@ -1263,7 +1294,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				e.brackets++;
 				return e;
 			case Tok!"__error": mixin(rule!(ErrorExp,"_"));
-			mixin(getTTCases(basicTypes)); {mixin(doParse!("_","."));return parseIdentifierList(New!BasicType(tok.type));} // int.max etc // TODO: location
+			mixin(getTTCases(basicTypes)); {mixin(doParse!("_","."));return parseIdentifierList(New!BasicType(ttype));} // int.max etc // TODO: location
 			mixin({string r; // immutable(int).max etc // TODO: location
 				foreach(type;typeQualifiers){
 					r~=q{case Tok!}`"`~type~`":`q{
@@ -1280,7 +1311,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"[": mixin(rule!(ArrayLiteralExp,"_","OPT",AssocArgumentList,"]"));
 			case Tok!"new":
 				nextToken();
-				if(tok.type==Tok!"class"){
+				if(ttype==Tok!"class"){
 					mixin(doParse!("_","OPT"q{"(",ArgumentList,"args",")"}));
 					auto aggr=cast(ClassDecl)cast(void*)parseAggregateDecl(STC.init,true); // it is an anonymous class, static cast is safe
 					mixin(rule!(NewClassExp,Existing,q{args,aggr}));
@@ -1291,10 +1322,10 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"typeid": mixin(rule!(TypeidExp,"_","(",TypeOrExpression,")"));
 			case Tok!"typeof": // TODO: location
 				nextToken(); expect(Tok!"(");
-				if(tok.type==Tok!"return"){nextToken(); expect(Tok!")"); return New!TypeofReturnExp();}
+				if(ttype==Tok!"return"){nextToken(); expect(Tok!")"); return New!TypeofReturnExp();}
 				mixin(doParse!(Expression,"e1",")"));
 				Expression e2=New!TypeofExp(e1);
-				if(tok.type==Tok!"."){nextToken(); e2=parseIdentifierList(e2);}
+				if(ttype==Tok!"."){nextToken(); e2=parseIdentifierList(e2);}
 				return e2;
 			mixin({string r;
 				foreach(x;unaryOps) r~=q{case Tok!}`"`~x~`":`q{nextToken(); return New!(UnaryExp!(Tok!}`"`~x~`"`q{))(parseExpression(nbp));};
@@ -1305,21 +1336,21 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	}
 	// left denotation
 	Expression led(Expression left){
-		switch(tok.type){
+		switch(ttype){
 			//case Tok!"i": return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));// infix
 			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",Expression));
 			case Tok!"[":
 				nextToken();
-				if(tok.type==Tok!"]"){nextToken(); mixin(rule!(IndexExp,Existing,q{left,cast(Expression[])null}));}
+				if(ttype==Tok!"]"){nextToken(); mixin(rule!(IndexExp,Existing,q{left,cast(Expression[])null}));}
 				auto l=parseExpression(rbp!(Tok!","));
-				if(tok.type==Tok!".."){nextToken(); auto r=parseExpression(rbp!(Tok!",")); expect(Tok!"]"); mixin(rule!(SliceExp,Existing,q{left,l,r}));}
+				if(ttype==Tok!".."){nextToken(); auto r=parseExpression(rbp!(Tok!",")); expect(Tok!"]"); mixin(rule!(SliceExp,Existing,q{left,l,r}));}
 				else{auto e=New!IndexExp(left,parseArgumentList!"]"(l)); expect(Tok!"]"); return e;} // TODO: location
 			case Tok!"(": mixin(rule!(CallExp,"_",Existing,"left",ArgumentList,")"));
 			case Tok!"!":
 				nextToken();
-				if(tok.type==Tok!"is") goto case Tok!"!is";
-				else if(tok.type==Tok!"in") goto case Tok!"!in";
-				if(tok.type==Tok!"("){
+				if(ttype==Tok!"is") goto case Tok!"!is";
+				else if(ttype==Tok!"in") goto case Tok!"!in";
+				if(ttype==Tok!"("){
 					nextToken(); auto e=New!TemplateInstanceExp(left,parseTuple!")");
 					if(e.args.length==1) e.args[0].brackets++; expect(Tok!")"); return e;
 				}
@@ -1344,13 +1375,13 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Expression parseExpression(int rbp = 0){
 		Expression left;
 		try left = nud();catch(PEE err){error("found '"~tok.toString()~"' when expecting expression");nextToken();return new ErrorExp();}
-		while(rbp < arrLbp[tok.type]){
+		while(rbp < arrLbp[ttype]){
 			try left = led(left); catch(PEE err){error(err.msg);}
 		}
 		return left;
 	}
 	Expression parseExpression2(Expression left, int rbp = 0){ // left is already known
-		while(rbp < arrLbp[tok.type]){
+		while(rbp < arrLbp[ttype]){
 			try left = led(left); catch(PEE err){error(err.msg);}
 		}
 		return left;
@@ -1358,7 +1389,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	bool skipToUnmatched(bool skipcomma=true)(){
 		int pnest=0, cnest=0, bnest=0; // no local templates >:(
 		for(;;nextToken()){
-			switch(tok.type){
+			switch(ttype){
 				case Tok!"(": pnest++; continue;
 				case Tok!"{": cnest++; continue;
 				case Tok!"[": bnest++; continue;
@@ -1375,10 +1406,10 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		}
 		return true;
 	}
-	void nonEmpty(string what="statement")(){if(tok.type==Tok!";") error("use '{}' for an empty "~what~", not ';'");}
+	void nonEmpty(string what="statement")(){if(ttype==Tok!";") error("use '{}' for an empty "~what~", not ';'");}
 	Statement parseStmError(){
-		while(tok.type != Tok!";" && tok.type != Tok!"}" && tok.type != Tok!"EOF") nextToken();
-		if(tok.type == Tok!";") nextToken();
+		while(ttype != Tok!";" && ttype != Tok!"}" && ttype != Tok!"EOF") nextToken();
+		if(ttype == Tok!";") nextToken();
 		mixin(rule!ErrorStm);
 	}
 	private static template pStm(T...){
@@ -1387,16 +1418,16 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Statement parseStatement(){
 		bool isfinal = false; //for final switch
 		bool isreverse = false; //for foreach_reverse
-		if(tok.type == Tok!"i" && peek().type == Tok!":"){
+		if(ttype == Tok!"i" && peek().type == Tok!":"){
 			auto l = New!Identifier(tok.name); // TODO: location
 			nextToken(); nextToken();
 			mixin(rule!(LabeledStm,Existing,"l",Statement));
 		}
-		switch(tok.type){
+		switch(ttype){
 			case Tok!";": mixin(rule!(Statement,"_"));
 		    case Tok!"{":
 				auto r=parseCompoundStm();
-				if(tok.type!=Tok!"(") return r;
+				if(ttype!=Tok!"(") return r;
 				else{
 					auto e=parseExpression2(New!FunctionLiteralExp(cast(FunctionType)null,r));
 					expect(Tok!";");
@@ -1414,19 +1445,19 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				auto vars=appender!(Parameter[])();
 				do{
 					auto stc=STC.init;
-					if(tok.type==Tok!"ref") stc=STCref;
+					if(ttype==Tok!"ref") stc=STCref;
 					stc|=parseSTC!toplevelSTC();
 					Expression type;
 					TokenType tt;
-					if(tok.type!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
+					if(ttype!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
 					auto name=parseIdentifier();
 					vars.put(New!Parameter(stc,type,name,cast(Expression)null)); // TODO: location
-					if(tok.type==Tok!",") nextToken();
+					if(ttype==Tok!",") nextToken();
 					else break;
-				}while(tok.type!=Tok!";" && tok.type!=Tok!"EOF");
+				}while(ttype!=Tok!";" && ttype!=Tok!"EOF");
 				expect(Tok!";");
 				auto e=parseExpression();
-				if(vars.length==1&&tok.type==Tok!".."){
+				if(vars.length==1&&ttype==Tok!".."){
 					mixin(rule!(ForeachRangeStm,Existing,q{vars.data[0],e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
 				}
 				expect(Tok!")"); nonEmpty();
@@ -1444,9 +1475,9 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				e = parseArgumentList!(":",true)(); // non-empty!
 				expect(Tok!":");				
 				
-				if(tok.type == Tok!".."){ // CaseRange
+				if(ttype == Tok!".."){ // CaseRange
 					isrange=true;
-					if(e.length>1) error("only one case allowed for start of case range");
+					if(e.length>1) error("only one case allowed for start of case range"); // TODO: better error location
 					e.length=2;
 					nextToken();
 					expect(Tok!"case");
@@ -1454,17 +1485,17 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 					expect(Tok!":");
 				}
 				
-				while(tok.type!=Tok!"case" && tok.type!=Tok!"default" && tok.type!=Tok!"}"&&tok.type!=Tok!"EOF") s.put(parseStatement());
+				while(ttype!=Tok!"case" && ttype!=Tok!"default" && ttype!=Tok!"}"&&ttype!=Tok!"EOF") s.put(parseStatement());
 				return isrange?New!CaseRangeStm(e[0],e[1],s.data):New!CaseStm(e,s.data); // TODO: location
 			case Tok!"default":
 				mixin(doParse!("_",":"));
 				auto s=appender!(Statement[])();
-				while(tok.type!=Tok!"case" && tok.type!=Tok!"default" && tok.type!=Tok!"}"&&tok.type!=Tok!"EOF") s.put(parseStatement());
+				while(ttype!=Tok!"case" && ttype!=Tok!"default" && ttype!=Tok!"}"&&ttype!=Tok!"EOF") s.put(parseStatement());
 				mixin(rule!(DefaultStm,Existing,"s.data"));
 			case Tok!"continue":
 				nextToken();
 				Statement r;
-				if(tok.type==Tok!"i") r=New!ContinueStm(New!Identifier(tok.name)), nextToken();
+				if(ttype==Tok!"i") r=New!ContinueStm(New!Identifier(tok.name)), nextToken();
 				else r=New!ContinueStm(cast(Identifier)null);
 				expect(Tok!";");
 				return r; // TODO: location
@@ -1472,14 +1503,14 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"break":
 				nextToken();
 				Statement r;
-				if(tok.type==Tok!"i") r=New!BreakStm(New!Identifier(tok.name)), nextToken();
+				if(ttype==Tok!"i") r=New!BreakStm(New!Identifier(tok.name)), nextToken();
 				else r=New!BreakStm(cast(Identifier)null);
 				expect(Tok!";");
 				return r; // TODO: location
 			mixin(pStm!("return","OPT",Expression,";"));
 			case Tok!"goto":
 				nextToken();
-				switch(tok.type){
+				switch(ttype){
 					case Tok!"i":
 						auto r=New!GotoStm(WhichGoto.identifier,New!Identifier(tok.name));
 						nextToken(); expect(Tok!";");
@@ -1487,7 +1518,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 					case Tok!"default": mixin(rule!(GotoStm,Existing,q{WhichGoto.default_,cast(Expression)null},"_",";"));
 					case Tok!"case":
 						nextToken();
-						if(tok.type == Tok!";"){mixin(rule!(GotoStm,Existing,q{WhichGoto.case_,cast(Expression)null},"_"));}
+						if(ttype == Tok!";"){mixin(rule!(GotoStm,Existing,q{WhichGoto.case_,cast(Expression)null},"_"));}
 						auto e = parseExpression();
 						mixin(rule!(GotoStm,Existing,q{WhichGoto.caseExp,e},";"));
 					default:
@@ -1503,7 +1534,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
 					catches.put(New!CatchStm(type,ident,s)); // TODO: location
 					if(!type) break; // this really should work as loop condition!
-				}while(tok.type==Tok!"catch");
+				}while(ttype==Tok!"catch");
 				mixin(doParse!("OPT"q{"finally",Statement,"finally_"}));
 				mixin(rule!(TryStm,Existing,q{ss,catches.data,finally_}));
 			mixin(pStm!("throw",Expression,";"));
@@ -1511,7 +1542,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				if(peek().type != Tok!"(") goto default;
 				mixin(doParse!("_","_"));
 				WhichScopeGuard w;
-				if(tok.type != Tok!"i"){expectErr!"scope identifier"(); return parseStmError();}
+				if(ttype != Tok!"i"){expectErr!"scope identifier"(); return parseStmError();}
 				switch(tok.name){
 					case "exit": w=WhichScopeGuard.exit; break;
 					case "success": w=WhichScopeGuard.success; break;
@@ -1524,7 +1555,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				expect(Tok!"{");
 				//error("inline assembly not implemented yet!");
 				//auto start = code.ptr;
-				for(int nest=1;tok.type!=Tok!"EOF";nextToken()) if(!(tok.type==Tok!"{"?++nest:tok.type==Tok!"}"?--nest:nest)) break;
+				for(int nest=1;ttype!=Tok!"EOF";nextToken()) if(!(ttype==Tok!"{"?++nest:ttype==Tok!"}"?--nest:nest)) break;
 				//auto asmcode=start[0..code.ptr-start];
 				Code asmcode; // TODO: fix
 				expect(Tok!"}");
@@ -1532,7 +1563,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"mixin":
 				if(peek().type!=Tok!"(") goto default; // mixin template declaration
 				mixin(doParse!("_","_",AssignExp,"e",")"));
-				if(tok.type != Tok!";"){// is a mixin expression, not a mixin statement
+				if(ttype != Tok!";"){// is a mixin expression, not a mixin statement
 					auto e2=parseExpression2(New!MixinExp(e)); // TODO: location
 					mixin(rule!(ExpressionStm,Existing,"e2",";"));
 				}
@@ -1547,16 +1578,16 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Expression parseType(string expectwhat="type"){
 		Expression tt;
 		bool brk=false;
-		switch(tok.type){
-			mixin(getTTCases(basicTypes)); tt = New!BasicType(tok.type); nextToken(); break;
+		switch(ttype){
+			mixin(getTTCases(basicTypes)); tt = New!BasicType(ttype); nextToken(); break;
 			case Tok!".": goto case;
 			case Tok!"i": tt=parseIdentifierList(); break;
 			mixin({string r;
 				foreach(x;typeQualifiers) r~=q{
 					case Tok!}`"`~x~`":`q{nextToken();
-						if(tok.type==Tok!"(") brk=true, nextToken(); 
+						if(ttype==Tok!"(") brk=true, nextToken(); 
 						auto e=parseType(); e.brackets+=brk; tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
-						if(tok.type==Tok!".") nextToken(), tt=parseIdentifierList(tt); // ENHANCEMENT
+						if(ttype==Tok!".") nextToken(), tt=parseIdentifierList(tt); // ENHANCEMENT
 						break;
 				};
 				return r;
@@ -1565,11 +1596,11 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			default: error("found '"~tok.toString()~"' when expecting "~expectwhat); nextToken(); return New!ErrorExp;
 		}
 		for(;;){
-			switch(tok.type){
+			switch(ttype){
 				case Tok!"*": nextToken(); tt=New!Pointer(tt); continue;
 				case Tok!"[": 
 					auto save = saveState();
-					bool isAA=skip()&&skipType()&&tok.type==Tok!"]";
+					bool isAA=skip()&&skipType()&&ttype==Tok!"]";
 					restoreState(save);
 					if(isAA){mixin(doParse!("_",Type,"e","]")); tt=New!IndexExp(tt,[e]);}
 					else tt=led(tt); continue; //'Bug': allows int[1,2].
@@ -1594,7 +1625,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		return tt;
 	}
 	bool skipType(){
-		switch(tok.type){
+		switch(ttype){
 			mixin(getTTCases(basicTypes)); nextToken(); break;
 			case Tok!".": nextToken(); case Tok!"i": 
 				if(!skipIdentifierList()) goto Lfalse; break;
@@ -1602,14 +1633,14 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				foreach(x;typeQualifiers) r~=q{
 					case Tok!}`"`~x~`":`q{
 						nextToken(); bool brk=skip(Tok!"("); if(!skipType()||brk&&!skip(Tok!")")) return false;
-						if(tok.type==Tok!"." && !skipIdentifierList()) goto Lfalse; break; // ENHANCEMENT
+						if(ttype==Tok!"." && !skipIdentifierList()) goto Lfalse; break; // ENHANCEMENT
 				};
 				return r;
 			}());
 			case Tok!"typeof":
 				nextToken();
 				if(!skip(Tok!"(")||!skipToUnmatched()||!skip(Tok!")")) goto Lfalse;
-				if(tok.type==Tok!"."){
+				if(ttype==Tok!"."){
 					nextToken();
 					if(!skipIdentifierList()) goto Lfalse;
 				}
@@ -1617,7 +1648,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			default: goto Lfalse;
 		}
 	skipbt2: for(;;){
-			switch(tok.type){
+			switch(ttype){
 				case Tok!"*": nextToken(); continue;
 				case Tok!"[": 
 					nextToken(); 
@@ -1634,18 +1665,18 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		Lfalse: return false;
 	}
 	Expression parseInitializerExp(bool recursive=true){
-		if(!recursive&&tok.type==Tok!"void"){nextToken(); return New!VoidInitializerExp();}
-		else if(tok.type==Tok!"["&&(recursive||peekPastParen().type==Tok!";")){
+		if(!recursive&&ttype==Tok!"void"){nextToken(); return New!VoidInitializerExp();}
+		else if(ttype==Tok!"["&&(recursive||peekPastParen().type==Tok!";")){
 			nextToken();
 			auto e=parseAssocArgumentList!("]",false,ArrayInitAssocExp)();
 			expect(Tok!"]");
 			return New!ArrayLiteralExp(e);
-		}else if(tok.type!=Tok!"{") return parseExpression(rbp!(Tok!","));
+		}else if(ttype!=Tok!"{") return parseExpression(rbp!(Tok!","));
 		else{
 			auto save=saveState();
 			nextToken();
 			for(int nest=1;nest;nextToken()){
-				switch(tok.type){
+				switch(ttype){
 					case Tok!"{": nest++; continue;
 					case Tok!"}": nest--; continue;
 					case Tok!";", Tok!"return", Tok!"if", Tok!"while", Tok!"do", Tok!"for", Tok!"foreach", 
@@ -1668,7 +1699,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	STC parseSTC(alias which,bool properties=true)(){
 		STC stc,cstc;
 	readstc: for(;;){
-			switch(tok.type){
+			switch(ttype){
 				mixin({string r;
 						foreach(x;which){
 							if(x=="auto ref") continue;
@@ -1681,14 +1712,14 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				static if(properties){
 					case Tok!"@":
 						nextToken();
-						if(tok.type!=Tok!"i"){expectErr!"attribute identifier after '@'"(); nextToken(); continue;}
+						if(ttype!=Tok!"i"){expectErr!"attribute identifier after '@'"(); nextToken(); continue;}
 						switch(tok.name){
 							mixin({string r;foreach(x;attributeSTC) r~="case \""~x~"\": cstc=STC"~x~"; goto Lstc;";return r;}());
 							default: error("unknown attribute identifier '"~tok.name~"'");
 						}
 				}
 				Lstc:
-					if(stc&cstc) error("redundant storage class "~tok.name);
+				    if(stc&cstc) error("redundant storage class "~tok.name);
 					stc|=cstc;
 					nextToken();
 					break;
@@ -1701,7 +1732,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	bool skipSTC(alias which,bool properties=true)(){
 		bool ret=false;
 		for(;;nextToken()){
-			switch(tok.type){
+			switch(ttype){
 				mixin({string r;
 						foreach(x;which){
 							if(x=="auto ref") continue;
@@ -1718,7 +1749,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	CompoundStm parseCompoundStm(){
 		expect(Tok!"{");
 		auto s=appender!(Statement[])();
-		while(tok.type!=Tok!"}" && tok.type!=Tok!"EOF"){
+		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			s.put(parseStatement());
 		}
 		expect(Tok!"}");
@@ -1727,17 +1758,17 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Declaration parseDeclaration(STC stc=STC.init){
 		Expression type;
 		Declaration d;
-		bool isAlias=tok.type==Tok!"alias";
+		bool isAlias=ttype==Tok!"alias";
 		if(isAlias) nextToken();
 		STC nstc, ostc=stc; // hack to make alias this parsing easy. TODO: refactor a little
 		stc|=nstc=parseSTC!toplevelSTC();
 		bool needtype=true;
-		if(tok.type==Tok!"this" || tok.type==Tok!"~"&&peek().type==Tok!"this" || tok.type==Tok!"invariant") needtype=false;
+		if(ttype==Tok!"this" || ttype==Tok!"~"&&peek().type==Tok!"this" || ttype==Tok!"invariant") needtype=false;
 		TokenType p;
-		if(needtype&&(!stc||(tok.type!=Tok!"i" || (p=peek().type)!=Tok!"=" && p!=Tok!"("))) type=parseType("declaration");
+		if(needtype&&(!stc||(ttype!=Tok!"i" || (p=peek().type)!=Tok!"=" && p!=Tok!"("))) type=parseType("declaration");
 		if(cast(ErrorExp)type) return New!ErrorDecl;
 		if(isAlias){
-			if(tok.type==Tok!"this"){
+			if(ttype==Tok!"this"){
 				nextToken();
 				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!ThisExp,cast(Expression)null)); expect(Tok!";"); // alias this
 			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
@@ -1747,14 +1778,14 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	}
 	bool skipDeclaration(){
 		TokenType p;
-		if(tok.type==Tok!"alias") nextToken();
+		if(ttype==Tok!"alias") nextToken();
 		if(skipSTC!toplevelSTC()){
-			if((tok.type!=Tok!"i"||(p=peek().type)!=Tok!"=") && p!=Tok!"(" && !skipType()) return false;
+			if((ttype!=Tok!"i"||(p=peek().type)!=Tok!"=") && p!=Tok!"(" && !skipType()) return false;
 		}else if(!skipType()) return false;
 		return peek().type==Tok!"(" && skipFunctionDeclaration() || skipDeclarators();
 	}
 	bool isDeclaration(){ // is the parser sitting on the beginning of a Declaration?
-		if(tok.type==Tok!"alias") return true;
+		if(ttype==Tok!"alias") return true;
 		auto save=saveState();
 		bool res=skipDeclaration();
 		restoreState(save);
@@ -1765,9 +1796,9 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		else{
 			Expression type,init;
 			auto stc=parseSTC!toplevelSTC();
-			if(!stc||tok.type!=Tok!"i") type=parseType();
+			if(!stc||ttype!=Tok!"i") type=parseType();
 			auto name=parseIdentifier();
-			if(tok.type!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp;}
+			if(ttype!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp;}
 			nextToken();
 			init=parseExpression(rbp!(Tok!","));
 			return New!ConditionDeclExp(stc,type,name,init);
@@ -1782,16 +1813,16 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			Expression type;
 			Identifier name;
 			Expression init;
-			if(tok.type==Tok!")") break;
-			else if(tok.type==Tok!"..."){vararg=VarArgs.cStyle; nextToken(); break;}
+			if(ttype==Tok!")") break;
+			else if(ttype==Tok!"..."){vararg=VarArgs.cStyle; nextToken(); break;}
 			stc=parseSTC!(parameterSTC, false)(); // false means no @attributes allowed
 			type=parseType();
-			if(tok.type==Tok!"i"){name=New!Identifier(tok.name); nextToken();}
-			if(tok.type==Tok!"="){nextToken();init=parseExpression(rbp!(Tok!","));}
+			if(ttype==Tok!"i"){name=New!Identifier(tok.name); nextToken();}
+			if(ttype==Tok!"="){nextToken();init=parseExpression(rbp!(Tok!","));}
 			params.put(New!Parameter(stc,type,name,init));
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else{
-				if(tok.type==Tok!"..."){vararg=VarArgs.dStyle; nextToken();}
+				if(ttype==Tok!"..."){vararg=VarArgs.dStyle; nextToken();}
 				break;
 			}
 		}
@@ -1800,7 +1831,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	}
 	void parsePostcondition(out CompoundStm post,out Identifier pres){ // out(pres){...}
 		expect(Tok!"out");
-		if(tok.type==Tok!"("){
+		if(ttype==Tok!"("){
 			nextToken();
 			pres=parseIdentifier();
 			expect(Tok!")");
@@ -1814,37 +1845,37 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		TemplateParameter[] tparam; bool isTemplate=false;
 		Parameter[] params;
 		if(ret) goto notspecial; // so that I don't have to test for ret multiple times
-		if(tok.type==Tok!"this"){
+		if(ttype==Tok!"this"){
 			name=New!ThisExp, nextToken();
-			if(tok.type==Tok!"("&&peek().type==Tok!"this"){
+			if(ttype==Tok!"("&&peek().type==Tok!"this"){
 				nextToken(), nextToken(), expect(Tok!")");
 				params = [New!PostblitParameter]; goto isspecial;
 			}
-		}else if(tok.type==Tok!"~" && peek().type==Tok!"this") name=New!TildeThisExp, nextToken(), nextToken();
-		else if(tok.type==Tok!"invariant"){mixin(doParse!("_","(",")")); name=New!InvariantExp; params=[]; goto isspecial;}
+		}else if(ttype==Tok!"~" && peek().type==Tok!"this") name=New!TildeThisExp, nextToken(), nextToken();
+		else if(ttype==Tok!"invariant"){mixin(doParse!("_","(",")")); name=New!InvariantExp; params=[]; goto isspecial;}
 		else{
 			notspecial:
-			if(tok.type!=Tok!"i") expectErr!"function name"(), name=New!Identifier(cast(string)null);
+			if(ttype!=Tok!"i") expectErr!"function name"(), name=New!Identifier(cast(string)null);
 			else{name=New!Identifier(tok.name);nextToken();}
 		}
-		if(tok.type==Tok!"(" && peekPastParen().type==Tok!"(") nextToken(), tparam=parseTemplateParameterList(), expect(Tok!")"), isTemplate=true;
+		if(ttype==Tok!"(" && peekPastParen().type==Tok!"(") nextToken(), tparam=parseTemplateParameterList(), expect(Tok!")"), isTemplate=true;
 		params=parseParameterList(vararg);
 		isspecial:
 		stc|=parseSTC!functionSTC();
 		if(isTemplate) constr=parseOptTemplateConstraint();
 		CompoundStm pre, post, bdy;
 		Identifier pres;
-		if(tok.type==Tok!"in"){
+		if(ttype==Tok!"in"){
 			nextToken(); pre=parseCompoundStm();
-			if(tok.type==Tok!"out") parsePostcondition(post,pres);
-		}else if(tok.type==Tok!"out"){
+			if(ttype==Tok!"out") parsePostcondition(post,pres);
+		}else if(ttype==Tok!"out"){
 			parsePostcondition(post,pres);
-			if(tok.type==Tok!"in"){nextToken();pre=parseCompoundStm();}
+			if(ttype==Tok!"in"){nextToken();pre=parseCompoundStm();}
 		}
 		FunctionDecl r;
-		if(tok.type==Tok!"{"||tok.type==Tok!"body"){
+		if(ttype==Tok!"{"||ttype==Tok!"body"){
 			if(pre||post) expect(Tok!"body");
-			else if(tok.type==Tok!"body") nextToken();
+			else if(ttype==Tok!"body") nextToken();
 			bdy=parseCompoundStm();
 			r=New!FunctionDef(New!FunctionType(stc,ret,params,vararg),name,pre,post,pres,bdy);
 		}else{
@@ -1859,16 +1890,16 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Expression parseFunctionLiteralExp(){
 		STC stc;
 		Expression ret;
-		bool isStatic = tok.type==Tok!"function";
+		bool isStatic = ttype==Tok!"function";
 		VarArgs vararg;
 		Parameter[] params;
 		bool hastype=false;
-		if(isStatic || tok.type==Tok!"delegate"){
+		if(isStatic || ttype==Tok!"delegate"){
 			nextToken();
-			if(tok.type!=Tok!"(") stc=parseSTC!toplevelSTC(), ret=parseType();
+			if(ttype!=Tok!"(") stc=parseSTC!toplevelSTC(), ret=parseType();
 			goto readp;
 		}
-		if(tok.type==Tok!"(") readp: params=parseParameterList(vararg), stc|=parseSTC!functionSTC(), hastype=true;
+		if(ttype==Tok!"(") readp: params=parseParameterList(vararg), stc|=parseSTC!functionSTC(), hastype=true;
 		auto bdy=parseCompoundStm();
 		return New!FunctionLiteralExp(hastype?New!FunctionType(stc,ret,params,vararg):null,bdy,isStatic);
 	}
@@ -1878,10 +1909,10 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		do{
 			auto name=parseIdentifier();
 			Expression init;
-			if(tok.type==Tok!"=") nextToken(), init=parseInitializerExp(false);
+			if(ttype==Tok!"=") nextToken(), init=parseInitializerExp(false);
 			r.put(New!VarDecl(stc,type,name,init));
-			if(tok.type==Tok!",") nextToken();else break;
-		}while(tok.type != Tok!";" && tok.type != Tok!"EOF"); 
+			if(ttype==Tok!",") nextToken();else break;
+		}while(ttype != Tok!";" && ttype != Tok!"EOF"); 
 		expect(Tok!";");
 		return r.length>1?New!Declarators(r.data):r.data[0];
 	}
@@ -1891,14 +1922,14 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	Declaration parseCArrayDecl(STC stc, Expression type){ // support stupid C syntax
 		Identifier name=parseIdentifier();
 		Expression pfix=name, init=null;
-		while(tok.type==Tok!"["){ // kludgy way of parsing, semantic will reverse the order
+		while(ttype==Tok!"["){ // kludgy way of parsing, semantic will reverse the order
 			auto save = saveState();
-			bool isAA=skip()&&skipType()&&tok.type==Tok!"]";
+			bool isAA=skip()&&skipType()&&ttype==Tok!"]";
 			restoreState(save);
 			if(isAA){mixin(doParse!("_",Type,"e","]")); pfix=New!IndexExp(pfix,[e]);}
 			else pfix=led(pfix);//'Bug': allows int[1,2].
 		}
-		if(tok.type==Tok!"=") nextToken(), init=parseInitializerExp(false);
+		if(ttype==Tok!"=") nextToken(), init=parseInitializerExp(false);
 		expect(Tok!";");
 		return New!CArrayDecl(stc,type,name,pfix,init);
 	}
@@ -1909,10 +1940,10 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		bool isBindings=false;
 		for(;;){
 			Expression s=parseIdentifierList();
-			if(tok.type==Tok!"=") nextToken(), s=New!(BinaryExp!(Tok!"="))(s,parseIdentifierList());
-			else if(!isBindings&&tok.type==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
+			if(ttype==Tok!"=") nextToken(), s=New!(BinaryExp!(Tok!"="))(s,parseIdentifierList());
+			else if(!isBindings&&ttype==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
 			(isBindings?bind:symbols).put(s);
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else break;
 		}
 		expect(Tok!";");
@@ -1925,59 +1956,59 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		Identifier tag;
 		Expression base;
 		auto members=appender!(Expression[2][])();
-		if(tok.type==Tok!"i") tag=New!Identifier(tok.name), nextToken();
-		if(tok.type==Tok!":") nextToken(), base = parseType();
+		if(ttype==Tok!"i") tag=New!Identifier(tok.name), nextToken();
+		if(ttype==Tok!":") nextToken(), base = parseType();
 		expect(Tok!"{");
-		for(;tok.type!=Tok!"}" && tok.type!=Tok!"EOF";){ // BUG: only uniform type allowed
+		for(;ttype!=Tok!"}" && ttype!=Tok!"EOF";){ // BUG: only uniform type allowed
 			Expression e,i;
-			if(tok.type==Tok!"i") e=New!Identifier(tok.name), nextToken();
+			if(ttype==Tok!"i") e=New!Identifier(tok.name), nextToken();
 			else break;
-			if(tok.type==Tok!"=") nextToken(), i=parseExpression(rbp!(Tok!","));
+			if(ttype==Tok!"=") nextToken(), i=parseExpression(rbp!(Tok!","));
 			Expression[2] sarr; sarr[0]=e; sarr[1]=i;
 			members.put(sarr);
-			if(tok.type!=Tok!"}") expect(Tok!",");
+			if(ttype!=Tok!"}") expect(Tok!",");
 		}
 		expect(Tok!"}");
 		return New!EnumDecl(stc,tag,base,members.data);
 	}
 	TemplateParameter[] parseTemplateParameterList(){
 		auto r=appender!(TemplateParameter[])();
-		while(tok.type!=Tok!")" && tok.type!=Tok!"EOF"){
+		while(ttype!=Tok!")" && ttype!=Tok!"EOF"){
 			Expression type;
-			bool isAlias=tok.type==Tok!"alias", isTuple=false;
+			bool isAlias=ttype==Tok!"alias", isTuple=false;
 			if(isAlias) nextToken();
 			else{
 				auto tt=peek().type;
 				if(tt!=Tok!"," && tt!=Tok!":" && tt!=Tok!"=" && tt!=Tok!")" && tt!=Tok!"...") type=parseType();
 			}
 			auto name=parseIdentifier();
-			if(!type && tok.type==Tok!"...") isTuple=true, nextToken();
+			if(!type && ttype==Tok!"...") isTuple=true, nextToken();
 			Expression spec, init;
 			if(!isTuple){
-				if(tok.type==Tok!":"){
+				if(ttype==Tok!":"){
 					nextToken(); spec=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
-				if(tok.type==Tok!"=") {parseinit: nextToken(); init=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
-				else if(tok.type==Tok!"*=" && spec){spec = New!Pointer(spec); goto parseinit;} // EXTENSION
+				if(ttype==Tok!"=") {parseinit: nextToken(); init=isAlias ? parseTypeOrExpression() : type?parseExpression(rbp!(Tok!",")):parseType();}
+				else if(ttype==Tok!"*=" && spec){spec = New!Pointer(spec); goto parseinit;} // EXTENSION
 			}
 			r.put(New!TemplateParameter(isAlias,isTuple,type,name,spec,init));
-			if(tok.type==Tok!",") nextToken();
+			if(ttype==Tok!",") nextToken();
 			else break;
 		}
 		return r.data;
 	}
 	Expression parseOptTemplateConstraint(){ // returns null if no template constraint
-		if(tok.type!=Tok!"if") return null;
+		if(ttype!=Tok!"if") return null;
 		mixin(doParse!("_","(",Expression,"e",")"));
 		return e;
 	}
-	Declaration parseAggregateDecl(STC stc=STC.init, bool anonclass=false)in{assert(anonclass||tok.type==Tok!"struct"||tok.type==Tok!"union"||tok.type==Tok!"class"||tok.type==Tok!"interface");}body{
+	Declaration parseAggregateDecl(STC stc=STC.init, bool anonclass=false)in{assert(anonclass||ttype==Tok!"struct"||ttype==Tok!"union"||ttype==Tok!"class"||ttype==Tok!"interface");}body{
 		enum{Struct,Union,Class,Interface}
 		int type;
 		Identifier name;
 		TemplateParameter[] params; Expression constraint; bool isTemplate=false;
 		auto parents=appender!(ParentListEntry[])();
 		if(!anonclass){
-			switch(tok.type){
+			switch(ttype){
 				case Tok!"struct": type=Struct; break;
 				case Tok!"union": type=Union; break;
 				case Tok!"class": type=Class; break;
@@ -1985,24 +2016,24 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				default: assert(0);
 			}
 			nextToken();
-			if(tok.type==Tok!"i") name=New!Identifier(tok.name), nextToken();
-			if(tok.type==Tok!"(") nextToken(),params=parseTemplateParameterList(),expect(Tok!")"),constraint=parseOptTemplateConstraint(),isTemplate=true;
+			if(ttype==Tok!"i") name=New!Identifier(tok.name), nextToken();
+			if(ttype==Tok!"(") nextToken(),params=parseTemplateParameterList(),expect(Tok!")"),constraint=parseOptTemplateConstraint(),isTemplate=true;
 		}else type=Class;
-		if(type>=Class && (!anonclass&&tok.type==Tok!":")||(anonclass&&tok.type!=Tok!"{")){
+		if(type>=Class && (!anonclass&&ttype==Tok!":")||(anonclass&&ttype!=Tok!"{")){
 			if(!anonclass) nextToken();
 		readparents: for(;;){
 				auto s=STC.init, nonefound=false;
-				switch(tok.type){
+				switch(ttype){
 					mixin({string r; foreach(x;protectionAttributes) r~=`case Tok!"`~x~`": s=STC`~x~`; nextToken(); goto case Tok!"i";`;return r;}());
 					case Tok!".", Tok!"i": parents.put(ParentListEntry(s,parseIdentifierList())); break;
 					default: break readparents;
 				}
-				if(tok.type==Tok!",") nextToken();
+				if(ttype==Tok!",") nextToken();
 				else break;
 			}
 			if(!parents.length) expectErr!"base class or interface"();
 		}
-		auto bdy=anonclass||tok.type!=Tok!";" ? parseCompoundDecl() : (nextToken(),null);
+		auto bdy=anonclass||ttype!=Tok!";" ? parseCompoundDecl() : (nextToken(),null);
 		auto r=
 			type==Struct    ? New!StructDecl(stc,name,bdy)           :
 			type==Union     ? New!UnionDecl(stc,name,bdy)            :
@@ -2011,9 +2042,9 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;
 	}
 	Expression parseVersionCondition(bool allowunittest=true){
-		if(tok.type==Tok!"i"){auto e=New!Identifier(tok.name); nextToken(); return e;}
-		if(tok.type==Tok!"0"||tok.type==Tok!"0L"||tok.type==Tok!"0U"||tok.type==Tok!"0LU"){auto e=New!LiteralExp(tok); nextToken(); return e;}
-		if(tok.type==Tok!"unittest"&&allowunittest) return nextToken(), New!Identifier("unittest");
+		if(ttype==Tok!"i"){auto e=New!Identifier(tok.name); nextToken(); return e;}
+		if(ttype==Tok!"0"||ttype==Tok!"0L"||ttype==Tok!"0U"||ttype==Tok!"0LU"){auto e=New!LiteralExp(tok); nextToken(); return e;}
+		if(ttype==Tok!"unittest"&&allowunittest) return nextToken(), New!Identifier("unittest");
 		expectErr!"condition";
 		return New!ErrorExp;
 	}
@@ -2029,24 +2060,24 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		STC stc=STC.init;
 		alias CondDeclBody Body;
 	    dispatch: 
-		switch(tok.type){
+		switch(ttype){
 			case Tok!";": nextToken(); return New!Declaration(STC.init,cast(Identifier)null);
 			case Tok!"module":
 				mixin(rule!(ModuleDecl,Existing,"stc","_",IdentifierList,";"));
 			case Tok!"static":
 				nextToken();
-				auto tt=tok.type;
+				auto tt=ttype;
 				if(tt==Tok!"assert"){mixin(rule!(StaticAssertDecl,Existing,"stc","_","(",ArgumentList,")",";"));}
 				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));}
 				stc|=STCstatic;
 				goto dispatch;
 			case Tok!"debug":
 				nextToken();
-				if(tok.type==Tok!"="){mixin(rule!(DebugSpecDecl,Existing,"stc","_",DebugCondition,";"));}
+				if(ttype==Tok!"="){mixin(rule!(DebugSpecDecl,Existing,"stc","_",DebugCondition,";"));}
 				mixin(rule!(DebugDecl,Existing,"stc","OPT"q{"(",DebugCondition,")"},"NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"version":
 				nextToken();
-				if(tok.type==Tok!"="){mixin(rule!(VersionSpecDecl,Existing,"stc","_",DebugCondition,";"));}
+				if(ttype==Tok!"="){mixin(rule!(VersionSpecDecl,Existing,"stc","_",DebugCondition,";"));}
 				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"pragma":
 				mixin(rule!(PragmaDecl,Existing,"stc","_","(",ArgumentList,")",CondDeclBody)); // Body can be empty
@@ -2056,8 +2087,8 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":") goto default;
 				return parseEnumDecl(stc);
 			case Tok!"mixin":
-				nextToken(); if(tok.type==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",AssignExp,")",";"));}
-				if(tok.type==Tok!"template"){isMix=true; goto case;}
+				nextToken(); if(ttype==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",AssignExp,")",";"));}
+				if(ttype==Tok!"template"){isMix=true; goto case;}
 				mixin(rule!(TemplateMixinDecl,Existing,"stc",IdentifierList,"OPT",Identifier,";"));
 			case Tok!"template":
 				mixin(rule!(TemplateDecl,Existing,"isMix",Existing,"stc","_",Identifier,"(",TemplateParameterList,")",OptTemplateConstraint,CompoundDecl));
@@ -2065,21 +2096,21 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 			case Tok!"unittest": return nextToken(), New!UnitTestDecl(stc,parseCompoundStm());
 			case Tok!"align":
 				nextToken();
-				if(tok.type!=Tok!"("){stc|=STCalign;goto dispatch;}
+				if(ttype!=Tok!"("){stc|=STCalign;goto dispatch;}
 				nextToken();
-				if(tok.type!=Tok!"0"&&tok.type!=Tok!"0U"&&tok.type!=Tok!"0L"&&tok.type!=Tok!"0LU") expectErr!"positive integer"(); // ENHANCEMENT: U,L,LU
+				if(ttype!=Tok!"0"&&ttype!=Tok!"0U"&&ttype!=Tok!"0L"&&ttype!=Tok!"0LU") expectErr!"positive integer"(); // ENHANCEMENT: U,L,LU
 				auto i=tok.int64;
 				mixin(rule!(AlignDecl,Existing,"stc",Existing,"i","_",")",DeclDef));
 			case Tok!"extern":
 				LinkageType lt;
 				nextToken();
-				if(tok.type!=Tok!"("){stc|=STCextern; goto dispatch;}
+				if(ttype!=Tok!"("){stc|=STCextern; goto dispatch;}
 				nextToken();
-				if(tok.type!=Tok!"i") expectErr!"linkage type"();
+				if(ttype!=Tok!"i") expectErr!"linkage type"();
 				else{
 					switch(tok.name){
 						case "C": nextToken();
-							if(tok.type==Tok!"++") lt=LinkageType.CPP, nextToken();
+							if(ttype==Tok!"++") lt=LinkageType.CPP, nextToken();
 							else lt=LinkageType.C; break;
 						case "D": nextToken(); lt=LinkageType.D; break;
 						case "Windows": nextToken(); lt=LinkageType.Windows; break;
@@ -2096,7 +2127,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				STC nstc; // parseSTC might parse nothing in case it is actually a type constructor
 				enum STCs={string[] r; foreach(x;toplevelSTC) if(x!="align"&&x!="enum"&&x!="extern"&&x!="static") r~=x;return r;}();
 				stc|=nstc=parseSTC!STCs();
-				if(tok.type==Tok!"{") return parseCompoundDecl(stc);
+				if(ttype==Tok!"{") return parseCompoundDecl(stc);
 				else if(nstc) goto dispatch;
 				else goto default;
 			case Tok!"{": if(!stc&&!(flags&allowcompound)) goto default; return parseCompoundDecl(stc);
@@ -2110,7 +2141,7 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 	CompoundDecl parseCompoundDecl(STC stc=STC.init){
 		expect(Tok!"{");
 		auto r=appender!(Declaration[])();
-		while(tok.type!=Tok!"}" && tok.type!=Tok!"EOF"){
+		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			r.put(parseDeclDef());
 		}
 		expect(Tok!"}");
@@ -2119,26 +2150,22 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 
 	Declaration[] parseDeclDefs(){
 		auto x=appender!(Declaration[])();
-		while(tok.type!=Tok!"}" && tok.type!=Tok!"EOF") x.put(parseDeclDef());
+		while(ttype!=Tok!"}" && ttype!=Tok!"EOF") x.put(parseDeclDef());
 		return x.data;
 	}
 
 	auto parse(){
 		//auto r=appender!(Declaration[])();
 		Declaration[] r;
-		while(tok.type!=Tok!"EOF"){
-			if(tok.type==Tok!"}") expectErr!"declaration"(), nextToken();
+		while(ttype!=Tok!"EOF"){
+			if(ttype==Tok!"}") expectErr!"declaration"(), nextToken();
 			r~=parseDeclDefs();
 		}
 		return r;
 	}
 }
 
-Declaration[] customParse(alias Allocator)(Code code){
-	return Parser!Allocator(code).parse();
-}
-
-Declaration[] parse(Code code){
-	return Parser!()(code).parse();
+Declaration[] parse(string code, ErrorHandler handler){
+	return Parser(lex(code),handler).parse();
 }
 
