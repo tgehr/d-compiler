@@ -15,6 +15,9 @@ enum binaryOps=mixin({string r="[";
         return r~"]";
 	}());
 
+private immutable arrLbp=mixin({string r="[";foreach(t;EnumMembers!TokenType) r~=to!string(isRelationalOp(t)?-2:getLbp(t))~",";return r~"]";}());
+
+
 
 enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"scope","shared","static","synchronized"]; // ref and auto ref taken to the front for easier handling by STCtoString
 
@@ -608,14 +611,15 @@ private struct Parser{
 	Expression parseExpression(int rbp = 0){
 		Expression left;
 		try left = nud();catch(PEE err){error("found '"~tok.toString()~"' when expecting expression");nextToken();return new ErrorExp();}
-		while(rbp < arrLbp[ttype]){
-			try left = led(left); catch(PEE err){error(err.msg);}
-		}
-		return left;
+		return parseExpression2(left, rbp);
 	}
+
 	Expression parseExpression2(Expression left, int rbp = 0){ // left is already known
-		while(rbp < arrLbp[ttype]){
+		while(rbp < arrLbp[ttype])
+		loop: try left = led(left); catch(PEE err){error(err.msg);}
+		if(arrLbp[ttype] == -2 && rbp<lbp!(Tok!"==")){
 			try left = led(left); catch(PEE err){error(err.msg);}
+			if(rbp<arrLbp[ttype]) goto loop;
 		}
 		return left;
 	}
@@ -953,7 +957,7 @@ private struct Parser{
 					case Tok!";", Tok!"return", Tok!"if", Tok!"while", Tok!"do", Tok!"for", Tok!"foreach",
 						 Tok!"switch", Tok!"with", Tok!"synchronized", Tok!"try", Tok!"scope", Tok!"asm", Tok!"pragma": // TODO: complete!
 						if(nest!=1) continue; // DMD bug: it lacks this
-						goto  isdglit;// if it contains return or ;, or it is a delegate literal
+						goto isdglit;// if it contains return or ;, or it is a delegate literal
 					case Tok!"EOF": break;
 					default: continue;
 				}
@@ -987,7 +991,7 @@ private struct Parser{
 					case Tok!"@":
 						nextToken();
 						if(ttype!=Tok!"i"){expectErr!"attribute identifier after '@'"(); nextToken(); continue;}
-						switch(tok.name){
+						switch(tok.name){ // TODO: if the lexer takes responsibility for uniquing away identifiers, this can be more efficient
 							mixin({string r;foreach(x;attributeSTC) r~="case \""~x~"\": cstc=STC"~x~"; goto Lstc;";return r;}());
 							default: error("unknown attribute identifier '"~tok.name~"'");
 						}
@@ -1196,10 +1200,12 @@ private struct Parser{
 		bool hastype=false;
 		if(isStatic || ttype==Tok!"delegate"){
 			nextToken();
-			if(ttype!=Tok!"(") stc=parseSTC!toplevelSTC(), ret=parseType();
-			goto readp;
+			if(ttype!=Tok!"(" && ttype!=Tok!"{"){
+				stc=parseSTC!toplevelSTC();
+				if(ttype!=Tok!"(" && ttype!=Tok!"{") ret=parseType();
+			}
 		}
-		if(ttype==Tok!"(") readp: params=parseParameterList(vararg), stc|=parseSTC!functionSTC(), hastype=true;
+		if(ttype==Tok!"(") params=parseParameterList(vararg), stc|=parseSTC!functionSTC(), hastype=true;
 		BlockStm bdy;
 		if(ttype != Tok!"=>") bdy=parseBlockStm();
 		else{

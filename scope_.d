@@ -39,14 +39,21 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 	ErrorHandler handler;
 
-	bool insert(Declaration decl)in{assert(decl.name&&decl.name.ptr);}body{
+	bool insert(Declaration decl)in{
+		assert(decl.name&&decl.name.ptr&&!decl.scope_);
+	}out(result){
+		assert(!result||decl.scope_ is this);
+	}body{
 		if(auto d=symtab.get(decl.name.ptr,null)){
 			if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
+					fd.scope_ = this;
 					os.add(fd);
 					return true;
 				}else if(auto ofd=d.isOverloadableDecl()){
-					symtab[decl.name.ptr]=New!OverloadSet(fd,ofd);
+					auto os = New!OverloadSet(fd,ofd);
+					decl.scope_ = os.scope_ = this;
+					symtab[decl.name.ptr]=os;
 					return true;
 				}
 			}
@@ -59,7 +66,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		decl.scope_=this;
 		return true;
 	}
-	
+	// TODO: useful or just unnecessarily convenient?
 	Declaration lookup(Identifier ident, lazy Declaration alt){
 		return symtab.get(ident.ptr, alt);
 	}
@@ -71,10 +78,10 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 	
 	FunctionDef getFunction(){return null;}
 	
-	T push(T:NestedScope)(R sc){ return New!T(this); }
-	Scope pop(){assert(0,"tried to pop module scope");}
-	void error(string err, Location loc){handler.error(err,loc);}
-	void note(string err, Location loc){handler.note(err,loc);}
+	//T push(T:NestedScope)(R sc){ return New!T(this); }
+	//Scope pop(){assert(0,"tried to pop module scope");}
+	void error(lazy string err, Location loc){handler.error(err,loc);}
+	void note(lazy string err, Location loc){handler.note(err,loc);}
 
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
@@ -85,7 +92,7 @@ private:
 
 abstract class NestedScope: Scope{
 	Scope parent;
-	override Scope pop(){return parent;}
+	// override Scope pop(){return parent;}
 	this(Scope parent) in{assert(!!parent);}body{
 		super(parent.handler);
 		this.parent=parent;
@@ -105,7 +112,7 @@ class FunctionScope: NestedScope{ // Forward references don't get resolved
 		this.fun=fun;
 	}
 	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, parent.lookup(ident));
+		return symtab.get(ident.ptr, parent.lookup(ident, alt));
 	}
 	
 	override FunctionDef getFunction(){return fun;}

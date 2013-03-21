@@ -9,8 +9,6 @@ template lbp(TokenType type){enum lbp=getLbp(type);}
 // right binding power: ^^, (op)= bind weaker to the right than to the left, '.' binds only primaryExpressions
 template rbp(TokenType type){enum rbp=type==Tok!"."?180:lbp!type-(type==Tok!"^^"||lbp!type==30);}
 
-auto arrLbp=mixin({string r="[";foreach(t;EnumMembers!TokenType) r~=to!string(getLbp(t))~",";return r~"]";}());
-
 int getLbp(TokenType type) pure{ // operator precedence
 	switch(type){
 	//case Tok!"..": return 10; // range operator
@@ -21,9 +19,11 @@ int getLbp(TokenType type) pure{ // operator precedence
 	case Tok!"=",Tok!"*=",Tok!"%=",Tok!"^=":
 	case Tok!"^^=",Tok!"~=":
 		return 30;
+	// logical operators
 	case Tok!"?":  return 40; // conditional operator
 	case Tok!"||": return 50; // logical OR
 	case Tok!"&&": return 60; // logical AND
+	// bitwise operators
 	case Tok!"|":  return 70; // bitwise OR
 	case Tok!"^":  return 80; // bitwise XOR
 	case Tok!"&":  return 90; // bitwise AND
@@ -34,7 +34,7 @@ int getLbp(TokenType type) pure{ // operator precedence
 	case Tok!"<>=", Tok!"!<>=":
 	case Tok!"in", Tok!"!in" ,Tok!"is",Tok!"!is":
 		return 100;
-	// bitwise shift operators
+	// shift operators
 	case Tok!">>", Tok!"<<":
 	case Tok!">>>": return 110;
 	// additive operators
@@ -114,10 +114,6 @@ bool isBitwiseOp(TokenType op){
 		case Tok!"|": // bitwise OR
 		case Tok!"^": // bitwise XOR
 		case Tok!"&": // bitwise AND
-		// bitwise shift operators
-		case Tok!">>": return true;
-		case Tok!"<<": return true;
-		case Tok!">>>":return true;
 			return true;
 		default:
 			return false;
@@ -126,7 +122,7 @@ bool isBitwiseOp(TokenType op){
 
 bool isShiftOp(TokenType op){
 	switch(op){
-		// bitwise shift operators
+		// shift operators
 		case Tok!">>": return true;
 		case Tok!"<<": return true;
 		case Tok!">>>":return true;

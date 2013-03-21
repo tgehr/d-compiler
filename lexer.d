@@ -169,7 +169,12 @@ struct Token{
 	string toString() const{
 		switch(type){
 			case Tok!"EOF": return "EOF";
-			default: return loc.rep;
+			default: if(loc.rep.length) return loc.rep;
+		}
+		switch(type){
+			case Tok!"true": return "true";
+			case Tok!"false": return "false";
+			default: assert(0);
 		}
 	}
 	union{
@@ -181,16 +186,16 @@ struct Token{
 }
 template token(string t){enum token=Token(Tok!t);}
 
-//TODO: Replace some switches by ifs
-//TODO: Remove this restriction:
-/+static assert({
+unittest{
+static assert({
 	foreach(i;simpleTokens){
 		string s=i[0];
 		bool found = s.length==1;
 		foreach(j;simpleTokens) if(j[0] == s[0..$-1]) found = true;
 		if(!found) return false;
 	}return true;
-}(),"Every non-empty prefix of simpleTokens must be a valid token.");+/
+}(),"Every non-empty prefix of simpleTokens must be a valid token.");
+}
 string caseSimpleToken(string prefix="", bool needs = false)pure{
 	string r;
 	int c=0,d=0;
@@ -299,6 +304,8 @@ struct Lexer{
 		n=n+anchor.index-s&buffer.length-1;
 		s=anchor.index;
 	}
+
+private:
 	Token tokError(string s, string rep, int l=0){
 		auto r = token!"Error";
 		r.str = s;
@@ -396,24 +403,27 @@ struct Lexer{
 							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
 							continue; // ignore comment
 						case '*':
-							p++;
+							s=p++-1;
+							sl=line;
 							consumecom2: for(;;){
 								switch(*p){
 									mixin(caseNl); // handle newlines
 									case '*': p++; if(*p=='/'){p++; break consumecom2;} break;
-									case 0, 0x1A: break consumecom2; //TODO: Error
+									case 0, 0x1A: errors~=tokError("unterminated /* */ comment",s[0..p-s],sl); break consumecom2;
 									default: mixin(skipUnicode);
 								}
 							}
 							continue; // ignore comment
 						case '+':
-							int d=1; p++;
+							int d=1;
+							s=p++-1;
+							sl=line;
 							consumecom3: while(d){
 								switch(*p){
 									mixin(caseNl); // handle newlines
 									case '+':  p++; if(*p=='/') d--, p++; break;
 									case '/':  p++; if(*p=='+') d++, p++; break;
-									case 0, 0x1A: break consumecom3; //TODO: ERROR
+									case 0, 0x1A: errors~=tokError("unterminated /+ +/ comment",s[0..p-s],sl); break consumecom3;
 									default: mixin(skipUnicode);
 								}
 							}
@@ -1037,7 +1047,7 @@ private dchar readEscapeSeq(ref immutable(char)* _p) in{assert(*(_p-1)=='\\');}b
 		case 'r': return _p=p+1, '\r';
 		case 't': return _p=p+1, '\t';
 		case 'v': return _p=p+1, '\v';
-		case '0': .. case '7': // BUG: Actually works for all ASCII characters
+		case '0': .. case '7': // BUG: Actually works for all extended ASCII characters
 			auto s=p;
 			for(int r=*p++-'0', i=0;;i++, r=(r<<3)+*p++-'0')
 				if(i>2||'0'>*p||*p>'7'){

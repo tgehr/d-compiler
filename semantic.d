@@ -4,6 +4,7 @@ import std.array, std.conv, std.algorithm, std.string;
 import lexer, parser, expression, statement, declaration, scope_, util;
 
 public import operators;
+public import interpret;
 
 string uniqueIdent(string base){
 	shared static id=0;
@@ -20,12 +21,14 @@ template PropErr(string s){ // propagate the 'error' semantic state TODO: maybe 
 				static if(is(typeof(@(t)): Node)){
 					if(@(t).sstate==SemState.error){
 						sstate=SemState.error;
+						needRetry=false;
 						return this;
 					}
 				}else{
 					foreach(x;@(t)){
 						if(x.sstate==SemState.error){
 							sstate=SemState.error;
+							needRetry=false;
 							return this;
 						}
 					}
@@ -33,18 +36,14 @@ template PropErr(string s){ // propagate the 'error' semantic state TODO: maybe 
 			});
 		}
 		return r;
-	}():q{if(sstate==SemState.error) return this;};
+	}():q{if(sstate==SemState.error){needRetry=false;return this;}};
 }
-
-//template SetRetry(string s){
-//	enum SetRetry = mixin(X!q{sc.deferSemantic(@(s.length?s:q{this}));})
-//}
 
 template PropRetry(string s){
 	enum PropRetry=mixin(X!q{
 		if(@(s).needRetry){
 			needRetry=true;
-			//import std.stdio; writeln("propagated retry from ",@(s).toString()," to ",toString());
+			//import std.stdio; w/riteln("propagated retry from ",@(s).toString()," to ",toString());
 			return this;
 		}
 	});
@@ -72,6 +71,10 @@ private template _SemChldImpl(string s, string op){
 
 template SemChld(string s){ // perform semantic analysis on child node, propagate all errors
 	enum SemChld=_SemChldImpl!(s,q{semantic(sc)})~PropErr!s;
+}
+
+template SemChldPar(string s){
+	enum SemChldPar=_SemChldImpl!(s,q{semantic(sc)});
 }
 
 template SemChldExp(string s){ // perform semantic analysis on child node, require that it is an expression
@@ -136,6 +139,9 @@ mixin template Semantic(T) if(is(T==ErrorDecl)||is(T==ErrorExp)||is(T==ErrorStm)
 // expressions
 mixin template Semantic(T) if(is(T==Expression)){
 	Type type;
+	invariant(){
+		assert(sstate != SemState.completed || type && type.sstate == SemState.completed);
+	}
 	override Expression semantic(Scope sc){ sc.error("unimplemented feature",loc); sstate = SemState.error; return this; }
 
 	Type typeSemantic(Scope sc){
@@ -175,7 +181,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		}else sc.error(format("%s '%s' is not an lvalue",kind,loc.rep),l);
 		return false;
 	}
-	final Expression convertTo(Type to){
+	final Expression convertTo(Type to)in{assert(type&&to);}body{
 		if(type is to) return this;
 		auto r = New!CastExp(STC.init,to,this);
 		r.loc = loc;
@@ -185,7 +191,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		if(type.implicitlyConvertsTo(rhs)) return true;
 		auto l = type.getHeadUnqual().isIntegral(), r = rhs.getHeadUnqual().isIntegral();
 		if(l && r){
-			// TODO: fix this. This is not yet right
+			// note: r.getLongRange is always valid for basic types
 			if(l.op == Tok!"long" || l.op == Tok!"ulong") return r.getLongRange().contains(getLongRange());
 			return r.getIntRange().contains(this.getIntRange());
 		}
@@ -311,7 +317,7 @@ struct MatchContext{
 
 mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 	override Expression semantic(Scope sc){
-		if(!lit.length){type=Type.get!EmptyArray(); sstate=SemState.completed; return this;}
+		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
 		mixin(SemChld!q{lit});
 		auto ty=lit[0].type;
 		foreach(x;lit[1..$]){
@@ -404,7 +410,8 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 	}
 
 	override Expression isLvalue(){
-		return this;
+		if(e.isLvalue()) return this;
+		return null;
 	}
 }
 
@@ -486,11 +493,11 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	static if(is(T _==UnaryExp!S,TokenType S)):
 	override Expression semantic(Scope sc){
 		mixin(SemPrlg);
-		static if(S!=Tok!"!"){mixin(SemChldExp!q{e});}
+		mixin(SemChldExp!q{e});
 		static if(S!=Tok!"&"&&S!=Tok!"!") auto ty=e.type.getHeadUnqual();
 		static if(S==Tok!"!"){
 			auto bl = Type.get!bool();
-			e = e.convertTo(bl).expSemantic(sc);
+			e = e.convertTo(bl).semantic(sc);
 			mixin(PropRetry!q{e});
 			mixin(PropErr!q{e});
 			type = bl;
@@ -644,6 +651,18 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						e1 = e1.implicitlyConvertTo(t1).semantic(sc);
 						assert(e1.sstate == SemState.completed);
 						type = t1;
+						bool valid = true;
+						if(bt2.bitSize()<=32){
+							auto r = e2.getIntRange();
+							if(!r.overlaps(IntRange(0,31,r.signed))) valid = false;
+						}else{
+							auto r = e2.getLongRange();
+							if(!r.overlaps(LongRange(0,31,r.signed))) valid = false;
+						}
+						if(!valid){
+							sc.error("shift amount is outside the range 0..31",loc);
+							mixin(ErrEplg);
+						}
 						mixin(SemEplg);
 					}
 				}
@@ -770,12 +789,29 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		foreach(x;["IntRange","LongRange"]){
 			r~=mixin(X!q{
 				override @(x) get@(x)(){
-					static if(isArithmeticOp(S) || isBitwiseOp(S)){
+					static if(isArithmeticOp(S) || isShiftOp(S) || isBitwiseOp(S)){
 						return mixin(`e1.get@(x)()`~TokChars!S~`e2.get@(x)()`);
 					}else static if(S==Tok!"," || isAssignOp(S)){
 						return e2.get@(x)();
 					}else static if(isIntRelationalOp(S)){
-						auto r1 = e1.get@(x)(), r2 = e2.get@(x)();
+						auto it = e1.type.isIntegral();
+						if(!it) return @(x)(0,1,true);
+						// TODO: make more efficient
+						LongRange r1, r2;
+						if(it.bitSize()<=32){
+							auto ir1 = e1.getIntRange();
+							auto ir2 = e2.getIntRange();
+							if(ir1.signed){
+								assert(ir2.signed);
+								r1 = LongRange(cast(int)ir1.min,cast(int)ir1.max,true);
+								r2 = LongRange(cast(int)ir2.min,cast(int)ir2.max,true);
+							}else{
+								assert(!ir1.signed);
+								r1 = LongRange(ir1.min,ir1.max,true);
+								r2 = LongRange(ir2.min,ir2.max,true);
+							}
+						}else r1 = e1.getLongRange(), r2 = e2.getLongRange();
+
 						if(r1.min==r1.max && r2.min==r2.max)
 							return mixin(`r1.min`~TokChars!S~`r2.min`)?@(x)(1,1,true):@(x)(0,0,true);
 						static if(S==Tok!"=="){
@@ -825,7 +861,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 	mixin(__dgliteralRng());
 }
 
-template Semantic(T) if(is(T X==TernaryExp)){
+template Semantic(T) if(is(T==TernaryExp)){
 	override Expression semantic(Scope sc){
 		mixin(SemPrlg);
 		e1=e1.semantic(sc);
@@ -867,10 +903,50 @@ template Semantic(T) if(is(T X==TernaryExp)){
 	mixin(__dgliteralRng());
 }
 
-// abstracts a symbol. most circular dependency diagnostics are centralized here.
+mixin template Semantic(T) if(is(T==IsExp)){
+	override Expression semantic(Scope sc){
+		if(!gscope) gscope = New!GaggingScope(sc);
+		auto f = ty.typeSemantic(gscope);
+		mixin(PropRetry!q{f});
+		Expression result;
+		if(f.sstate == SemState.error) goto no;
+		switch(which){
+			case WhichIsExp.type:
+				goto yes;
+			case WhichIsExp.isEqual, WhichIsExp.implicitlyConverts:
+				if(tparams.length) goto default;
+				if(tySpec){
+					auto g = tySpec.typeSemantic(gscope);
+					mixin(PropRetry!q{g});
+					if(g.sstate == SemState.error) goto no;
+					if(which == WhichIsExp.isEqual && f.equals(g) ||
+					   which == WhichIsExp.implicitlyConverts && f.implicitlyConvertsTo(g))
+						goto yes;
+					else goto no;
+				}
+			default: return super.semantic(sc);
+		}
+	yes:
+		result = New!LiteralExp(token!"true").semantic(sc);
+		goto ret;
+	no:
+		result = New!LiteralExp(token!"false").semantic(sc);
+		goto ret;
+	ret:
+		result.loc = loc;
+		return result;
+	}
+private:
+	GaggingScope gscope;
+}
+
+
+
+
+// abstracts a symbol. almost all circular dependency diagnostics are located here.
 // CallExp is aware of the possibility circular dependencies too, because it plays an
-// important rules role in overloaded symbol resolution
-// instances of this class have an identity independent from the referenced declaration
+// important role in overloaded symbol resolution
+// note: instances of this class have an identity independent from the referenced declaration
 class Symbol: Expression{ // semantic node
 	Declaration meaning;
 	protected this(){} // subclass can construct parent lazily
@@ -892,7 +968,6 @@ class Symbol: Expression{ // semantic node
 		mixin(SemPrlg);
 		scope_=sc;
 		assert(!!meaning);
-		mixin(PropErr!q{meaning});
 
 		if(needRetry){
 			sstate = SemState.begin; // TODO: ok?
@@ -902,9 +977,10 @@ class Symbol: Expression{ // semantic node
 			sc.error("circular dependencies are illegal",loc);
 			if(!circ) circ = this;
 			sstate = SemState.error;
-			mixin(RetryEplg); // TODO: does this go well?
+			mixin(RetryEplg);
 			//mixin(ErrEplg);
 		}else sstate = SemState.started;
+		// those are not virtual functions because of centralized symbol dependency handling
 		if(auto vd=meaning.isVarDecl()){
 			if(!vd.type || vd.stc & STCenum){
 				meaning = meaning.semantic(meaning.scope_);
@@ -913,7 +989,7 @@ class Symbol: Expression{ // semantic node
 				mixin(PropErr!q{meaning});
 			}
 			assert(!!vd.type);
-			type=vd.type.typeSemantic(meaning.scope_);
+			type=vd.type.semantic(meaning.scope_);
 		}else if(auto fd=meaning.isFunctionDecl()){
 			if(fd.type.hasUnresolvedReturn()){
 				meaning = meaning.semantic(meaning.scope_);
@@ -921,8 +997,9 @@ class Symbol: Expression{ // semantic node
 				mixin(PropRetry!q{meaning});
 				mixin(PropErr!q{meaning});
 			}
-			type = fd.type.typeSemantic(meaning.scope_);
-		}// TODO: overloads and templates
+			type = fd.type = fd.type.semantic(meaning.scope_);
+		}else if(typeid(this.meaning) is typeid(ErrorDecl)){mixin(ErrEplg);}
+		// TODO: templates
 		else type=Type.get!void(); // same as DMD
 		mixin(CircErrMsg);
 		mixin(PropRetry!q{type});
@@ -936,7 +1013,8 @@ class Symbol: Expression{ // semantic node
 
 	// override Type isType(){...} // TODO.
 	override Expression isLvalue(){
-		if(meaning.isVarDecl()) return this;
+		//import std.stdio; writeln(meaning," ",meaning.stc);
+		if(meaning.isVarDecl() && !(meaning.stc&STCenum)) return this;
 		return null;
 	}
 
@@ -959,9 +1037,39 @@ class Symbol: Expression{ // semantic node
 	override void matchError(Scope sc, Location loc, scope Expression[] args){
 		meaning.matchError(sc,loc,args);
 	}
+
+	mixin Interpret!Symbol;
+
 private:
 	Scope scope_;
 }
+// everything concerning error gagging is centralized here
+import error;
+class GaggingErrorHandler: ErrorHandler{
+	this(){super(null, null);}
+	override void error(lazy string, Location){ /* do nothing */ }
+	override void note(lazy string, Location){ /* do nothing */ }
+}
+
+class GaggingScope: Scope{
+	Scope parent;
+	this(Scope parent){this.parent = parent;super(New!GaggingErrorHandler());}
+	override bool insert(Declaration decl){assert(0);} // cannot insert into gagging scope
+
+	override void error(lazy string, Location){ /* do nothing */ }
+	override void note(lazy string, Location){ /* do nothing */ }
+
+	// forward other members:
+	override Declaration lookup(Identifier ident, lazy Declaration alt){
+		return parent.lookup(ident,alt);}
+	override Declaration lookup(Identifier ident){
+		// silence error message
+		return parent.lookup(ident, New!ErrorDecl());
+	}
+	override FunctionDef getFunction(){return parent.getFunction();}
+}
+
+
 
 mixin template Semantic(T) if(is(T==CastExp)){
 	override Expression semantic(Scope sc){
@@ -1863,6 +1971,7 @@ mixin template Semantic(T) if(is(T==BlockStm)){
 			mixin(PropRetry!q{x});
 			current = max(current, initial+1+i);
 		}
+		mixin(PropErr!q{s});
 		mixin(SemEplg);
 	}
 
@@ -1890,7 +1999,9 @@ mixin template Semantic(T) if(is(T==IfStm)){
 		mixin(SemPrlg);
 		if(!tsc) tsc = New!BlockScope(sc);
 		auto bl = Type.get!bool();
-		if(e.type !is bl) e = e.convertTo(bl).semantic(tsc);
+		e = e.semantic(tsc);
+		mixin(PropRetry!q{e});
+		e = e.convertTo(bl).semantic(tsc);
 		mixin(PropRetry!q{e});
 		s1 = s1.semantic(tsc);
 		mixin(PropRetry!q{s1});
@@ -1911,8 +2022,9 @@ mixin template Semantic(T) if(is(T==WhileStm)){
 		mixin(SemPrlg);
 		if(!lsc) lsc = New!BlockScope(sc);
 		e = e.semantic(lsc);
-		mixin(PropRetry!q{e}); // TODO: needed?
+		mixin(PropRetry!q{e});
 		s = s.semantic(lsc);
+		mixin(PropRetry!q{s});
 		mixin(PropErr!q{e,s});
 		mixin(SemEplg);
 	}
@@ -1927,7 +2039,8 @@ mixin template Semantic(T) if(is(T==DoStm)){
 		s = s.semantic(lsc);
 		mixin(PropRetry!q{s}); // TODO: needed?
 		e = e.semantic(sc);   // TODO: propose e.semantic(lsc);
-		mixin(PropErr!q{e,s});
+		mixin(PropRetry!q{e});
+		mixin(PropErr!q{s,e});
 		mixin(SemEplg);
 	}
 private:
@@ -1942,19 +2055,86 @@ mixin template Semantic(T) if(is(T==ForStm)){
 		if(s1){ // s1 is NoScope
 			if(auto bl=s1.isBlockStm()) s1 = bl.semanticNoScope(lsc);
 			else s1=s1.semantic(lsc);
+			mixin(PropRetry!q{s1});
 		}
-		mixin(PropRetry!q{s1}); // TODO: needed?
-		if(e1) e1=e1.semantic(lsc);
-		mixin(PropRetry!q{e1}); // TODO: needed?
-		if(e2) e2=e2.semantic(lsc); s2=s2.semantic(lsc);
+		if(e1){
+			e1=e1.semantic(lsc);
+			mixin(PropRetry!q{e1});
+		}
+		if(e2){
+			e2=e2.semantic(lsc);
+			mixin(PropRetry!q{e2});
+		}
+		s2=s2.semantic(lsc);
+		mixin(PropRetry!q{s2});
 		if(s1) mixin(PropErr!q{s1});
 		if(e1) mixin(PropErr!q{e1});
 		if(e2) mixin(PropErr!q{e2});
 		mixin(PropErr!q{s2});
-		return this;
+		mixin(SemEplg);
 	}
 private:
 	BlockScope lsc;
+}
+
+mixin template Semantic(T) if(is(T==ForeachStm)){
+	override ForeachStm semantic(Scope sc){
+		mixin(SemPrlg);
+		if(!lsc) lsc = New!BlockScope(sc);
+		mixin(SemChld!q{aggregate});
+		auto ty = aggregate.type;
+		// foreach over built-in arrays
+		Type et = null;
+		if(auto tt = ty.isArrayTy()) et = tt.ty;
+		if(auto tt = ty.isDynArrTy()) et = tt.ty;
+		if(et){
+			if(vars.length>2){
+				sc.error("at most two loop variables allowed for array foreach",
+				         vars[0].loc.to(vars[$-1].loc));
+				mixin(ErrEplg);
+			}else{
+				assert(vars.length);
+				if(vars.length == 2 && !curparam){
+					auto s_t = Type.get!Size_t();
+					if(vars[0].rtype){
+						vars[0].type = vars[0].rtype.typeSemantic(lsc);
+						mixin(PropErr!q{vars[0].rtype});
+						if(!vars[0].type.implicitlyConvertsTo(s_t)){ // TODO: This is a stub
+							sc.error(format("invalid type '%s' for index variable '%s'", vars[0].rtype.loc.rep, vars[0].name.toString()), vars[0].rtype.loc);
+							sstate = SemState.error;
+						}
+					}else vars[0].type = s_t;
+					curparam++;
+				}
+				if(curparam < vars.length){
+					if(vars[curparam].rtype){
+						vars[curparam].type = vars[curparam].rtype.typeSemantic(lsc);
+						mixin(PropErr!q{vars[curparam].rtype});
+						if(!et.implicitlyConvertsTo(vars[curparam].type)){
+							sc.error(format("cannot implicitly convert from element type '%s' to '%s'", et.toString(), vars[curparam].rtype.loc.rep),vars[curparam].rtype.loc);
+							sstate = SemState.error;
+						}
+					}else vars[curparam].type = ty;
+					curparam++;
+				}
+			}
+		}
+		// TODO: foreach over string types with automatic decoding
+		// TODO: foreach over associative arrays
+		// TODO: foreach over ranges
+		// TODO: foreach with opApply
+		// TODO: foreach over delegates
+		// TODO: foreach over Tuples
+		foreach(var; vars) var.semantic(lsc); // TODO: fix?
+		//mixin(SemChld!q{scope=lsc, bdy}); // TODO: implement this
+		bdy = bdy.semantic(lsc);
+		mixin(PropErr!q{vars, aggregate});
+		mixin(SemEplg);
+	}
+
+private:
+	BlockScope lsc;
+	size_t curparam=0;
 }
 
 mixin template Semantic(T) if(is(T==ReturnStm)){
@@ -1979,9 +2159,9 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 		}else{
 			mixin(PropErr!q{fun.type.ret});
 			e = e.implicitlyConvertTo(fun.type.ret).semantic(sc);
+			mixin(PropRetry!q{e});
 			mixin(PropErr!q{e});
 		}
-		mixin(PropErr!q{e});
 		mixin(SemEplg);
 	}
 }
@@ -1997,7 +2177,6 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		//assert(result is this); // TODO: remove return type?
 		//}body{ // insert into symbol table, but don't do the heavy processing yet
 		if(sstate != SemState.pre) return this;
-		scope_=sc;
 		sstate = SemState.begin;
 		if(!name){sc.error("unimplemented feature",loc); sstate = SemState.error; return this;} // TODO: obvious
 		if(!sc.insert(this)) sstate = SemState.error;
@@ -2028,11 +2207,11 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		mixin(SemPrlg);
 		if(rtype){
 			type=rtype.typeSemantic(sc);
-			mixin(PropRetry!q{type}); // TODO: needed?
+			mixin(PropRetry!q{type});
 		}
 		if(init){
 			init=init.expSemantic(sc);
-			mixin(PropRetry!q{init}); // TODO: needed?
+			mixin(PropRetry!q{init});
 			// deduce type
 			if(!type && init.sstate!=SemState.error) type=init.type;
 		}else if(!type){
@@ -2049,14 +2228,22 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		mixin(PropErr!q{type});
 
 		if(init){
-			init=init.implicitlyConvertTo(type).semantic(sc); // TODO: This re-checks the implicit conversion relation. optimize.
-			mixin(PropErr!q{init});
+			init=init.implicitlyConvertTo(type).semantic(sc);
+			if(stc&STCenum){
+				mixin(PropErr!q{init});
+				assert(init.sstate == SemState.completed);
+				init = init.interpret(sc);
+				mixin(PropErr!q{init});
+			}
 			/+if(init.implicitlyConvertsTo(type)){
 				... 
 			}else{
 				sc.error(format("initializing '%s' from incompatible type '%s'",rtype.loc.rep,init.type.toString()),loc);
 				mixin(ErrEplg);
 			}+/
+		}else if(stc&STCenum){
+			sc.error("manifest constants must have initializers",loc);
+			mixin(ErrEplg);
 		}
 
 		mixin(SemEplg);
@@ -2139,7 +2326,8 @@ class OverloadSet: Declaration{ // purely semantic node
 		auto matches = new Matched[decls.length]; // pointless GC allocation
 		foreach(i,decl; decls) matches[i].decl = decls[i].matchCall(args, matches[i].context);
 
-		auto best = reduce!max(map!(_=>_.context.match)(matches));
+		//auto best = reduce!max(map!(_=>_.context.match)(matches));
+		auto best = reduce!max(map!((_){return _.context.match;})(matches));
 		if(best == Match.none){
 			context.match = Match.none;
 			altCand = -1;
@@ -2214,7 +2402,8 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 	override FunctionDecl matchCall(scope Expression[] args, ref MatchContext context){
 		// TODO: variadic arguments
 		if(args.length > type.params.length ||
-		   any!(_=>_.init is null)(type.params[args.length..type.params.length])){
+		   //any!(_=>_.init is null)(type.params[args.length..type.params.length])){
+		   any!((_){return _.init is null;})(type.params[args.length..type.params.length])){
 				context.match=Match.none;
 				return null;
 		}
@@ -2251,7 +2440,8 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		MatchContext dummy;
 		// GC allocations, unneeded
 		// TODO!: refactor
-		auto pt = array(map!(function Expression (_)=>new StubExp(_.type))(type.params));
+		//auto pt = array(map!(function Expression (_)=>new StubExp(_.type))(type.params));
+		auto pt = array(map!(function Expression (_){return new StubExp(_.type);})(type.params));
 		return !!rhs.matchCall(pt, dummy);
 	}
 
@@ -2328,7 +2518,8 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					//foreach(ref x; args[1..$]) x = x.semantic(sc);
 					mixin(SemChld!q{args[1..$]});
 					foreach(x; args[1..$]){mixin(PropRetry!q{x});}
-					// TODO: interpret!
+					foreach(ref x; args[1..$]) x = x.interpret(sc);
+					mixin(PropErr!q{args[1..$]});
 					import std.stdio;
 					foreach(x; args[1..$]) stderr.write(x);
 

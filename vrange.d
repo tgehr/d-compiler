@@ -33,10 +33,10 @@ struct ValueRange(int size) if(size==32||size==64){
 	bool overlaps(R rhs){
 		if(signed){
 			if(!rhs.signed) rhs = rhs.toSigned();
-			return cast(S)max>=cast(S)rhs.min || cast(S)rhs.max>=cast(S)min;
+			return cast(S)max>=cast(S)rhs.min && cast(S)rhs.max>=cast(S)min;
 		}else{
 			if(rhs.signed) rhs = rhs.toUnsigned();
-			return max>=rhs.min || rhs.max>=min;
+			return max>=rhs.min && rhs.max>=min;
 		}
 	}
 
@@ -50,7 +50,7 @@ struct ValueRange(int size) if(size==32||size==64){
 	}
 	bool le(R rhs)in{assert(signed == rhs.signed);}body{
 		if(signed) return cast(S)max<cast(S)rhs.min;
-		return max>rhs.min;
+		return max<rhs.min;
 	}
 	bool leq(R rhs)in{assert(signed == rhs.signed);}body{
 		if(signed) return cast(S)max<=cast(S)rhs.min;

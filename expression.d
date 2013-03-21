@@ -252,6 +252,8 @@ class IsExp: Expression{
 		return "is("~ty.toString()~(ident?" "~ident.toString():"")~(which!=WhichIsExp.type?(which==WhichIsExp.isEqual?"==":": ")~
 			(tySpec?tySpec.toString():TokenTypeToString(tySpec2))~(tparams?","~join(map!(to!string)(tparams),","):""):"")~")";
 	}
+
+	mixin Visitors;
 }
 
 class TypeidExp: Expression{

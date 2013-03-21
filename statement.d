@@ -1,5 +1,5 @@
 
-import std.array, std.algorithm, std.range, std.conv;
+import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, scope_, semantic, visitors, util;
 
@@ -86,6 +86,8 @@ class ForeachStm: Statement{
 	bool isReverse;
 	this(Parameter[] v,Expression a,Statement b, bool isr=false){ vars = v; aggregate = a; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();}
+
+	mixin Visitors;
 }
 class ForeachRangeStm: Statement{
 	Parameter var;

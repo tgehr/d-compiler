@@ -17,7 +17,8 @@ const int x;
 
 void main(){
 	pragma(msg, typeof(0.0f&&{}()));
-	pragma(msg, !is(T==int)^^2);
+	pragma(msg, !(is(T==int))*2);
+	pragma(msg, !false);
 	
 	char ä='ä';
 	immutable(int)[] a;
