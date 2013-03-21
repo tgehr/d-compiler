@@ -1,3 +1,13 @@
+template iftioverload(T){
+	T iftioverload(T a, float b){return a;}
+	int iftioverload(int a, double b){return a;}
+}
+
+void testiftioverload(){
+	iftioverload!()(2,2); // TODO: how should this behave?
+}
+
+
 alias immutable(char)[] string;
 
 int fun(int delegate(int,int) a){return a(1,2);}

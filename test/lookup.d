@@ -1,4 +1,12 @@
-/+
+int intatmodulescope;
+
+void testmodulescoperesolution(){
+	double intatmodulescope; // fake
+	static assert(is(typeof(.intatmodulescope)==int));
+	pragma(msg, typeof(.intatmodulescope));
+}
+
+
 alias typeof((immutable(void[])).length) size_t;
 
 pragma(msg, size_t);
@@ -126,7 +134,7 @@ struct WW{
 	}
 }
 
-immutable foo = 2; 
+//immutable foo = 2; 
 //pragma(msg, a);
 
 

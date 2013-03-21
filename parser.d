@@ -292,19 +292,17 @@ private struct Parser{
 		nextToken();
 		return e;
 	}
-	Expression parseIdentifierList(bool tmpl=true,bool instNew=false,T...)(T args){ // tmpl: allow template instantiations, instNew: allow identifier.new Class;
-		TokenType tt;
-		Expression e;
+	Expression parseIdentifierList(bool tmpl=true,bool instNew=false)(Expression e=null){ // tmpl: allow template instantiations, instNew: allow identifier.new Class;
 		void errori(){expectErr!"identifier following '.'"();}
-		static if(T.length==0){
-			auto loc=tok.loc;
-			if(ttype==Tok!"."){e = New!Identifier(""); e.loc=tok.loc; nextToken();}
-			else if(ttype!=Tok!"i"){expectErr!"identifier"(); return New!ErrorExp();}
-			else e = New!Identifier(tok.name); e.loc = tok.loc; nextToken();
-		}else{
-			e=args[0];
-			auto loc=e.loc;
+		if(!e){
+			bool isModuleLookup = false;
+			if(ttype==Tok!"."){isModuleLookup=true; nextToken();}
+			if(ttype!=Tok!"i"){expectErr!"identifier"(); return New!ErrorExp();}
+			e = isModuleLookup?New!ModuleIdentifier(tok.name):New!Identifier(tok.name);
+			e.loc = tok.loc; nextToken();
 		}
+		auto loc=e.loc;
+
 		displayExpectErr=true;
 		for(bool multerr=0;;){
 			if(ttype==Tok!"."){
@@ -327,7 +325,7 @@ private struct Parser{
 			}else static if(tmpl){
 				if(ttype==Tok!"!"){
 					e=led(e);
-					if(ttype==Tok!"!"&&!multerr && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+					if(ttype==Tok!"!"&&!multerr){
 						error("multiple '!' arguments are disallowed"), multerr=1;
 					}
 				}else break;
@@ -336,7 +334,6 @@ private struct Parser{
 		return e;
 	}
 	bool skipIdentifierList(){ // only used for types, so no handling of instance.new
-		TokenType tt;
 		skip(Tok!".");
 		if(!skip(Tok!"i")) return false;
 		for(;;){

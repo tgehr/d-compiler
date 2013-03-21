@@ -1,3 +1,19 @@
+
+/+ // TODO: make work
+struct Tpl{
+	TypeTuple!(int, double) foo;
+	int a,b;
+	alias TypeTuple!(a,b) c;
+}
+
+void checkTpl(){
+	void fun(int, double){ }
+	Tpl t;
+	fun(t.c);
+	t.c[0]=2;
+	t.foo[0]=2;
+}+/
+
 template Alias(T){ alias T Alias; }
 
 template TypeTuple(T...){ alias T TypeTuple; }

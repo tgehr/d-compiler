@@ -1,5 +1,19 @@
 alias immutable(char)[] string;
 
+auto testcontextded(){
+	auto a = [x=>x+1, y=>2*y, (long z)=>z/2];
+	static assert(is(typeof(a[0]): long function(long)));
+	auto b = [[(long x)=>x+1],[y=>2*y], [z=>z/2]];
+	static assert(is(typeof(b[0][0]): long function(long)));
+	auto c = [[x=>x+1],[y=>2*y], [(long z)=>z/2]];
+	static assert(is(typeof(c[0][0]): long function(long)));
+	auto d = [[[x=>x+1]],[[x=>x]],[[(long x)=>x+1]]];
+	auto e = [[[x=>x+1, x=>x, (long x)=>x+1]]];
+	return d[0][0][0](1)+d[1][0][0](2)
+		+ e[0][0][0](1)+e[0][0][1](2);
+}
+static assert(testcontextded()==8);
+
 void testinex(){
 	void foo(int delegate(int) dg){}
 	foo(x=>y);

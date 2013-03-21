@@ -1,4 +1,5 @@
 
+
 immutable int foo(){}
 
 void main(){

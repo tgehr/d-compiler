@@ -251,7 +251,6 @@ void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
 
 pragma(msg, foo123!double(42.23));
 
-
 template test(){
 	void test(){
 		//enum test = 2;
@@ -329,7 +328,6 @@ pragma(msg, "fun: ",fun());
 
 T twotimes(T)(T arg)=>arg+arg;
 pragma(msg, twotimes!double(32.2));
-
 
 
 void foo(){
@@ -453,6 +451,8 @@ auto test2(){
 	return foo!bar();
 }
 pragma(msg, test2());
+
+
 
 auto test3(){
 	auto x = 22;

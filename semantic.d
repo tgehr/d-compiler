@@ -69,13 +69,13 @@ template PropErr(string s) if(!s.canFind(",")){
 	enum PropErr=s.length?mixin(X!q{
 		static if(is(typeof(@(s)): Node)){
 			if(@(s).sstate==SemState.error){
-				//import std.stdio; writeln("propagated error from ",@(s)," to ",this);
+				//dw("propagated error from ",@(s)," to ",this);
 				@(ErrEplg)
 			}
 		}else{
 			foreach(x;@(s)){
 				if(x.sstate==SemState.error){
-					//import std.stdio; writeln("propagated error from ",x," to ",this);
+					//dw("propagated error from ",x," to ",this);
 					@(ErrEplg)
 				}
 			}
@@ -511,6 +511,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 			void perform(CallExp exp){
 				// improve overload error messages
 				// (don't show redundant deduction failure messages)
+				// not required for correctness
 				foreach(a;exp.args)
 					if(auto ae = a.isAddressExp())
 						if(ae.isUndeducedFunctionLiteral()){
@@ -596,18 +597,21 @@ mixin template Semantic(T) if(is(T==Expression)){
 		return r;
 	}
 
-	Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc)in{
+	Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context)in{
 		assert(sstate == SemState.completed);
 	}body{
-		return type.matchCallHelper(args, context, loc) ? this : null;
+		return type.matchCallHelper(sc, loc, args, context) ? this : null;
 	}
 
-	final Expression matchCall(Expression[] args, const ref Location loc){
+	final Expression matchCall(Scope sc, const ref Location loc, Expression[] args){
 		MatchContext context;
-		auto r=matchCallHelper(args, context, loc);
-		if(!r) return null;
+		auto r=matchCallHelper(sc, loc, args, context);
+		if(!r){
+			if(sc && finishDeduction(sc)) matchError(sc, loc, args);			
+			return null;
+		}
 		if(r.sstate == SemState.completed) r=r.resolveInout(context.inoutRes);
-		else assert(r.sstate==SemState.error||r.isSymbol()&&(r.isSymbol().isSymbolMatcher||r.isSymbol().isFunctionLiteral)||cast(TemplateInstanceExp)r,text(r," ",typeid(r),r.isSymbol()?" "~r.isSymbol().meaning.toString():""," ",args," ",r.sstate," ",r.needRetry));
+		else assert(r.needRetry||r.sstate==SemState.error||cast(TemplateInstanceExp)r, text(r," ",r.sstate," ",r.needRetry));//||r.isSymbol()&&(r.isSymbol().isSymbolMatcher||r.isSymbol().isFunctionLiteral)||cast(TemplateInstanceExp)r,text(r," ",typeid(r),r.isSymbol()?" "~r.isSymbol().meaning.toString():""," ",args," ",r.sstate," ",r.needRetry));
 		return r;
 	}
 
@@ -731,6 +735,18 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 				}
 			}
 		}
+		// TODO: is there a better solution than using 'void' as the type
+		// for undeduced function literals?
+
+		if(ty is Type.get!void())
+		foreach(x; lit){
+			if(x.isAddressExp()||x.isArrayLiteralExp())
+				if(x.type is ty){
+					type = ty;
+					mixin(SemEplg);
+				}
+		}
+
 		foreach(ref x; lit)  x=x.implicitlyConvertTo(ty);
 		mixin(SemChldPar!q{lit});
 		alias util.all all; // TODO: file bug
@@ -1109,6 +1125,7 @@ private:
 mixin template Semantic(T) if(is(T==AssertExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		mixin(SemChld!q{a});
 		if(a.length<1){
 			sc.error("missing arguments to assert", loc);
 			mixin(ErrEplg);
@@ -1116,7 +1133,6 @@ mixin template Semantic(T) if(is(T==AssertExp)){
 			sc.error("too many arguments to assert", loc);
 			mixin(ErrEplg);
 		}
-		mixin(SemChld!q{a});
 		a[0]=a[0].convertTo(Type.get!bool());
 		// TODO: this is maybe not perfectly appropriate
 		if(a.length>1 && a[1].type !is Type.get!string())
@@ -1238,8 +1254,8 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return super.implicitlyConvertsTo(rhs);
 	}
 
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
-		return e.matchCallHelper(args, context, loc);
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		return e.matchCallHelper(sc, loc, args, context);
 	}
 
 	final bool isUndeducedFunctionLiteral(){
@@ -1301,8 +1317,17 @@ mixin template Semantic(T) if(is(T==BinaryExp!(Tok!"."))){ }
 class MatcherTy: Type{
 	Type adapted;
 	bool ambiguous;
-	this(){ sstate = SemState.completed; }
+	WhichTemplateParameter which;
+	this(WhichTemplateParameter which)in{
+		with(WhichTemplateParameter)
+			assert(which == type || which == tuple);
+	}body{
+		this.which = which;
+		sstate = SemState.completed;
+	}
 	override void typeMatch(Type from){
+		if(which==WhichTemplateParameter.tuple && !from.isTuple()) return;
+
 		if(!adapted) adapted=from;
 		else if(auto c=adapted.combine(from)) adapted=c;
 		else if(!adapted.equals(from)) ambiguous=true;
@@ -1316,16 +1341,6 @@ class MatcherTy: Type{
 	mixin DeepDup!MatcherTy;
 }
 
-enum MatchState{
-	start,            // start matching
-	iftiStart,        // start matching in ifti mode
-	iftiPrepare,
-	iftiMatching,     // continue ifti matching
-	checkMatch,       // check if there is a match
-	resolvedSemantic, // check default arguments for errors
-	checkConstraint,  // check the constraint
-	completed,        // matching succeeded
-}
 
 class TemplateInstanceDecl: Declaration{
 	Expression[] args;
@@ -1338,13 +1353,21 @@ class TemplateInstanceDecl: Declaration{
 
 	@property bool completedMatching(){ return matchState==MatchState.completed; }
 
-	MatchState matchState = MatchState.start;
-	Expression[] iftiArgs;
+	private{
 
-	/* some arguments might have been deduced while matching, so this
-	   instance just refers to the instance that has complete arguments
-	*/
-	TemplateInstanceDecl completeInstance;
+		enum MatchState{
+			start,            // start matching
+			iftiStart,        // start matching in ifti mode
+			iftiPrepare,
+			iftiMatching,     // continue ifti matching
+			checkMatch,       // check if there is a match
+			resolvedSemantic, // check default arguments for errors
+			checkConstraint,  // check the constraint
+			completed,        // matching succeeded
+		}
+
+		MatchState matchState = MatchState.start;
+	}
 
 	this(TemplateDecl parent, Expression[] args){
 		super(parent.stc, parent.name);
@@ -1352,10 +1375,38 @@ class TemplateInstanceDecl: Declaration{
 		this.args=args;
 		this.constraint = parent.constraint?parent.constraint.ddup():null;
 		this.bdy=parent.bdy; // NOTE: bdy is the original template body at this point!
+
+		scope_ = parent.scope_;
 		sstate = SemState.begin;
 	}
 
-	enum SemPrlg = .SemPrlg~q{
+	void gag()in{
+		assert(!paramScope && !iftiScope);
+	}body{
+		scope_ = New!GaggingScope(parent.scope_);
+	}
+
+	void ungag(){
+		scope_ = parent.scope_;
+		paramScope.parent = parent.scope_;
+		parent.summon(this);
+	}
+
+	final Declaration eponymousDecl()in{ // TODO: get rid of this if possible
+		assert(finishedInstantiation());
+	}body{
+		foreach(x;bdy.decls) if(x.name.name == name.name) return x;
+		return null;
+	}
+
+
+	this(TemplateDecl parent, Expression[] args, Expression[] iftiArgs){
+		this(parent, args);
+		this.iftiArgs = iftiArgs;
+		this.matchState = MatchState.iftiStart;
+	}
+
+	private enum SemPrlg = .SemPrlg~q{
 		assert(sstate == SemState.begin);
 		sstate = SemState.started;
 		scope(exit) if(sstate == SemState.started) sstate = SemState.begin;
@@ -1374,7 +1425,7 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		Scope instanceScope = parent.scope_;
 
-		if(bdy.stc&STCstatic){ // TODO: fix!
+		if(parent.stc&STCstatic){ // TODO: fix!
 			size_t maxn = 0;
 			foreach(i,x;args){
 				if(i>=parent.tuplepos
@@ -1404,7 +1455,6 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		foreach(i,x;resolved){
 			// TODO: don't leak references
-			
 			if(x.isSymbol()||x.isType()||x.isExprTuple()){
 				auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, x, parent.params[i].name, null));
 				al.semantic(paramScope);
@@ -1441,9 +1491,8 @@ class TemplateInstanceDecl: Declaration{
 		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,$)];
 		if(!checkResolvedValidity) return false;
 
-		scope_ = parent.scope_;
 		if(!paramScope){
-			paramScope = New!TemplateScope(parent.scope_,parent.scope_,this);
+			paramScope = New!TemplateScope(scope_,scope_,this);
 			determineInstanceScope();
 		}
 
@@ -1453,6 +1502,7 @@ class TemplateInstanceDecl: Declaration{
 	}
 
 	private{
+		Expression[] iftiArgs;
 		Parameter[] iftiEponymousParameters;
 		MatcherTy[] matcherTypes;
 		NestedScope iftiScope;
@@ -1469,11 +1519,18 @@ class TemplateInstanceDecl: Declaration{
 		iftiEponymousParameters = new Parameter[funparams.length];
 		matcherTypes = new MatcherTy[parent.params.length];
 
+		// function literal type deduction
+		// TODO: can the efficiency be improved?
+		iftiArgs = iftiArgs.dup;
+		foreach(ref a;iftiArgs)
+		if(auto ae = a.isAddressExp())
+		if(ae.isUndeducedFunctionLiteral())
+			a=a.ddup();
 	}
 
 	private void prepareIFTI(){
 		// TODO: this is quite inefficient
-		// TODO: use region allocator and release all the memory at once
+		// TODO: use region allocator and release lots of memory at once
 		// TODO: keep around iftiScope, and update it correctly
 		auto fdecl = parent.iftiDecl();
 		assert(!!fdecl);
@@ -1481,11 +1538,12 @@ class TemplateInstanceDecl: Declaration{
 		
 		foreach(i,ref t;iftiEponymousParameters) t=funparams[i].ddup();
 
-		iftiScope = New!NestedScope(parent.scope_);
+		iftiScope = New!NestedScope(scope_);
 
 		foreach(i,p;parent.params){
-			if(p.which != WhichTemplateParameter.type) continue;
-			if(!resolved[i]) matcherTypes[i]=New!MatcherTy();
+			if(p.which != WhichTemplateParameter.type
+			&& p.which != WhichTemplateParameter.tuple) continue;
+			if(!resolved[i]) matcherTypes[i]=New!MatcherTy(p.which);
 			auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, resolved[i]?resolved[i]:matcherTypes[i], parent.params[i].name,null));
 			al.semantic(iftiScope);
 			mixin(PropErr!q{al});
@@ -1507,29 +1565,20 @@ class TemplateInstanceDecl: Declaration{
 			mixin(SemProp!q{x.rtype});
 			x.type = x.type.applySTC(x.stc);
 		}
-		foreach(ref x;iftiArgs) mixin(SemChld!q{x});
-		//dw(iftiArgs," ",map!(_=>_.type)(iftiArgs));
+		foreach(ref x;iftiArgs){
+			mixin(SemChld!q{x});
+		}
 
-		foreach(i,ref a;iftiEponymousParameters){
-			assert(!!a.type);
-			a.type.typeMatch(iftiArgs[i].type);
-		}
-		//dw(iftiEponymousParameters);
 		bool resolvedSome = false;
-		//dw(matcherTypes);
-		foreach(i,x; matcherTypes){
-			if(!resolved[i] && x && x.adapted && !x.ambiguous){
-				resolvedSome = true;
-				resolved[i]=x.adapted;
-			}
-		}
 
 		foreach(i,ref a;iftiArgs)
 		if(auto ae = a.isAddressExp())
 		if(ae.isUndeducedFunctionLiteral()){
 			assert(!!iftiEponymousParameters[i].type);
 			auto ft = iftiEponymousParameters[i].type.getFunctionTy();
+			
 			if(!ft) continue;
+			ft=ft.ddup(); // TODO: can we do without these allocations?
 			ft.stripPseudoTypes();
 			assert(!!cast(Symbol)ae.e);
 			auto sym = cast(Symbol)cast(void*)ae.e;
@@ -1539,12 +1588,42 @@ class TemplateInstanceDecl: Declaration{
 			resolvedSome|=reso;
 			if(reso){
 				ae.sstate = sym.sstate = SemState.begin;
+				// TODO: gag this?
 				a.semantic(sc);
 				mixin(Rewrite!q{a});
-				mixin(PropErr!q{a});
+				mixin(PropRetry!q{a});
+				mixin(PropErr!q{a}); // TODO: get rid of this?
 			}
 		}
 
+		// dw(iftiArgs," ",map!(_=>_.type)(iftiArgs));
+
+		// if this behaviour should be changed, remember to edit
+		// FunctionTy.typeMatch as well
+		foreach(i,ref a;iftiEponymousParameters[0..min($,iftiArgs.length)]){
+			assert(!!a.type);
+			auto mt = a.type.isMatcherTy();
+			if(mt && mt.which==WhichTemplateParameter.tuple){
+				if(i+1==iftiEponymousParameters.length){
+					//TODO: gc allocation
+					auto types = map!(_=>_.type)(iftiArgs[i..$]).array();
+					mt.typeMatch(New!TypeTuple(types));
+				}
+				break;
+			}else if(a.type.isTuple()) break;
+
+			a.type.typeMatch(iftiArgs[i].type);
+		}
+
+
+		//dw(iftiEponymousParameters);
+		//dw(matcherTypes);
+		foreach(i,x; matcherTypes){
+			if(!resolved[i] && x && x.adapted && !x.ambiguous){
+				resolvedSome = true;
+				resolved[i]=x.adapted;
+			}
+		}
 
 		if(resolvedSome){
 			matchState = MatchState.iftiPrepare;
@@ -1557,19 +1636,42 @@ class TemplateInstanceDecl: Declaration{
 
 		auto tuplepos = parent.tuplepos;
 		auto params = parent.params;
-
-		if(tuplepos<params.length){
-			Expression[] expr = args[tuplepos..$];
-			Expression et = New!ExprTuple(paramScope.iparent,expr);
-			et.semantic(scope_);
-			mixin(Rewrite!q{et});
-			assert(et.sstate == SemState.completed);
-			resolved[tuplepos]=et;
+		
+		// this always fills the first tuple parameter
+		// other possible semantics would be to only fill the
+		// first tuple parameter if it is the last template parameter
+		// this would lead to uniform treatment of multiple tuple
+		// parameters in a template parameter list, which is more pure,
+		// but potentially less useful.
+		if(tuplepos<params.length && args.length>=tuplepos){
+			if(resolved[tuplepos]){
+				if(args.length>tuplepos){
+					auto tp = resolved[tuplepos].isTuple();
+					assert(!!tp);
+					if(args.length-tuplepos==tp.length){
+						size_t i=0;
+						foreach(x; tp){
+							if(x.templateParameterEquals(args[tuplepos+i++])) continue;
+							resolved[tuplepos]=null;
+							return false;
+						}
+					}else{
+						resolved[tuplepos]=null;
+						return false;
+					}
+				}
+			}else{
+				Expression[] expr = args[tuplepos..$];
+				Expression et = New!ExprTuple(paramScope.iparent,expr);
+				et.semantic(scope_);
+				mixin(Rewrite!q{et});
+				assert(et.sstate == SemState.completed);
+				resolved[tuplepos]=et;
+			}
 		}
-
+		
 		alias util.any any;
-		if(tuplepos&&any!(_=>_ is null)(resolved[0..tuplepos]))
-			return false;
+		if(any!(_=>_ is null)(resolved)) return false;
 
 		fillScopes();
 
@@ -1593,7 +1695,7 @@ class TemplateInstanceDecl: Declaration{
 
 		bdy.presemantic(bdyscope);
 		assert(bdy.scope_ is bdyscope);
-		if(instanceScope !is scope_){
+		if(instanceScope !is parent.scope_){
 			auto decl=instanceScope.getDeclaration();
 			assert(!!decl);
 			decl.nestedTemplateInstantiation(this);
@@ -1603,8 +1705,6 @@ class TemplateInstanceDecl: Declaration{
 
 
 	override void semantic(Scope sc){
-		if(completeInstance) mixin(RewEplg!q{completeInstance});
-
 		if(!completedMatching){
 			needRetry=false;
 			Ldecide:final switch(matchState) with(MatchState){
@@ -1720,7 +1820,10 @@ class TemplateInstanceDecl: Declaration{
 	override bool needsAccessCheck(AccessCheck check){ return false; }
 
 	override string kind(){return "template instance";}
-	override string toString(){ return name.toString()~"!("~join(map!(to!string)(args),",")~")"; }
+	override string toString(){
+		auto r = resolved;
+		return name.toString()~"!("~join(map!(to!string)(r),",")~")";
+	}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -1734,7 +1837,7 @@ interface Tuple{
 
 	@property ulong length();
 
-	int opApply(int delegate(Expression) dg);
+	int opApply(scope int delegate(Expression) dg);
 
 
 	static Expression[] expand(Expression[] a){
@@ -1838,7 +1941,7 @@ class ExprTuple: Expression, Tuple{
 	}
 	@property ulong length(){ return exprs.length;}
 
-	int opApply(int delegate(Expression) dg){
+	int opApply(scope int delegate(Expression) dg){
 		foreach(x; exprs) if(auto r = dg(x)) return r;
 		return 0;
 	}
@@ -1923,7 +2026,7 @@ class TypeTuple: Type, Tuple{
 	}
 	@property ulong length(){ return types.length;}
 
-	int opApply(int delegate(Expression) dg){
+	int opApply(scope int delegate(Expression) dg){
 		foreach(x; types) if(auto r = dg(x)) return r;
 		return 0;
 	}
@@ -2034,7 +2137,11 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 		// See if the eponymous declaration can be determined without analyzing
 		// the template body. This is required for IFTI and template constraints.
-		foreach(x; bdy.decls) if(x.name && x.name.name == name.name) eponymousDecl = x;
+		// TODO: deal with overloaded eponymous symbols
+		foreach(x; bdy.decls){
+			if(x.name && x.name.name == name.name) eponymousDecl = x;
+			break;
+		}
 
 		sc.getModule().addTemplateDecl(this);
 		mixin(SemEplg);
@@ -2045,8 +2152,8 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	 */
 	override bool needsAccessCheck(AccessCheck check){ return false; }
 
-	private TemplateInstanceDecl getInstance(Expression[] args)in{
-		assert(sstate == SemState.completed);
+/+ // TODO: where to put this?
+	final static void verifyArgs(Expression[] args){
 		alias util.all all;
 		assert(all!(_=>_.sstate == SemState.completed &&(_.isType()||_.isConstant()||_.isSymbol())||_.isAddressExp()&&_.isAddressExp().e.isSymbol())(args),{
 				string r;
@@ -2055,58 +2162,51 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 				}
 				return r;
 			}());
-	}body{
-		if(auto r=lookup(args)) return r;
+	}
++/
+	private TemplateDecl matchHelper(bool attemptLookup, T...)(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args, T ts){
+		assert(!!scope_);
+		if(sstate != SemState.completed){
+			semantic(scope_);
+			assert(!rewrite);
+			mixin(SemCheck);
+		}
+		assert(sstate == SemState.completed);
 
-		auto r=New!TemplateInstanceDecl(this,args);
-		add(r);
+		// TODO: could leverage instances that are error-free from gaggedStore
+		auto st = sc&&sc.handler.showsEffect ? &store : &gaggedStore;
+
+		if(!inst){
+			static if(attemptLookup) if(auto r=st.lookup(args)){ inst=r; return this; }
+			inst = New!TemplateInstanceDecl(this,args,ts);
+			if(st is &gaggedStore) inst.gag();
+		}
+		if(!inst.completedMatching){
+			inst.semantic(scope_);
+			if(inst.needRetry) return this;
+			if(inst.completedMatching){
+				// TODO: could maybe re-use orphaned instance
+				if(auto exst = st.lookup(inst.resolved)) inst = exst;
+				else st.add(inst);
+			}
+		}
+		if(inst.sstate == SemState.error) return null;
+		return this;		
+	}
+
+	override TemplateDecl matchInstantiation(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args){
+		auto r=matchHelper!true(sc, loc, inst, args);
+		// TODO: more explicit error message
+		if(!r && sc) sc.error("instantiation does not match template declaration",loc);
 		return r;
 	}
 
-	override TemplateDecl matchInstantiation(Expression[] args, ref TemplateInstanceDecl inst){
-		assert(!!scope_);
-		if(sstate != SemState.completed){
-			semantic(scope_);
-			assert(!rewrite);
-			mixin(SemCheck);
-		}
-		assert(sstate == SemState.completed);
-
-		if(!inst) inst = getInstance(args);
-		if(!inst.completedMatching){
-			inst.semantic(scope_);
-			if(inst.needRetry) return this;
-		}
-		if(inst.sstate == SemState.error) return null;
-		return this;
-	}
-	void instantiationError(Scope sc, Location loc, Expression[] args){
+	override TemplateDecl matchIFTI(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args, Expression[] funargs){
+		if(!iftiDecl) return super.matchIFTI(sc, loc, inst, args, funargs);
+		auto r=matchHelper!false(sc, loc, inst, args, funargs);
 		// TODO: more explicit error message
-		sc.error("instantiation does not match template declaration",loc);
-	}
-
-	override TemplateDecl matchIFTI(Expression[] args, Expression[] funargs, ref TemplateInstanceDecl inst){
-		assert(!!scope_);
-		if(sstate != SemState.completed){
-			semantic(scope_);
-			assert(!rewrite);
-			mixin(SemCheck);
-		}
-		assert(sstate == SemState.completed);
-
-		if(!inst){
-			inst = New!TemplateInstanceDecl(this,args);
-			inst.iftiArgs = funargs;
-			inst.matchState = MatchState.iftiStart;
-		}
-		if(!inst.completedMatching){
-			inst.semantic(scope_);
-			if(inst.needRetry) return this;
-		}else{
-			// TODO: grab the complete template instance
-		}
-		if(inst.sstate == SemState.error) return null;
-		return this;
+		if(!r && sc) sc.error("could not match call to function template",loc);
+		return r;
 	}
 
 /+	void updateInstances(scope TemplateInstanceDecl delegate(/*scope*/TemplateInstanceDecl) dg){
@@ -2114,7 +2214,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	}+/
 
 	void instancesBuildInterface(){
-		foreach(ref x; instances){
+		foreach(ref x; store.instances){
 			if(x.bdy is bdy) continue;
 			x.buildInterface();
 			mixin(Rewrite!q{x});
@@ -2122,49 +2222,61 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	}
 
 	void instancesSemantic(){
-		foreach(ref x; instances){
+		foreach(ref x; store.instances){
 			if(x.bdy is bdy) continue;
 			x.semantic(null); // TODO: ok?
 			mixin(Rewrite!q{x});
 		}
 	}
 
-private:
-	TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
+	void summon(TemplateInstanceDecl decl)in{
+		assert(gaggedStore.lookup(decl.resolved) is decl);
+		assert(decl.scope_ is scope_);
+	}body{
+		store.add(decl);
+	}
 
-	// TODO: use 'resolved' as the key instead
-	TemplateInstanceDecl lookup(Expression[] args){
-		TemplateInstanceDecl r = null;
-		foreach(x; instances){
-			alias util.all all;
-			if(args.length == x.args.length &&
-			   all!(_=>_[0].templateParameterEquals(_[1]))(zip(x.args, args)))
-			{ r=x; break; }
+private:
+	struct TemplateInstanceStore{
+		TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
+		
+		// TODO: use 'resolved' as the key instead
+		TemplateInstanceDecl lookup(Expression[] args){
+			TemplateInstanceDecl r = null;
+			foreach(x; instances){
+				alias util.all all;
+				if(args.length == x.resolved.length &&
+				   all!(_=>_[0].templateParameterEquals(_[1]))(zip(x.resolved, args)))
+					{ r=x; break; }
+			}
+			return r;
 		}
-		if(r&&r.completeInstance){
-			assert(r.bdy is bdy);
-			r=r.completeInstance;
-			assert(!r.completeInstance);
-		}
-		return r;
+		void add(TemplateInstanceDecl decl)in{
+			assert(decl.completedMatching());
+		}body{
+			instances~=decl;
+		}	
 	}
-	void add(TemplateInstanceDecl decl){
-		instances~=decl;
-	}
+	
+	TemplateInstanceStore store;
+	TemplateInstanceStore gaggedStore;
 }
+
 
 
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	bool firstlookup = true;
 
 	bool needIFTI = false;
+	Expression[] iftiArgs;
 	override void willCall() { needIFTI=true; }
 
-	override Expression matchCallHelper(Expression[] funargs, ref MatchContext context, const ref Location loc){
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] funargs, ref MatchContext context){
 		assert(needIFTI);
 		assert(sstate == SemState.completed);
 
 		sstate = SemState.begin;
+		iftiArgs = funargs;
 
 		Expression container = null;
 		auto sym = e.isSymbol();
@@ -2177,61 +2289,23 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		}
 
 		TemplateDecl decl;
-		if(!inst||!inst.completedMatching){
-			decl = sym.meaning.matchIFTI(args, funargs, inst);
-			if(!decl){
-				if(sym.meaning.sstate != SemState.error)
-					sym.meaning.iftiError(scope_,loc,args);
-				mixin(ErrEplg);
-			}
-			assert(!!inst);
-			mixin(SemProp!q{decl, inst});
-		}else decl=inst.parent;
+		//assert(!inst);
+		decl = sym.meaning.matchIFTI(sc, loc, inst, args, funargs);
+		if(!decl) mixin(ErrEplg);
+		assert(!!inst);
+		mixin(SemProp!q{decl, inst});
 
 		return this;
-	}
-	Scope scope_;
-
-	private void IFTIsemantic(Scope sc, Expression container, Symbol sym){
-		mixin(SemPrlg);
-		mixin(SemChld!q{e,args});
-		type = type.get!void();
-		if(!inst) mixin(SemEplg);
-
-		if(!inst.completedMatching)
-			mixin(SemChld!q{inst});
-
-		auto decl=inst.parent;
-		
-		finishSemantic(sc, container, sym, decl);
 	}
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 
-		scope_=sc;
-
 		// eponymous template trick
 		if(!!res){
-			mixin(SemChld!q{res});
-			if(!eponymous.meaning && eponymous.sstate != SemState.failed){
-				eponymous.recursiveLookup = false;
-				eponymous.lookup(res.getMemberScope());
-			}
-			mixin(SemProp!q{eponymous});
-			if(eponymous.sstate == SemState.failed){
-				needRetry=false;
-				auto r = res;
-				mixin(RewEplg!q{r});
-			}
-			Expression r=New!(BinaryExp!(Tok!"."))(res, eponymous);
-			r.loc=loc;
-			r.semantic(sc);
-			mixin(Rewrite!q{r});
-			// TODO: are there other code locations that might create
-			// a circular dependency like this?
-			if(r.needRetry==2){mixin(PropRetry!q{r});}
-			mixin(RewEplg!q{r});
+			if(needIFTI) iftiResSemantic(sc);
+			else instantiateResSemantic(sc);
+			return;
 		}
 		
 		mixin(RevEpoLkup!q{e});
@@ -2246,7 +2320,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 				container = fld.e1;
 				sym = fld.e2;
 			}else{
-				// TODO: this error message has a duplicate in Declaration.instantiationError
+				// TODO: this error message has a duplicate in Declaration.matchInstantiation
 				sc.error(format("can only instantiate templates, not %ss",e.kind),loc);
 				mixin(ErrEplg);
 			}
@@ -2278,8 +2352,38 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 		mixin(SemChld!q{args});
 
-		// if(needIFTI) return IFTIsemantic(sc,container,sym);
+		if(needIFTI) return IFTIsemantic(sc,container,sym);
 		instantiateSemantic(sc,container,sym);
+	}
+
+	private void IFTIsemantic(Scope sc, Expression container, Symbol sym){
+		mixin(SemPrlg);
+		mixin(SemChld!q{e,args});
+		type = type.get!void();
+		if(!inst) mixin(SemEplg);
+
+		TemplateDecl decl;
+		if(!inst||!inst.completedMatching){
+			decl = sym.meaning.matchIFTI(sc, loc, inst, args, iftiArgs);
+			if(!decl) mixin(ErrEplg);
+			assert(!!inst);
+			mixin(SemProp!q{decl, inst});
+		}else decl=inst.parent;
+		
+		finishSemantic(sc, container, sym, decl);
+	}
+
+	private void instantiateSemantic(Scope sc, Expression container, Symbol sym){
+		TemplateDecl decl;
+		if(!inst||!inst.completedMatching){
+			decl = sym.meaning.matchInstantiation(sc, loc, inst, args);
+			if(!decl) mixin(ErrEplg);
+			assert(!!inst);
+			mixin(SemProp!q{decl, inst});
+		}else decl=inst.parent;
+		assert(decl&&inst);
+
+		finishSemantic(sc, container, sym, decl);
 	}
 
 	private void finishSemantic(Scope sc, Expression container, Symbol sym, TemplateDecl decl){
@@ -2315,22 +2419,39 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		semantic(sc); // no indefinite recursion because 'res' is now set		
 	}
 
-	private void instantiateSemantic(Scope sc, Expression container, Symbol sym){
-		TemplateDecl decl;
-		if(!inst||!inst.completedMatching){
-			decl = sym.meaning.matchInstantiation(args, inst);
-			if(!decl){
-				if(sym.meaning.sstate != SemState.error)
-					sym.meaning.instantiationError(sc,loc,args);
-				mixin(ErrEplg);
-			}
-			assert(!!inst);
-			mixin(SemProp!q{decl, inst});
-		}else decl=inst.parent;
-		assert(decl&&inst);
-
-		finishSemantic(sc, container, sym, decl);
+	private void instantiateResSemantic(Scope sc){
+		mixin(SemChld!q{res});
+		if(!eponymous.meaning && eponymous.sstate != SemState.failed){
+			eponymous.recursiveLookup = false;
+			eponymous.lookup(res.getMemberScope());
+		}
+		mixin(SemProp!q{eponymous});
+		if(eponymous.sstate == SemState.failed){
+			needRetry=false;
+			auto r = res;
+			mixin(RewEplg!q{r});
+		}
+		Expression r=New!(BinaryExp!(Tok!"."))(res, eponymous);
+		r.loc=loc;
+		r.semantic(sc);
+		mixin(Rewrite!q{r});
+		// TODO: are there other code locations that might create
+		// a circular dependency like this?
+		if(r.needRetry==2){mixin(PropRetry!q{r});}
+		mixin(RewEplg!q{r});
 	}
+
+	private void iftiResSemantic(Scope sc){
+		instantiateResSemantic(sc);
+		if(!rewrite) return;
+		assert(!!cast(Expression)rewrite);
+		rewrite=(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
+		if(!rewrite) mixin(ErrEplg);
+	}
+
+
+
+
 private:
 	Expression res;
 	Identifier eponymous;
@@ -2349,6 +2470,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		// TODO: can this be solved more elegantly?
 		static if(S==Tok!"||"||S==Tok!"&&"){
 			if(lazyConditionalSemantic){
+				e1.prepareInterpret();
 				mixin(SemChldExp!q{e1});
 				auto bl = Type.get!bool();
 				mixin(ConvertTo!q{e1,bl});
@@ -2955,7 +3077,7 @@ class Symbol: Expression{ // semantic node
 				foreach(x; clist) if(x.scope_.handler.showsEffect()){
 					errsc = x.scope_;
 					break;
-				}else if(x.meaning.scope_.handler.showsEffect()){
+				}else if(x.meaning.scope_&&x.meaning.scope_.handler.showsEffect()){
 					errsc = x.meaning.scope_;
 					break;
 				}
@@ -3032,13 +3154,15 @@ class Symbol: Expression{ // semantic node
 		}
 
 		if(isSymbolMatcher){
-			assert(!!cast(SymbolMatcher)meaning,to!string(meaning));
+			//assert(!!cast(SymbolMatcher)meaning,to!string(meaning));
+			if(meaning.isSymbolMatcher()){
 			meaning.semantic(scope_);
 			mixin(CircErrMsg);
 			if(meaning.rewrite)
 				inoutRes = (cast(SymbolMatcher)cast(void*)meaning)
 					.context.inoutRes;
 			mixin(SemProp!q{meaning});
+			}
 			isSymbolMatcher=false;
 		}else if(isStrong){
 			if(!needParamDeduction){
@@ -3074,6 +3198,7 @@ class Symbol: Expression{ // semantic node
 
 		}else if(auto fd=meaning.isFunctionDecl()){
 			if(!needParamDeduction){
+				//if(fd.type.hasAutoReturn()){ // DMD 2.059 does this...
 				if(fd.type.hasUnresolvedReturn()){
 					mixin(MeaningSemantic);
 					mixin(CircErrMsg);
@@ -3113,7 +3238,7 @@ class Symbol: Expression{ // semantic node
 				fd.type.semantic(meaning.scope_);
 				assert(!fd.rewrite);
 			}
-			if(ov.decls.length==1)
+			if(ov.count==1 && ov.decls.length)
 				if(auto fd=ov.decls[0].isFunctionDecl()){
 					meaning = fd;
 					type = fd.type;
@@ -3141,7 +3266,7 @@ class Symbol: Expression{ // semantic node
 		// uniform access principle
 		Declaration implcalldecl = meaning.isFunctionDecl();
 		if(!implcalldecl)if(auto ov=meaning.isOverloadSet())
-			if(ov.hasFunctions)
+			if(ov.hasFunctions) // ?
 				implcalldecl=meaning;
 		if(implcalldecl){
 			if(!addressTaken && !called
@@ -3185,7 +3310,7 @@ class Symbol: Expression{ // semantic node
 		}
 		if(tmpl && meaning.name.name==tmpl.name.name)
 			return meaning.name.name~"!("~join(map!(to!string)(tmpl.args),",")~")";
-		return meaning.name.name;
+		return meaning.name.toString();
 	}
 	override @property string kind(){return meaning.kind;}
 
@@ -3246,8 +3371,8 @@ class Symbol: Expression{ // semantic node
 	}
 
 
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
-		if(auto m = meaning.matchCall(args, context, loc)){
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		if(auto m = meaning.matchCall(sc, loc, args, context)){
 			// resolve the overload in place and then rely on
 			// semantic to catch eventual circular dependencies:
 			meaning = m;
@@ -3257,7 +3382,7 @@ class Symbol: Expression{ // semantic node
 			Symbol.semantic(scope_);
 			return this;
 		}
-		return super.matchCallHelper(args, context, loc);
+		return super.matchCallHelper(sc, loc, args, context);
 	}
 	override void matchError(Scope sc, Location loc, Expression[] args){
 		meaning.matchError(sc,loc,args);
@@ -3335,16 +3460,14 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		mixin(SemChldExp!q{args});
 		mixin(PropErr!q{e});
 
-		if(auto c = fun !is null ? fun : e.matchCall(args, loc)){
-			fun = c;
-			mixin(SemChld!q{fun});
-		}else{
-			mixin(SemProp!q{e}); // display error only once
-			if(e.finishDeduction(sc)) e.matchError(sc, loc, args);			
-			mixin(ErrEplg);
+		if(fun is null){
+			fun = e.matchCall(sc, loc, args);
+			if(fun is null) mixin(ErrEplg);
+			mixin(SemProp!q{fun});
 		}
+		mixin(SemChld!q{fun});
 
-		mixin(SemProp!q{e}); // catch errors generated in matchCall
+		mixin(SemProp!q{e}); // catch errors generated in matchCall TODO: still relevant?
 		assert(fun && fun.type);
 		auto tt = fun.type.getFunctionTy();
 		assert(!!tt);
@@ -3393,6 +3516,9 @@ mixin template Semantic(T) if(is(T==CallExp)){
 // everything concerning error gagging is centralized here
 import error;
 class GaggingErrorHandler: ErrorHandler{
+
+	static opCall(){static GaggingErrorHandler instance; return instance?instance:(instance=New!GaggingErrorHandler());}
+
 	override void error(lazy string, Location){ nerrors++; }
 	override void note(lazy string, Location){ /* do nothing */ }
 
@@ -3402,7 +3528,10 @@ class GaggingErrorHandler: ErrorHandler{
 }
 
 class GaggingScope: NestedScope{
-	this(Scope parent){super(parent); handler=New!GaggingErrorHandler();}
+	this(Scope parent){super(parent);}
+
+	override @property ErrorHandler handler(){return GaggingErrorHandler();}
+
 	override bool insert(Declaration decl){
 		// cannot insert into gagging scope
 		return false;
@@ -3415,9 +3544,16 @@ class GaggingScope: NestedScope{
 	override Declaration lookup(Identifier ident, lazy Declaration alt){
 		return parent.lookup(ident,alt);
 	}
+	override Declaration lookupHere(Identifier ident, lazy Declaration alt){
+		return parent.lookupHere(ident, alt);
+	}
 
 	override Scope getUnresolved(Identifier ident){
 		return parent.getUnresolved(ident);
+	}
+
+	override bool inexistent(Identifier ident){
+		return parent.inexistent(ident);
 	}
 
 	override FunctionDef getFunction(){return parent.getFunction();}
@@ -3641,11 +3777,10 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		super.semantic(sc);
 	}
 
-	/* looks up the given identifier in the scope given by the first argument.
-	   the second argument
+	/* looks up the given identifier in the scope given by the argument.
 
 	   + if needRetry is set after the call, then the lookup should be retried later
-	   + if sstate is SemState.error after the call, then the lookup failed
+	   + if sstate is SemState.failed after the call, then the lookup failed
 	   + if the lookup succeeds, then 'meaning' will become initialized
 	 */
 
@@ -3740,6 +3875,16 @@ class LookupIdentifier: Identifier{
 	}
 }
 
+mixin template Semantic(T) if(is(T==ModuleIdentifier)){
+	Scope mscope;
+	override void semantic(Scope sc){
+		assert(!!sc.getModule());
+		if(!mscope) mscope = sc.getModule().sc;
+		if(!meaning) lookupSemantic(sc, mscope);
+		else super.semantic(sc);
+	}
+}
+
 
 mixin template Semantic(T) if(is(T==FieldExp)){
 
@@ -3808,6 +3953,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			}
 		}else if(this_){
 			if(auto et = res.isExprTuple()){
+				// TODO: integrate this with the rest of the code base
 				tuple = et;
 				type = et.type;
 				mixin(SemEplg);
@@ -3896,9 +4042,9 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	}
 
 	// TODO: consider 'this'-pointer for matching
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		if(tuple) return null;
-		auto exp = e2.matchCallHelper(args, context, loc);
+		auto exp = e2.matchCallHelper(sc, loc, args, context);
 		if(!exp) return null;
 		assert(!!cast(Symbol)exp);
 		auto sym = cast(Symbol)cast(void*)exp;
@@ -4142,7 +4288,7 @@ mixin template Semantic(T) if(is(T==Type)){
 		return arrType[size]=ArrayTy.create(this,size);
 	}
 
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		return null;
 	}
 	void matchError(Scope sc, Location loc, Expression[] args){
@@ -4208,15 +4354,10 @@ mixin template Semantic(T) if(is(T==Type)){
 	}
 
 	final FunctionTy getFunctionTy(){ // TODO: could be a virtual function instead
-		auto tt = isFunctionTy();
-		if(!tt){
-			if(auto dgt = isDelegateTy()) tt = dgt.ft;
-			else if(auto fpt = isPointerTy()){
-				assert(cast(FunctionTy)fpt.ty);
-				tt = cast(FunctionTy)cast(void*)fpt.ty;
-			}
-		}
-		return tt;
+		if(auto fty = isFunctionTy()) return fty;
+		if(auto dgt = isDelegateTy()) return dgt.ft;
+		if(auto fpt = isPointerTy())  return fpt.ty.isFunctionTy();
+		return null;
 	}
 
 
@@ -4361,8 +4502,8 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 		mixin(SemEplg);
 	}
 
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
-		return ft.matchCallHelper(args, context, loc) ? this : null;
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		return ft.matchCallHelper(sc, loc, args, context) ? this : null;
 		return null;
 	}
 
@@ -4387,7 +4528,6 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 		if(auto ptr=from.isPointerTy())
 			if(auto pft=ptr.ty.isFunctionTy())
 				ft.typeMatch(pft);
-
 	}
 	
 	override bool hasPseudoTypes(){ return ft.hasPseudoTypes(); }
@@ -4509,9 +4649,21 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 	override void typeMatch(Type rhs){
 		if(auto ft = rhs.isFunctionTy()){
 			if(ret&&ft.ret) ret.typeMatch(ft.ret);
-			foreach(i,p;params[0..min($,ft.params.length)])
+			foreach(i,p;params[0..min($,ft.params.length)]){
+				auto mt = p.type.isMatcherTy();
+				if(mt && mt.which==WhichTemplateParameter.tuple){
+					//TODO: gc allocation
+					alias util.all all;
+					if(i+1==params.length&&all!(_=>_.type !is null)(ft.params[i..$])){
+						auto types = map!(_=>_.type)(ft.params[i..$]).array();
+						mt.typeMatch(New!TypeTuple(types));
+					}
+					break;
+				}
+
 				if(p.type && ft.params[i].type)
 					p.type.typeMatch(ft.params[i].type);
+			}
 		}
 	}
 	override bool hasPseudoTypes(){
@@ -4529,7 +4681,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 				p.type = null;
 	}
 
-	override FunctionTy matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
+	override FunctionTy matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		alias util.any any; // TODO: file bug
 		if(args.length > params.length ||
 		   any!(_=>_.init is null)(params[args.length..params.length])){
@@ -5368,8 +5520,9 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 		}
 	}
 	static if(is(T==PointerTy))
-	override Expression matchCallHelper(Expression[] args, ref MatchContext context, const ref Location loc){
-		if(auto ft=ty.isFunctionTy()) return ft.matchCallHelper(args, context, loc) ? this : null;
+	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		if(auto ft=ty.isFunctionTy())
+			return ft.matchCallHelper(sc, loc, args, context) ? this : null;
 		return null;
 	}
 
@@ -5823,28 +5976,22 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		return !(stc&STCstatic) && check == AccessCheck.all;
 	}
 
-	Declaration matchCall(Expression[] args, ref MatchContext context, const ref Location loc){
+	Declaration matchCall(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		return null;
 	}
 	void matchError(Scope sc, Location loc, Expression[] args){
 		sc.error(format("%s '%s' is not callable",kind,name.toString()),loc);
 	}
 
-	TemplateDecl matchInstantiation(Expression[] args, ref TemplateInstanceDecl inst){
+	TemplateDecl matchInstantiation(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args){
+		if(sc) sc.error(format("can only instantiate templates, not %ss",kind),loc);
 		return null;
-	}
-	void instantiationError(Scope sc, Location loc, Expression[] args){
-		sc.error(format("can only instantiate templates, not %ss",kind),loc);
 	}
 	
-	TemplateDecl matchIFTI(Expression[] args, Expression[] funargs, ref TemplateInstanceDecl inst){
+	TemplateDecl matchIFTI(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args, Expression[] funargs){
+		if(sc) sc.error(format("%s '%s' is not a function template",kind, name.name),loc);
 		return null;
 	}
-
-	void iftiError(Scope sc, Location loc, Expression[] args){
-		sc.error(format("%s '%s' is not a function template",kind, name.name),loc);
-	}
-
 
 	// TODO: make OO instead of functional?
 	bool isDeclAccessible(Declaration decl)in{
@@ -6009,6 +6156,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				tc.syms = new Expression[cast(size_t)len];
 				foreach(i, ref x;tc.syms){
 					auto sym = New!Symbol(tc.vds[i]);
+					sym.accessCheck = AccessCheck.none;
 					sym.loc = loc; // TODO: fix
 					sym.scope_=scope_;
 					x = sym;
@@ -6188,6 +6336,12 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 	}
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		a[0].prepareInterpret();
+		a[0].prepareLazyConditionalSemantic();
+		if(a.length==2) a[1].prepareInterpret();
+
+		mixin(SemChld!q{a});
+
 		if(a.length<1){
 			sc.error("missing arguments to static assert", loc);
 			mixin(ErrEplg);
@@ -6195,15 +6349,11 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 			sc.error("too many arguments to static assert", loc);
 			mixin(ErrEplg);
 		}
-		a[0].prepareInterpret();
-		a[0].prepareLazyConditionalSemantic();
-		if(a.length==2) a[1].prepareInterpret();
 
-		mixin(SemChld!q{a});
 		foreach(x; a) mixin(FinishDeduction!q{x});
 		mixin(PropErr!q{a});
 		auto bl=Type.get!bool();
-		mixin(ImplConvertTo!q{a[0],bl});
+		mixin(ConvertTo!q{a[0],bl});
 		mixin(IntChld!q{a[0]});
 
 		if(!a[0].interpretV()){
@@ -6381,8 +6531,7 @@ abstract class OverloadableDecl: Declaration{ // semantic node
 
 class OverloadSet: Declaration{ // purely semantic node
 
-	private bool _matchedOne = false; // TODO: remove
-	bool hasFunctions = false;
+	debug private bool _matchedOne = false; // TODO: remove
 
 	this(OverloadableDecl[] args...)in{
 		assert(args.length);
@@ -6395,10 +6544,11 @@ class OverloadSet: Declaration{ // purely semantic node
 	this(Identifier name){super(STC.init,name);}
 	void add(OverloadableDecl decl)in{
 		assert(!decls.length||decls[0].name.name==decl.name.name);
-		assert(!_matchedOne, "TODO!"); // TODO:
+		assert(!tdecls.length||tdecls[0].name.name==decl.name.name);
+		debug assert(!_matchedOne, "TODO!"); // TODO:
 	}body{
-		decls~=decl;
-		if(decl.isFunctionDecl()) hasFunctions=true;
+		if(auto td=decl.isTemplateDecl()) tdecls~=td;
+		else decls~=decl;
 	}
 
 	/* accessibility of overloads is checked after they have been resolved
@@ -6414,9 +6564,13 @@ class OverloadSet: Declaration{ // purely semantic node
 		FunctionDecl decl;
 	}
 
-	override Declaration matchCall(Expression[] args, ref MatchContext context, const ref Location loc){
-		_matchedOne = true;
-		if(decls.length == 1) return decls[0].matchCall(args, context, loc);
+	override Declaration matchCall(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		debug _matchedOne = true;
+
+		if(!tdecls.length){
+			if(decls.length == 1) return decls[0].matchCall(sc, loc, args, context);
+		}else return New!FunctionOverloadMatcher(this, args, loc);
+
 		auto matches = new Matched[decls.length]; // pointless GC allocation
 		foreach(i,decl; decls){
 			if(decl.sstate == SemState.error){
@@ -6424,13 +6578,13 @@ class OverloadSet: Declaration{ // purely semantic node
 				if(!fd||fd.type.sstate == SemState.error)
 					return decl;
 			}
-			auto matched=decls[i].matchCall(args, matches[i].context, loc);
+			auto matched=decls[i].matchCall(null, loc, args, matches[i].context);
 			assert(!matched||cast(FunctionDecl)matched);
 			matches[i].decl = cast(FunctionDecl)cast(void*)matched;
 		}
 
 		auto r=determineMostSpecialized(matches, context);
-		foreach(a;args)
+		if(!r) foreach(a;args)
 		if(auto ae = a.isAddressExp())
 		if(ae.isUndeducedFunctionLiteral()){
 			return New!FunctionOverloadMatcher(this, args, loc);
@@ -6444,8 +6598,9 @@ class OverloadSet: Declaration{ // purely semantic node
 		assert(matches.length<cast(size_t)-1);
 	}body{
 		cand = altCand = null;
-		foreach(i,decl; decls) if(matches[i].decl is null) matches[i].context.match = Match.none;
-		auto best = reduce!max(map!(_=>_.context.match)(matches));
+		foreach(ref m; matches) if(m.decl is null) m.context.match = Match.none;
+
+		auto best = reduce!max(Match.none, map!(_=>_.context.match)(matches));
 		if(best == Match.none){
 			context.match = Match.none;
 			return null;
@@ -6508,55 +6663,14 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override TemplateDecl matchInstantiation(Expression[] args, ref TemplateInstanceDecl inst){
-		int n;
-		TemplateDecl w = null;
-		foreach(x; decls){
-			if(auto td = x.isTemplateDecl()){
-				n++;
-				w = td;
-			}
-		}
-		if(n==1) return w.matchInstantiation(args,inst);
+	override TemplateDecl matchInstantiation(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args){
+		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, inst, args);
 		return null; // TODO!
 	}
 
-	override void instantiationError(Scope sc, Location loc, Expression[] args){
-		int n;
-		TemplateDecl w = null;
-		foreach(x; decls){
-			if(auto td = x.isTemplateDecl()){
-				n++;
-				w = td;
-			}
-		}
-		if(n==1) return w.instantiationError(sc,loc,args);
-		return super.instantiationError(sc,loc,args);
-	}
-	override TemplateDecl matchIFTI(Expression[] args, Expression[] funargs, ref TemplateInstanceDecl inst){
-		int n;
-		TemplateDecl w = null;
-		foreach(x; decls){
-			if(auto td = x.isTemplateDecl()){
-				n++;
-				w = td;
-			}
-		}
-		if(n==1) return w.matchIFTI(args,funargs,inst);
+	override TemplateDecl matchIFTI(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args, Expression[] funargs){
+		if(tdecls.length==1) return tdecls[0].matchIFTI(sc, loc, inst, args, funargs);
 		return null; // TODO!
-	}
-
-	override void iftiError(Scope sc, Location loc, Expression[] args){
-		int n;
-		TemplateDecl w = null;
-		foreach(x; decls){
-			if(auto td = x.isTemplateDecl()){
-				n++;
-				w = td;
-			}
-		}
-		if(n==1) return w.iftiError(sc,loc,args);
-		return super.iftiError(sc,loc,args);
 	}
 
 	override @property string kind(){
@@ -6564,8 +6678,11 @@ class OverloadSet: Declaration{ // purely semantic node
 		return "overload set";
 	}
 
-// private: // TODO: introduce again, temporary hack in BinaryExp!(Tok!"&")
+	public final @property size_t count(){ return decls.length + tdecls.length; }
+
+// private: // TODO: introduce again, temporary hack in UnaryExp!(Tok!"&")
 	OverloadableDecl[] decls;
+	TemplateDecl[] tdecls;
 }
 
 
@@ -6581,7 +6698,7 @@ abstract class SymbolMatcher: Declaration{
 		this.loc=loc;
 	}
 
-	override Declaration matchCall(Expression[] args, ref MatchContext context, const ref Location loc){
+	override Declaration matchCall(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		assert(0);
 	}
 
@@ -6591,7 +6708,6 @@ abstract class SymbolMatcher: Declaration{
 
 	// TODO:
 	// matchInstantiation
-	// instantiationError
 	// IFTI
 	// ...
 
@@ -6601,20 +6717,23 @@ abstract class SymbolMatcher: Declaration{
 class FunctionOverloadMatcher: SymbolMatcher{
 
 	UnaryExp!(Tok!"&")[][] literals;
+	TemplateInstanceDecl[] iftis;
 	size_t[] positions;
 	GaggingScope gscope;
 
 
 	this(OverloadSet set, Expression[] args, const ref Location loc)in{
-		assert(set.decls.length>1);
+		assert(set.decls.length>1||set.tdecls.length>0);
 	}body{
 		super(set, args, loc);
+		// TODO: GC allocations
+		iftis = new TemplateInstanceDecl[](set.tdecls.length);
+		
 		size_t numfunclit;
 		foreach(a;args)
 			if(auto ae = a.isAddressExp())
 				if(ae.isUndeducedFunctionLiteral())
 					numfunclit++;
-		// TODO: GC allocation
 		literals = new UnaryExp!(Tok!"&")[][](set.decls.length+1, numfunclit);
 		positions = new size_t[numfunclit];
 
@@ -6636,11 +6755,41 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		mixin(RetryEplg);
 	}
 
-	override void semantic(Scope sc){
-		if(!gscope) gscope = New!GaggingScope(sc);
+	TemplateInstanceDecl waitFor = null;
+	FunctionDecl rewriteIfOk = null;
+
+	override void semantic(Scope sc_){
+		if(waitFor){
+			if(waitFor.sstate != SemState.started){
+				waitFor.semantic(waitFor.scope_);
+				mixin(SemProp!q{waitFor});
+			}
+			assert(!!rewriteIfOk);
+			auto r=rewriteIfOk;
+			mixin(RewEplg!q{r});
+		}
+
+
+		if(!gscope) gscope = New!GaggingScope(sc_);
+
+		foreach(i, x; set.tdecls){
+			TemplateDecl decl;
+			if(!iftis[i]||!iftis[i].completedMatching)
+				decl=x.matchIFTI(null, loc, iftis[i], [], args);
+			if(decl){mixin(PropRetry!q{decl}); if(decl.sstate==SemState.error) continue;}
+			if(iftis[i]){mixin(PropRetry!q{iftis[i]}); if(iftis[i].sstate==SemState.error) continue;}
+			if(!iftis[i].finishedInstantiation()) iftis[i].finishInstantiation();
+
+			auto ed = iftis[i].eponymousDecl();
+			assert(!!cast(FunctionDecl)ed);
+			auto fd = cast(FunctionDecl)cast(void*)ed;
+			fd.analyzeType();
+			mixin(PropRetry!q{fd.type});
+		}
 
 		set._matchedOne = true;
-		auto matches = new set.Matched[set.decls.length]; // pointless GC allocation
+		auto matches = new set.Matched[set.decls.length];   // pointless GC allocations
+		auto tmatches = new set.Matched[set.tdecls.length]; // ditto
 	    trymatch: foreach(i,decl; set.decls){
 			if(decl.sstate == SemState.error){
 				auto fd=decl.isFunctionDecl();
@@ -6649,7 +6798,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			}
 			adjustArgs(args, i);
 			foreach(a; args) if(a.sstate == SemState.error) continue trymatch;
-			auto matched=set.decls[i].matchCall(args, matches[i].context, loc);
+			auto matched=set.decls[i].matchCall(null, loc, args, matches[i].context);
 			assert(!matched||cast(FunctionDecl)matched);
 			matches[i].decl = cast(FunctionDecl)cast(void*)matched;
 			if(matches[i].decl){
@@ -6659,13 +6808,49 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		}
 		restoreArgs(args);
 
-		foreach(l1;literals[0..$-1]) foreach(l2;l1){mixin(SemChldPar!q{l2});}
 
+		MatchContext tcontext;
+		foreach(i,inst; iftis){
+			if(!inst||inst.sstate == SemState.error) continue;
+			auto ed = inst.eponymousDecl();
+			assert(!!cast(FunctionDecl)ed);
+			auto fd = cast(FunctionDecl)cast(void*)ed;
+			if(fd.type.sstate == SemState.error) continue;
+			fd=fd.matchCall(null, loc, args, tcontext);
+			if(!fd) continue;
+			tmatches[i].decl = fd;
+			tmatches[i].context = tcontext;
+		}
+
+
+		foreach(l1;literals[0..$-1]) foreach(ref l2;l1){alias gscope sc; mixin(SemChldPar!q{l2});}
+
+		// TODO: error handling
+		auto t=set.determineMostSpecialized(tmatches, tcontext);
+		auto cand = set.cand, altCand = set.altCand;
 		auto r=set.determineMostSpecialized(matches, context);
-		// TODO: could now re-use literals
-		if(r) mixin(RewEplg!q{r});
-		set.matchError(sc, loc, args);
-		mixin(ErrEplg);
+
+		TemplateInstanceDecl inst;
+		if(tcontext.match>context.match && t){
+			r=t;
+			context = tcontext;
+			assert(!!cast(NestedScope)r.scope_);
+			assert(!!cast(TemplateScope)(cast(NestedScope)r.scope_).parent);
+			auto tsc = cast(TemplateScope)cast(void*)(cast(NestedScope)cast(void*)r.scope_).parent;
+			inst = tsc.tmpl;
+			if(sc_&&sc_.handler.showsEffect) inst.ungag();
+		}
+		// TODO: could re-use the function literal arguments of the most specialized function
+		if(!r){
+			if(!set.cand && !set.altCand) set.cand = cand, set.altCand = altCand;
+			if(sc_) set.matchError(sc_, loc, args);
+			mixin(ErrEplg);
+		}else{
+			if(inst&&inst.sstate != SemState.completed){
+				waitFor = inst;
+				rewriteIfOk = r;
+			}else mixin(RewEplg!q{r});
+		}
 	}
 private:
 	void adjustArgs(Expression[] args, size_t j){
@@ -6711,6 +6896,9 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		}();
 		type.stc|=mask&stc;
 	}
+
+	void analyzeType(){ type.semantic(scope_); }
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		propagateSTC();
@@ -6731,21 +6919,20 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		return super.needsAccessCheck(check);
 	}
 
-	override FunctionDecl matchCall(Expression[] args, ref MatchContext context, const ref Location loc){
+	override FunctionDecl matchCall(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		// semantically analyze the type if necessary
 		type.semantic(scope_); // TODO: get rid of direct call
 		mixin(SemProp!q{type});
-		return type.matchCallHelper(args, context, loc) ? this : null;
+		return type.matchCallHelper(sc, loc, args, context) ? this : null;
 	}
 
 	bool atLeastAsSpecialized(FunctionDecl rhs){
 		MatchContext dummy;
-		Location dummy2;
 		// GC allocations, unneeded
 		// TODO: allocate this on the stack
 		auto pt = array(map!(function Expression (_)=>new StubExp(_.type))(type.params));
-		auto r=rhs.matchCall(pt, dummy, dummy2);
-		assert(!r||r.sstate == SemState.completed);
+		auto r=rhs.matchCall(null, loc, pt, dummy);
+		assert(!r||r.type.sstate == SemState.completed);
 		return !!r;
 	}
 
@@ -6860,13 +7047,10 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 }
 
 mixin template Semantic(T) if(is(T==FunctionDef)){
-	override void semantic(Scope sc){
-		mixin(SemPrlg);
-		propagateSTC();
-		if(sstate == SemState.pre){
-			presemantic(sc); // add self to parent scope
-			if(sstate == SemState.error) needRetry=false;
-		}
+	
+	override void analyzeType(){
+		assert(!!scope_);
+		alias scope_ sc;
 		if(!fsc){
 			fsc = New!FunctionScope(sc, this);
 			foreach(p; type.params){
@@ -6878,10 +7062,20 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		foreach(x; type.params){
 			x.semantic(fsc);
 			assert(!x.rewrite);
-			mixin(PropRetry!q{x});
+			if(x.needRetry){ type.needRetry = true; return; }
 		}
+		type.semantic(sc);
+	}
 
-		mixin(SemChldPar!q{type});
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		propagateSTC();
+		if(sstate == SemState.pre){
+			presemantic(sc); // add self to parent scope
+			if(sstate == SemState.error) needRetry=false;
+		}
+		analyzeType();
+		mixin(SemProp!q{type});
 
 		if(type.sstate == SemState.error) sstate = SemState.error, needRetry=false;
 
@@ -6889,7 +7083,6 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		if(sstate != SemState.error) mixin(PropRetry!q{bdy}); // TODO: is this ok?
 
 		if(type.hasUnresolvedReturn()){
-			// foo
 			type.resolveReturn(Type.get!void());
 		}
 		foreach(gto;&fsc.unresolvedLabels){
@@ -7016,6 +7209,9 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	}
 	private R evaluate(Scope sc){
 		mixin(SemPrlg);
+		a[0].prepareInterpret();
+		mixin(SemChld!q{a});
+
 		if(a.length<1){
 			sc.error("missing arguments to string mixin", loc);
 			mixin(ErrEplg);
@@ -7024,8 +7220,6 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 			mixin(ErrEplg);
 		}
 
-		a[0].prepareInterpret();
-		mixin(SemChld!q{a[0]});
 		mixin(FinishDeductionProp!q{a[0]});
 		int which;
 		Type[3] types = [Type.get!(const(char)[])(),

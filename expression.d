@@ -64,7 +64,7 @@ class ErrorExp: Expression{
 }
 
 class StubExp: Expression{
-	this(Type type)in{assert(type && type.sstate==SemState.completed);}body{
+	this(Type type)in{assert(type && type.sstate==SemState.completed, to!string(type)~(type?" "~to!string(type.sstate):""));}body{
 		sstate = SemState.completed;
 		this.type = type;
 	}
@@ -137,6 +137,13 @@ class Identifier: Symbol{
 	override @property string kind(){return meaning?super.kind:"identifier";}
 
 	mixin DownCastMethod;
+	mixin Visitors;
+}
+
+class ModuleIdentifier: Identifier{
+	this(string name){ super(name); }
+	override string toString(){return !meaning?_brk("."~name):"."~super.toString();}
+
 	mixin Visitors;
 }
 

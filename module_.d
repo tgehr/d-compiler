@@ -7,10 +7,11 @@ import analyze;
 import core.memory;
 import std.stdio, std.algorithm;
 
-class Module: Node{
+class Module: Declaration{
 	Declaration[] decls;
 	Scope sc;
 	this(string path){
+		super(STC.init,New!Identifier(path)); // TODO: fix name
 		GC.disable(); scope(exit) GC.enable();
 		//auto f=File(path); // TODO: handle exceptions
 		File f; if(path=="-") f=stdin; else f=File(path);
@@ -28,12 +29,14 @@ class Module: Node{
 		if(sc.handler.nerrors) sstate = SemState.error;
 	}
 
-	void buildInterface(){
+	override void buildInterface(){
 		mixin(Configure!q{Identifier.tryAgain = true});
 		mixin(Configure!q{Identifier.allowDelay = true});
 		if(sstate == SemState.pre) foreach(ref x;decls){
 			x.stc|=STCstatic;
 			x.presemantic(sc); // add all to symbol table
+			scope_=sc;
+			sstate = SemState.begin;
 		}
 		while(Identifier.tryAgain){
 			while(Identifier.tryAgain){
@@ -49,7 +52,7 @@ class Module: Node{
 			}
 		}
 	}
-	void semantic(){
+	override void semantic(Scope=null){
 		mixin(SemPrlg);
 		mixin(Configure!q{Identifier.tryAgain = true});
 		mixin(Configure!q{Identifier.allowDelay = true});

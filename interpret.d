@@ -182,7 +182,7 @@ mixin template Interpret(T) if(is(T==Symbol)){
 		return semantic(scope_);
 	}
 
-}mixin template Interpret(T) if(is(T==Identifier)){}
+}mixin template Interpret(T) if(is(T==Identifier)||is(T==ModuleIdentifier)){}
 
 
 
@@ -3287,7 +3287,10 @@ uint getBCSizeof(Type type){
 // get compile time size of a type in bytes
 size_t getCTSizeof(Type type){
 	if(type.getHeadUnqual().isDynArrTy()) return BCSlice.sizeof;
-	if(type.getHeadUnqual().isPointerTy()) return BCPointer.sizeof;
+	if(type.getHeadUnqual().isPointerTy()){
+		if(type.getFunctionTy()) return Symbol.sizeof;
+		else return BCPointer.sizeof;
+	}
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.getHeadUnqual().isDelegateTy()) return 2*ulong.sizeof;
 	if(type is Type.get!real()) return real.sizeof;
@@ -3496,8 +3499,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				}
 			}
 			void perform(CallExp self){
-				//if(!self.fun || !self.fun.type) return; // TODO: ok?
-				assert(self.fun && self.fun.type, to!string(self));
+				if(!self.fun || !self.fun.type) return; // TODO: ok?
 				auto tt=self.fun.type.getFunctionTy();
 				assert(!!tt);
 				foreach(i,x; self.args){

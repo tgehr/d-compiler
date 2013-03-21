@@ -40,10 +40,8 @@ class DoesNotExistDecl: Declaration{
 	Identifier originalReference;
 }
 
-class Scope{ // TOP LEVEL (MODULE) SCOPE
-	this(ErrorHandler handler){this.handler=handler;}
-
-	ErrorHandler handler;
+abstract class Scope{ // SCOPE
+	abstract @property ErrorHandler handler();
 
 	bool insert(Declaration decl)in{
 		assert(decl.name&&decl.name.ptr&&!decl.scope_, decl.toString()~" "~(decl.scope_ is null?" null scope":"non-null scope"));
@@ -149,18 +147,24 @@ private:
 
 class ModuleScope: Scope{
 	Module module_;
+	private ErrorHandler _handler;
+	override @property ErrorHandler handler(){return _handler;}
 	this(ErrorHandler handler, Module module_){
-		super(handler);
+		this._handler=handler;
 		this.module_=module_;
+	}
+	override Declaration lookup(Identifier ident, lazy Declaration alt){
+		if(!ident.name.length) return module_;
+		return super.lookup(ident, alt);
 	}
 	override Module getModule(){return module_;}
 }
 
 class NestedScope: Scope{
 	Scope parent;
-	// override Scope pop(){return parent;}
+
+	override @property ErrorHandler handler(){return parent.handler;}
 	this(Scope parent) in{assert(!!parent);}body{
-		super(parent.handler);
 		this.parent=parent;
 	}
 
