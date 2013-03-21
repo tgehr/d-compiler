@@ -47,7 +47,8 @@ class LiteralExp: Expression{
 	Token lit;
 	this(Token literal){lit=literal;} // TODO: suitable contract
 	override string toString(){return _brk(lit.toString());}
-	
+	override @property string kind(){return "constant";}
+
 	mixin Visitors;
 }
 
@@ -67,10 +68,10 @@ class ArrayLiteralExp: Expression{
 }
 
 class FunctionLiteralExp: Expression{
-	FunctionType fty;
+	FunctionTy fty;
 	BlockStm bdy;
 	bool isStatic;
-	this(FunctionType ft, BlockStm b, bool s=false){ fty=ft; bdy=b; isStatic=s;}
+	this(FunctionTy ft, BlockStm b, bool s=false){ fty=ft; bdy=b; isStatic=s;}
 	override string toString(){return _brk((isStatic?"function"~(fty&&fty.ret?" ":""):fty&&fty.ret?"delegate ":"")~(fty?fty.toString():"")~bdy.toString());}
 
 	mixin Visitors;
@@ -164,6 +165,9 @@ class UnaryExp(TokenType op): Expression{
 	Expression e;
 	this(Expression next){e = next;}
 	override string toString(){return _brk(TokChars!op~e.toString());}
+	static if(op==Tok!"&") override @property string kind(){return "address";}
+	
+	mixin Visitors;
 }
 class PostfixExp(TokenType op): Expression{
 	Expression e;
@@ -185,12 +189,16 @@ class SliceExp: Expression{//e[l..r]
 	Expression l,r;
 	this(Expression exp, Expression left, Expression right){e=exp; l=left; r=right;}
 	override string toString(){return _brk(e.toString()~'['~l.toString()~".."~r.toString()~']');}
+
+	mixin Visitors;
 }
 class CallExp: Expression{
 	Expression e;
 	Expression[] args;
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
 	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
+
+	override @property string kind(){return "function call";} // TODO: 'struct literal'
 
 	mixin Visitors;
 }
@@ -246,7 +254,7 @@ class IsExp: Expression{
 class TypeidExp: Expression{
 	Expression e;
 	this(Expression exp)in{assert(exp&&1);}body{e=exp;}
-	override string toString(){return "typeid("~e.toString~")";}
+	override string toString(){return "typeid("~e.toString()~")";}
 }
 
 class TraitsExp: Expression{
@@ -291,4 +299,6 @@ class ConditionDeclExp: Expression{
 	Expression init;
 	this(STC s, Expression t, Identifier n, Expression i){stc=s; ty=t; name=n; init=i;}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~(ty?ty.toString()~" ":"")~name.toString()~(init?"="~init.toString():"");}
+
+	mixin Visitors;
 }

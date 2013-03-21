@@ -16,6 +16,8 @@ struct ValueRange(int size) if(size==32||size==64){
 
 	T min, max;
 	bool signed;
+	invariant(){assert(signed&&cast(S)min<=cast(S)max||!signed&&min<=max);}
+
 	string toString(){return signed?text(cast(S)min,"..",cast(S)max):text(min,"..",max);}
 
 	bool contains(R rhs){
@@ -26,6 +28,33 @@ struct ValueRange(int size) if(size==32||size==64){
 			if(rhs.signed) rhs = rhs.toUnsigned();
 			return min<=rhs.min && max>=rhs.max;
 		}
+	}
+
+	bool overlaps(R rhs){
+		if(signed){
+			if(!rhs.signed) rhs = rhs.toSigned();
+			return cast(S)max>=cast(S)rhs.min || cast(S)rhs.max>=cast(S)min;
+		}else{
+			if(rhs.signed) rhs = rhs.toUnsigned();
+			return max>=rhs.min || rhs.max>=min;
+		}
+	}
+
+	bool gr(R rhs)in{assert(signed == rhs.signed);}body{
+		if(signed) return cast(S)min>cast(S)rhs.max;
+		return min>rhs.max;
+	}
+	bool geq(R rhs)in{assert(signed == rhs.signed);}body{
+		if(signed) return cast(S)min>=cast(S)rhs.max;
+		return min>=rhs.max;
+	}
+	bool le(R rhs)in{assert(signed == rhs.signed);}body{
+		if(signed) return cast(S)max<cast(S)rhs.min;
+		return max>rhs.min;
+	}
+	bool leq(R rhs)in{assert(signed == rhs.signed);}body{
+		if(signed) return cast(S)max<=cast(S)rhs.min;
+		return max<=rhs.min;
 	}
 
 	static R full(bool signed){return signed?R(S.min,S.max,true):R(T.min,T.max,false);}
@@ -44,22 +73,29 @@ struct ValueRange(int size) if(size==32||size==64){
 		if(cast(S)(min^max)>=0) return max<0?-this:this;
 		return R(0,.max(abs(min),max),true);
 	}
-
-	.ValueRange!32 narrow(bool sign, int bits){
-		T mask = (1<<bits)-1;
-		alias .ValueRange!32 R;
+	R merge(R rhs)in{assert(signed==rhs.signed);}body{
+		if(!signed) return R(.min(min, rhs.min), .max(max, rhs.max), 0);
+		return R(.min(cast(S)min, cast(S)rhs.min), .max(cast(S)max, cast(S)rhs.max), 1);
+	}
+	ValueRange!32 narrow(bool sign, int bits)in{assert(0<bits && bits<=32 && bits<size);}body{
+		T mask = (cast(T)1<<bits)-1;
+		alias ValueRange!32 R;
 		static if(size == 32){
 			if(!sign) return (this&R(cast(uint)mask,cast(uint)mask,signed)).toSigned();
-		}else{
-			auto r = (this&ValueRange(mask,mask,signed)).toSigned();
-			if(!sign) return R(cast(uint)r.min, cast(uint)r.max, true);
+		}else if(!sign){
+			auto r = (this&ValueRange(mask,mask,signed));
+			if(bits<32) r=r.toSigned();
+			else r=r.toUnsigned();
+			return R(cast(uint)r.min, cast(uint)r.max, r.signed);
 		}
 		T diff = min^max;
 		T s = 1<<bits-1;
-		if(diff>mask || !(min&s) && max&s) return R(cast(uint)-s, cast(uint)s-1, true);
+		assert(diff>max || !(diff&s) || !(min&s) && max&s);
+		if(diff>mask || diff&s) return R(cast(uint)-s, cast(uint)s-1, true);
 		diff|=diff>>1; diff|=diff>>2; diff|=diff>>4; diff|=diff>>8;
 		static if(is(T==long)) diff|=diff>>16;
 		T nmin = min&~diff&mask, nmax=max&mask;
+		if(nmin&s) nmin |= ~(s-1); if(nmax&s) nmax |= ~(s-1); // sign extend
 		return R(cast(uint)nmin, cast(uint)nmax, true);
 	}
 
@@ -147,7 +183,7 @@ struct ValueRange(int size) if(size==32||size==64){
 				maxo = cast(S)max>0 && cast(S)rhs.min<0 && cast(S)max>S.max+cast(S)rhs.min, // max-rhs.min overflows
 				minu = cast(S)min<0 && cast(S)rhs.max>0 && cast(S)min<S.min+cast(S)rhs.max, // min-rhs.max underflows
 				maxu = cast(S)max<0 && cast(S)rhs.min>0 && cast(S)max<S.min+cast(S)rhs.min; // max-rhs.min underflows
-			if(!mino && !maxo && !minu && !maxu || mino && maxo || minu && maxu) return R(min-rhs.max, max-rhs.min);
+			if(!mino && !maxo && !minu && !maxu || mino && maxo || minu && maxu) return R(min-rhs.max, max-rhs.min,true);
 			return full(true);
 		}
 	}
@@ -208,17 +244,57 @@ struct ValueRange(int size) if(size==32||size==64){
 		// TODO: implement
 		assert(0);
 	}
-	R opBinary(string op:"<<")(R rhs)in{assert(signed==rhs.signed);}body{
-		// TODO: implement
-		assert(0);
+	R opBinary(string op:"<<")(R rhs){ // do not care about signedness of rhs!
+		if(!signed){
+			T diff = min^max;
+			if(rhs.max>size-1) return full(false);
+			if(rhs.min&&~((cast(T)1<<size-1>>rhs.min-1)-1)&diff){
+				return R(0, ~cast(T)0<<rhs.min, false);
+			}
+			T nmin = min<<rhs.min, nmax = max<<rhs.min;
+			for(auto i=rhs.min, xmin=nmin, xmax=nmax; i<=rhs.max; i++, xmin+=xmin, xmax+=xmax, diff+=diff){
+				if(xmin<nmin) nmin=xmin;
+				if(xmax>nmax) nmax=xmax;
+				if(i<rhs.max&&diff&(cast(T)1<<size-1)){
+					if(0<nmin) nmin=0;
+					xmax=~((cast(T)1<<i-1)-1);
+					if(xmax>nmax) nmax=xmax;
+					break;
+				}
+			}
+			return R(nmin, nmax, false);
+		}
+		T diff = min^max;
+		if(cast(S)rhs.min<0||cast(S)rhs.max>size-1||rhs.min&&~((cast(T)1<<size-1>>rhs.min)-1)&diff) return full(true);
+		S nmin = cast(S)(min<<rhs.min), nmax = cast(S)(max<<rhs.min);
+		for(auto i=rhs.min, xmin=nmin, xmax=nmax; i<=rhs.max; i++, xmin+=xmin, xmax+=xmax, diff+=diff){
+			if(xmin<nmin) nmin=xmin;
+			if(xmax>nmax) nmax=xmax;
+			if(diff&(cast(T)1<<size-1)){
+				if(0<nmin) nmin=0;
+				xmax=~((cast(T)1<<i-1)-1);
+				if(xmax>nmax) nmax=xmax;
+				break;
+			}
+		}
+		return R(nmin, nmax, true);
 	}
 	R opBinary(string op:">>")(R rhs)in{assert(signed==rhs.signed);}body{
-		// TODO: implement
-		assert(0);
+		if(!signed){
+			if(rhs.max>size-1) return full(false);
+			return R(min>>rhs.max,max>>rhs.min,false);
+		}else if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
+		if(cast(S)max>0) return R(cast(S)min>>rhs.max,cast(S)max>>rhs.min,true);
+		else return R(cast(S)max>>rhs.min,cast(S)min>>rhs.max,true);
 	}
 	R opBinary(string op:">>>")(R rhs)in{assert(signed==rhs.signed);}body{
-		// TODO: implement
-		assert(0);
+		if(!signed){
+			if(rhs.max>size-1) return full(false);
+			return R(min>>rhs.max,max>>rhs.min,false);
+		}else if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
+		if(cast(S)(min^max)<0)
+			return R(rhs.min?0:min,rhs.max?cast(T)-1>>rhs.max:max,true);
+		return R(min>>>rhs.max,max>>>rhs.min,true);
 	}
 
 	// modular arithmethics leads to hard problems => conservative approx.
@@ -229,6 +305,7 @@ struct ValueRange(int size) if(size==32||size==64){
 		}else if(!rhs.min) rhs.min++;
 		if(!signed){
 			//if(max-min>=rhs.max) return R(0, rhs.max-1, false);
+			if(max<rhs.max) return this;
 			return R(0, rhs.max-1, false);
 		}else{
 			auto r = rhs.getAbs();
@@ -238,8 +315,14 @@ struct ValueRange(int size) if(size==32||size==64){
 				else r.min=-r.max;
 			}
 			// mod cannot create a wider range
-			if(cast(S)min<0 &&-cast(S)min<cast(S)rhs.max) r.min=min;
-			if(cast(S)max>0 && cast(S)max<cast(S)rhs.max) r.max=max;
+			if(cast(S)min<0 && cast(S)min>-cast(S)rhs.max){
+				r.min=min;
+				if(cast(S)max<0) r.max=max;
+			}
+			if(cast(S)max>=0 && cast(S)max<cast(S)rhs.max){
+				r.max=max;
+				if(cast(S)min>=0) r.max=max;				
+			}
 			return r;
 		}
 	}
@@ -308,17 +391,17 @@ unittest{
 		if(c>d) swap(c,d);
 		//if(!~scanf("%d %d %d %d",&a,&b,&c,&d)) break;		
 		//writefln("%.32b..%.32b\n%.32b..%.32b",a,b,c,d);
-		S min=S.max, mi, mj;
+		S max=S.min, mi, mj;
 		foreach(i;a..b+1)
 			foreach(j;c..d+1)
-				if((i^j)<min) min = i^j, mi=i, mj=j;
+				if((i^j)>max) max = i^j, mi=i, mj=j;
 		//writeln(mi," ",mj);
 		//writefln("%.32b\n%.32b",mi,mj);
 		//writeln(maxAnd(R(a,b),R(c,d)));
 		//writeln(a,"..",b," ",c,"..",d,": ",max);
-		S omin=(R(a,b,true)^R(c,d,true)).min;
+		S omax=(R(a,b,true)^R(c,d,true)).max;
 		//writeln(min," =? ",omin);
-		if(min!=omin){writeln(a,"..",b," ",c,"..",d); writeln(min,"!=",omin); break;}
+		if(max!=omax){writeln(a,"..",b," ",c,"..",d); writeln(max,"!=",omax); break;}
 		//break;
 	}
 }

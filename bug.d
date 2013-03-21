@@ -1,12 +1,15 @@
-module std.datetime;
+void main(){}
+/+void function() x = &main;
 
-public import core.time;
+void main(){
+	int x;
+}+/
 
-import core.exception;
-import core.stdc.time;
+/+shared(immutable(int)[])[][] ab;
+shared(inout(int)[])[][] cd;
+pragma(msg, typeof(1?ab:cd));
 
-import std.array;
-import std.algorithm;
-import std.ascii;
-import std.conv;
-import std.exception;
+immutable(int)** x;
+int** y;
+pragma(msg, typeof(1?y:x));*/
+

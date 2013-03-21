@@ -84,6 +84,7 @@ string[2][] simpleTokens =
 	 [":",     "Colon"                     ],
 	 ["$",     "Dollar"                    ],
 	 ["=",     "Assign"                    ],
+	 ["=>",    "GoesTo"                    ],
 	 ["==",    "Equal"                     ],
 	 ["*",     "Star"                      ],
 	 ["*=",    "MultiplyAssign"            ],
@@ -112,20 +113,14 @@ string[2][] compoundTokens =
 
 string[] keywords = ["abstract", "alias", "align", "asm", "assert", "auto", "body", "bool", "break", "byte", "case", "cast", "catch", "cdouble", "cent", "cfloat", "char", "class", "const", "continue", "creal", "dchar", "debug", "default", "delegate", "delete", "deprecated", "do", "double", "else", "enum", "export", "extern", "false", "final", "finally", "float", "for", "foreach", "foreach_reverse", "function", "goto", "idouble", "if", "ifloat", "immutable", "import", "in", "inout", "int", "interface", "invariant", "ireal", "is", "lazy", "long", "macro", "mixin", "module", "new", "nothrow", "null", "out", "override", "package", "pragma", "private", "protected", "public", "pure", "real", "ref", "return", "scope", "shared", "short", "static", "struct", "super", "switch", "synchronized", "template", "this", "throw", "true", "try", "typedef", "typeid", "typeof", "ubyte", "ucent", "uint", "ulong", "union", "unittest", "ushort", "version", "void", "volatile", "wchar", "while", "with", /*"__FILE__", "__LINE__",*/ "__gshared", "__thread", "__traits"];
 
-// TODO: Minimize (does not work if enum is left away, or keywordTokens is not a template)
-enum string[2][] tokens = specialTokens ~ complexTokens ~ simpleTokens ~ compoundTokens ~ keywordTokens!();
+string[2][] tokens = specialTokens ~ complexTokens ~ simpleTokens ~ compoundTokens ~ keywordTokens();
 }
 
-//TokenType[string] kwAA; // TODO: make more efficient. this seems to be faster than string switch though!
-//static this(){foreach(i,x;keywords) kwAA[x]=cast(TokenType)(Tok!"abstract"+i);}
-
 private{
-template keywordTokens(){
-	enum keywordTokens={
-		string[2][] r;
-		foreach(i,kw;keywords) r~=[kw,kw~"_"];
-		return r;
-	}();
+auto keywordTokens(){
+	immutable(string[2])[] r;
+	foreach(i,kw;keywords) r~=[kw,kw~"_"];
+	return r;
 }
 
 string TokenNames(){
@@ -315,7 +310,11 @@ struct Lexer{
 		size_t len;  // used as a temporary that stores the length of the last UTF sequence
 		size_t num=0;// number of tokens lexed, return value
 		typeof(p) invCharSeq_l=null;
-		void invCharSeq(){if(p>invCharSeq_l+1) invCharSeq_l=p/*, lexed.put(tokError("invalid character sequence",p[0..1]))*/; p++;} // TODO: fix
+		void invCharSeq(){
+			if(p>invCharSeq_l+1) errors~=tokError("unsupported character",p[0..1]);
+			else errors[$-1].loc.rep=errors[$-1].loc.rep.ptr[0..errors[$-1].loc.rep.length+1];
+			invCharSeq_l=p; p++;
+		}
 		// text macros:
 		enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}};
 		enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}}; // don't break, continue
@@ -617,6 +616,7 @@ struct Lexer{
 					readhexstring: for(int c=0,ch,d;;p++,c++){
 						switch(*p){
 							mixin(caseNl); // handle newlines
+							case ' ', '\t', '\v': c--; break;
 							case 0, 0x1A:
 								errors~=tokError("unterminated hex string literal",(s-1)[0..1],sl);
 								break readhexstring;
@@ -626,7 +626,7 @@ struct Lexer{
 							handlexchar:
 								if(c&1) r.put(cast(char)(ch|d));
 								else ch=d<<4; break;
-							case '"': // TODO: improve error message
+							case '"':
 								if(c&1) errors~=tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""),s[0..p-s]);
 								p++; break readhexstring;
 							default:
@@ -635,8 +635,9 @@ struct Lexer{
 									s=p;
 									len=0;
 									try{
-										utf.decode(p[0..4],len);
+										auto chr = utf.decode(p[0..4],len);
 										p+=len-1;
+										if(isWhite(chr)) break; //TODO: newlines
 									}catch{invCharSeq();}
 									errors~=tokError(format("found '%s' when expecting hex digit",s[0..len]),s[0..len]);
 								}
@@ -711,7 +712,7 @@ struct Lexer{
 						continue;
 					}catch{} goto default;
 				default:
-					invCharSeq();
+					p--; invCharSeq();
 					continue;
 			}
 			res[0].loc.rep=begin[0..p-begin];

@@ -5,9 +5,11 @@ import semantic, scope_, vrange, visitors;
 
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
-	this(){type = this;}
+	this(){type = get!void();}
+	private this(int){type = this;}
 
 	override string toString(){return "Type";}
+	override @property string kind(){return "type";}
 
 	static BasicType get(T)() if(.isBasicType!T){
 		if(uniqueType!T) return uniqueType!T;
@@ -58,8 +60,14 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!T=New!EmptyArrTy();
 	}
 
-	override Type isType(){return this;}
+	static Type get(T:Size_t)(){ // typeof((new int[]).length)
+		enum _32bit = true; // TODO: make parameterizable
+		if(_32bit) return get!uint();
+		else return get!ulong();
+	}
 
+
+	mixin DownCastMethod;
 	mixin DownCastMethods!(
 		BasicType,
 		QualifiedTy,
@@ -70,11 +78,9 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		PointerTy,
 		DynArrTy,
 		ArrayTy,
+		FunctionTy,
 	);
-
-	BasicType isIntegral(){return null;}
 	
-
 	mixin Visitors;
 
 protected:
@@ -93,10 +99,13 @@ class ErrorTy: Type{
 }
 
 
-struct Null{} // dummy type. TODO: make Type.get accept a null literal
+// dummy types:
+struct Null{}
 struct EmptyArray{}
 struct Struct{}
 struct Class{}
+
+struct Size_t{}
 
 class NullPtrTy: Type{ // typeof(null)
 	this(){sstate = SemState.completed;}
@@ -116,9 +125,10 @@ enum VarArgs{
 	cStyle,
 	dStyle,
 }
-class FunctionType: Type{
+class FunctionTy: Type{
 	STC stc;
 	Expression ret;
+	Type retTy;
 	Parameter[] params;
 	VarArgs vararg;
 	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; ret=retn; params=plist; vararg=va;}
@@ -126,18 +136,26 @@ class FunctionType: Type{
 	string pListToString(){
 		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")");
 	}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 class FunctionPtr: Type{
-	FunctionType ft;
-	this(FunctionType ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
+	FunctionTy ft;
+	this(FunctionTy ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
 	override string toString(){return ft.ret.toString()~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+
+	mixin Visitors;
 }
 
-class DelegateType: Type{
-	FunctionType ft;
-	this(FunctionType ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
+class DelegateTy: Type{
+	FunctionTy ft;
+	this(FunctionTy ft)in{assert(ft !is null&&ft.ret !is null);}body{this.ft=ft;}
 	override string toString(){return ft.ret.toString()~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+
+	mixin Visitors;
+
 }
 
 class TypeofExp: Type{
@@ -159,7 +177,11 @@ template isBasicType(T){
 
 final class BasicType: Type{
 	TokenType op;
-	this(TokenType op)in{assert(strength[op]||op==Tok!"void");}body{this.op=op; sstate=SemState.completed;}
+	this(TokenType op)in{assert(strength[op]||op==Tok!"void");}body{
+		this.op=op; sstate=SemState.completed;
+		if(op==Tok!"void") super(0);
+		else super();
+	}
 	override string toString(){return _brk(TokenTypeToString(op));}
 
 	mixin DownCastMethod;
@@ -247,6 +269,3 @@ class InoutTy: QualifiedTy{
 	mixin Visitors;	
 }
 
-//-----------------
-
-class PolysemousType: Type{} // TODO: Implement

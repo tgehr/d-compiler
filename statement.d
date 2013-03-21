@@ -6,6 +6,9 @@ import lexer, parser, expression, scope_, semantic, visitors, util;
 abstract class Statement: Node{
 	override @property string kind(){return "statement";}
 
+	mixin DownCastMethods!(
+		BlockStm,
+	);
 	mixin Visitors;
 }
 
@@ -26,6 +29,8 @@ class BlockStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
+
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -41,12 +46,7 @@ class ExpressionStm: Statement{
 	this(Expression next){e=next;}
 	override string toString(){return e.toString() ~ ';';}
 
-	override Statement semantic(Scope sc){
-		if(sstate == SemState.completed) return this;
-		e=e.semantic(sc);
-		sstate = e.sstate;
-		return this;
-	}
+	mixin Visitors;
 }
 
 
@@ -54,16 +54,22 @@ class IfStm: Statement{
 	Expression e; Statement s1,s2;
 	this(Expression cond, Statement left, Statement right){e=cond, s1=left, s2=right;}
 	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(BlockStm)s1?"":"\n")~"else "~s2.toString:"");}
+
+	mixin Visitors;
 }
 class WhileStm: Statement{
 	Expression e; Statement s;
 	this(Expression cond, Statement statement){e=cond; s=statement;}
 	override string toString(){return "while(" ~ e.toString ~ ") "~s.toString();}
+
+	mixin Visitors;
 }
 class DoStm: Statement{
 	Statement s; Expression e;
 	this(Statement statement, Expression cond){s=statement;e=cond;}
 	override string toString(){return "do "~s.toString()~"while("~e.toString()~");";}
+
+	mixin Visitors;
 }
 class ForStm: Statement{
 	Statement s1; Expression e1, e2;

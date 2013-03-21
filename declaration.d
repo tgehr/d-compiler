@@ -134,15 +134,24 @@ class AttributeDecl: Declaration{
 	override string toString(){return STCtoString(stc)~":\n"~join(map!(to!string)(decls),"\n");}
 }
 
+enum WhichTemplateParameter{
+	type,
+	alias_,
+	this_,
+	tuple,
+}
+
 class TemplateParameter: Node{
 	Identifier name;
 	Expression type, spec, init;
-	bool isAlias, isTuple;
-	this(bool isa, bool ist, Expression tt, Identifier name, Expression specialization, Expression deflt){
-		isAlias=isa, isTuple=ist; this.name = name;
+	WhichTemplateParameter which;
+	this(WhichTemplateParameter which, Expression tt, Identifier name, Expression specialization, Expression deflt){
+		this.which = which; this.name = name;
 		type=tt; spec=specialization; init=deflt;
 	}
 	override string toString(){
+		bool isAlias = which == WhichTemplateParameter.alias_;
+		bool isTuple = which == WhichTemplateParameter.type;
 		return (isAlias?"alias ":"")~(type?type.toString()~" ":"")~(name?name.toString():"")~
 			(isTuple?"...":"")~(spec?":"~spec.toString():"")~(init?"="~init.toString():"");
 	}
@@ -231,10 +240,10 @@ class TemplateFunctionDecl: OverloadableDecl{
 
 
 class VarDecl: Declaration{
-	Expression type;
+	Expression rtype;
 	Expression init;
-	this(STC stc, Expression type, Identifier name, Expression initializer){this.stc=stc; this.type=type; init=initializer; super(stc,name);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
+	this(STC stc, Expression rtype, Identifier name, Expression initializer){this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rtype?rtype.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
 	override @property string kind(){return "variable";}
@@ -242,14 +251,12 @@ class VarDecl: Declaration{
 	mixin Visitors;
 }
 
-class CArrayDecl: Declaration{
-	Expression type;
-	Expression init;
+class CArrayDecl: VarDecl{
 	Expression postfix; // reverse order
-	this(STC stc, Expression type, Identifier name, Expression pfix, Expression initializer)in{assert(type&&name&&pfix);}body{
-		this.stc=stc; this.type=type; postfix=pfix; init=initializer; super(stc,name);
+	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
+		postfix=pfix; super(stc, rtype, name, initializer);
 	}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~type.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
 
 	mixin Visitors;
 }
@@ -269,10 +276,12 @@ class Declarators: Declaration{
 }
 
 class Parameter: VarDecl{ // for functions, foreach etc
-	this(STC stc, Expression type, Identifier name, Expression initializer){super(stc,type,name,initializer);}
-	override string toString(){return STCtoString(stc)~(stc&&type?" ":"")~(type?type.toString():"")~
+	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
+	override string toString(){return STCtoString(stc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():"")~
 			(name?(stc||type?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
-	//override @property string kind(){return "parameter";}
+	override @property string kind(){return "parameter";}
+
+	mixin Visitors;
 }
 class PostblitParameter: Parameter{
 	this(){super(STC.init,null,null,null);}
@@ -280,23 +289,28 @@ class PostblitParameter: Parameter{
 }
 
 class FunctionDecl: OverloadableDecl{
-	FunctionType type;
+	FunctionTy type;
 	BlockStm pre,post;
 	Identifier postres;
-	this(FunctionType type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
+	this(FunctionTy type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
 		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
 	}
-	override string toString(){
+	final string signatureString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
-			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");
+			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");		
+	}
+	override string toString(){
+		return signatureString();
 	}
 	override @property string kind(){return "function";}
 	override FunctionDecl isFunctionDecl(){return this;}
+
+	mixin Visitors;
 }
 
 class FunctionDef: FunctionDecl{
 	BlockStm bdy;
-	this(FunctionType type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
+	this(FunctionTy type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
 		super(type,name, precondition, postcondition, pres); bdy=fbody;}
 	override string toString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~

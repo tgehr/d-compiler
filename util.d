@@ -165,14 +165,13 @@ struct ChunkGCAlloc{
 	struct Appender(T:T[]){
 		static Appender create(){
 			Appender r;
-			r._data=cast(Unqual!T[])NewImpl(T.sizeof*initsize);
+			// workaround for GDC bug:
+			r._data=(cast(Unqual!T[])NewImpl(T.sizeof*initsize))[0..initsize];
+			//r._data=cast(Unqual!T[])NewImpl(T.sizeof*initsize);
 			r.len=0;
 			return r;
 		}
 		void put(T x){
-			//if(len<initsize) _data[len]=x;
-			//else _data~=x; // this results in memory corruption under GDC!
-			//len++;
 			if(len>=_data.length) _data.length=_data.length*2;
 			_data[len++]=x;
 		}
@@ -196,7 +195,7 @@ struct ChunkGCAlloc{
 		size_t len;
 	}
 	auto appender(T)(){return Appender!T.create();}
-	// TODO: FIX BUUG
+	// TODO: FIX BUG
 	/+
 	 struct AppWrap(T){
 		std.array.Appender!T pl;
@@ -262,6 +261,30 @@ mixin template DownCastMethod(){
 	mixin(`override `~typeof(this).stringof~` is`~typeof(this).stringof~`(){return this;}`);
 }
 
+private string Ximpl(string x){
+	string r=`"`;
+	for(typeof(x.length) i=0;i<x.length;r~=x[i],i++){
+		if(x[i]=='@'&&x[i+1]=='('){
+			auto start = ++i, nest=1;
+			while(nest){
+				i++;
+				if(x[i]=='(') nest++;
+				else if(x[i]==')') nest--;
+			}
+			i++;
+			r~=`"~`~x[start..i]~`~"`;
+			if(i==x.length) break;
+		}
+		if(x[i]=='"'||x[i]=='\\'){r~="\\"; continue;} 
+	}
+	return r~`"`;
+}
 
+template X(string x){
+	enum X = Ximpl(x);
+}
 
+template XX(string x){
+	enum XX = mixin(Ximpl(x));
+}
 

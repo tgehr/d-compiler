@@ -9,23 +9,18 @@ abstract class ErrorHandler{
 	string code;
 	int nerrors=0;
 	int tabsize=8;
-	private string[] _lines;
+	private string[] _lines=null;
 	@property string[] lines(){
 		if(_lines !is null) return _lines;
 		return _lines=code.splitLines(); // TODO: implement manually. (this can throw on invalid character sequences)
 	}
-	void error(string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
-	void note(string note, Location loc)in{assert(loc.rep);}body{};
+	void error(lazy string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
+	void note(lazy string note, Location loc)in{assert(loc.rep);}body{};
 	this(string s, string c){
 		tabsize=getTabSize();
-		_lines=null;
 		source=s;
 		code=c;
 	}
-	/*protected int getLine(string loc){
-		auto l=assumeSorted!"a.ptr<=b.ptr"(lines);
-		return cast(int)l.lowerBound(loc).length;
-	}*/
 	protected int getColumn(Location loc){
 		int res=0;
 		auto l=lines[loc.line-1];
@@ -38,7 +33,11 @@ abstract class ErrorHandler{
 }
 class SimpleErrorHandler: ErrorHandler{
 	this(string source,string code){super(source,code);}
-	override void error(string err, Location loc){
+	override void error(lazy string err, Location loc){
+		if(loc.line == 0){ // just here for robustness
+			stderr.writeln("(bug, location missing): "~err);
+			return;
+		}
 		nerrors++;
 		stderr.writeln(source,'(',loc.line,"): error: ",err);
 	}
@@ -48,7 +47,11 @@ class SimpleErrorHandler: ErrorHandler{
 
 class VerboseErrorHandler: ErrorHandler{
 	this(string source, string code){super(source,code);}
-	override void error(string err, Location loc){
+	override void error(lazy string err, Location loc){
+		if(loc.line == 0){ // just here for robustness
+			stderr.writeln("(bug, location missing): "~err);
+			return;
+		}
 		nerrors++;
 		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
@@ -62,7 +65,11 @@ class VerboseErrorHandler: ErrorHandler{
 			stderr.writeln();
 		}
 	}
-	override void note(string err, Location loc){
+	override void note(lazy string err, Location loc){
+		if(loc.line == 0){ // just here for robustness
+			stderr.writeln("(bug, location missing): "~err);
+			return;
+		}
 		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
 		stderr.writeln(source,':',loc.line,":",column,": note: ",err);
@@ -81,8 +88,11 @@ class VerboseErrorHandler: ErrorHandler{
 import terminal;
 class FormattingErrorHandler: VerboseErrorHandler{
 	this(string source,string code){super(source,code);}
-	override void error(string err, Location loc){
-		assert(loc.line!=0, "this should not happen... error message was '"~err~'\'');
+	override void error(lazy string err, Location loc){
+		if(loc.line == 0){ // just here for robustness
+			stderr.writeln("(bug, location missing): "~err);
+			return;
+		}
 		if(isATTy(stderr)){
 			nerrors++;
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
@@ -99,7 +109,7 @@ class FormattingErrorHandler: VerboseErrorHandler{
 			}
 		}else VerboseErrorHandler.error(err,loc);
 	}
-	override void note(string err, Location loc){
+	override void note(lazy string err, Location loc){
 		if(isATTy(stderr)){
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);

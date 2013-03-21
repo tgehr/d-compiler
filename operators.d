@@ -35,9 +35,8 @@ int getLbp(TokenType type) pure{ // operator precedence
 	case Tok!"in", Tok!"!in" ,Tok!"is",Tok!"!is":
 		return 100;
 	// bitwise shift operators
-	case Tok!">>": return 110;
-	case Tok!"<<": return 110;
-	case Tok!">>>":return 110;
+	case Tok!">>", Tok!"<<":
+	case Tok!">>>": return 110;
 	// additive operators
 	case Tok!"+",Tok!"-",Tok!"~":
 		return 120;
@@ -54,6 +53,7 @@ int getLbp(TokenType type) pure{ // operator precedence
 	case Tok!"(", Tok!"[": // function call and indexing
 		return 160;
 	// template instantiation
+	case Tok!"=>": return 165; // goesto
 	case Tok!"!":  return 170;
 	//case Tok!"i": return 45; //infix
 	default: return -1;
@@ -73,6 +73,16 @@ bool isAssignOp(TokenType op){
 			return true;
 		default:
 			return false;
+	}
+}
+
+bool isIntRelationalOp(TokenType op){
+	switch(op){
+		// relational operators
+		case Tok!"==",Tok!"!=":
+		case Tok!">",Tok!"<", Tok!">=",Tok!"<=":
+			return true;
+		default: return false;
 	}
 }
 
@@ -112,6 +122,19 @@ bool isBitwiseOp(TokenType op){
 		default:
 			return false;
 	}
+}
+
+bool isShiftOp(TokenType op){
+	switch(op){
+		// bitwise shift operators
+		case Tok!">>": return true;
+		case Tok!"<<": return true;
+		case Tok!">>>":return true;
+			return true;
+		default:
+			return false;
+	}
+
 }
 
 bool isArithmeticOp(TokenType op){

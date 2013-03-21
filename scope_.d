@@ -39,31 +39,32 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 	ErrorHandler handler;
 
-	void insert(Declaration decl)in{assert(decl.name.ptr);}body{
+	bool insert(Declaration decl)in{assert(decl.name.ptr);}body{
 		if(auto d=symtab.get(decl.name.ptr,null)){
 			if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					os.add(fd);
-					return;
+					return true;
 				}else if(auto ofd=d.isOverloadableDecl()){
 					symtab[decl.name.ptr]=New!OverloadSet(fd,ofd);
-					return;
+					return true;
 				}
 			}
 			if(d.sstate != SemState.error){ // TODO: is this always desirable?
 				error(format("redefinition of '%s'",decl.name), decl.name.loc);
 				note("previous definition was here",d.name.loc);	             
 			}
-			return;
+			return false;
 		}
 		symtab[decl.name.ptr]=decl;
+		return true;
 	}
 	
 	Declaration lookup(Identifier ident, lazy Declaration alt){
 		return symtab.get(ident.ptr, alt);
 	}
 	Declaration lookup(Identifier ident){
-		if(auto lk = symtab.get(ident.ptr, null)) return lk;
+		if(auto lk = lookup(ident, null)) return lk;
 		error(format("undefined identifier '%s'",ident.name), ident.loc);
 		return New!ErrorDecl();
 	}
@@ -88,22 +89,20 @@ abstract class NestedScope: Scope{
 		super(parent.handler);
 		this.parent=parent;
 	}
+	alias Scope.lookup lookup;
 	override Declaration lookup(Identifier ident){
-		return lookup(ident, New!MutableAliasRef(parent.lookup(ident)));
+		return lookup(ident, parent.lookup(ident));
 	}
-	alias Scope.lookup lookup; // overload lookup
 }
 
 class FunctionScope: NestedScope{ // Forward references don't get resolved
 	this(Scope parent){
 		super(parent);
 	}
-	override Declaration lookup(Identifier ident){
-		if(auto lk = symtab.get(ident.ptr, parent.lookup(ident, null))) return lk;
-		error(format("undefined identifier '%s'",ident.name), ident.loc);
-		return New!ErrorDecl();
+	Declaration lookup(Identifier ident, lazy Declaration alt){
+		return symtab.get(ident.ptr, parent.lookup(ident));
 	}
-	alias NestedScope.lookup lookup; // overload lookup
+	alias Scope.lookup lookup; // overload lookup
 protected:
 	bool canDeclareNested(Declaration decl){ // for BlockScope
 		return !(decl.name.ptr in symtab); // TODO: More complicated stuff.
@@ -114,15 +113,16 @@ class BlockScope: FunctionScope{ // No shadowing of declarations in the enclosin
 	this(Scope parent){
 		super(parent);
 	}
-	override void insert(Declaration decl){
+	override bool insert(Declaration decl){
 		if(!parent.canDeclareNested(decl)){
 			auto confl=parent.lookup(decl.name);
-			error(format("declaration '%s' shadows a local %s",decl.name,confl.kind), decl.name.loc);
+			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);
+			return false;
 		}
 		super.insert(decl); // overload lookup
+		return true;
 	}
-	alias FunctionScope.lookup lookup;
 protected:
 	override bool canDeclareNested(Declaration decl){
 		return super.canDeclareNested(decl) && parent.canDeclareNested(decl);

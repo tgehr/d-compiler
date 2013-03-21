@@ -19,13 +19,12 @@ class Module{
 		sc=new Scope(new FormattingErrorHandler(path, code));
 		//sc=new Scope(new SimpleErrorHandler(path, code));
 		decls=parse(code,sc.handler);
+		if(sc.handler.nerrors) sstate = SemState.error;
 	}
-	void semantic(){
-		if(sstate == SemState.completed || sc.handler.nerrors) return;
+	Module semantic(){
+		mixin(SemPrlg);
 		if(sstate == SemState.pre) foreach(ref x;decls) x=x.presemantic(sc); // add all to symbol table
-		foreach(ref x;decls){
-			x=x.semantic(sc); // do the heavy processing.
-			sstate=min(sstate,x.sstate);
-		}
+		mixin(SemChld!q{decls});
+		mixin(SemEplg);
 	}
 }
