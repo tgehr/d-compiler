@@ -3,7 +3,7 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
 
-class Declaration: Statement{ // empty declaration if instanced
+abstract class Declaration: Statement{ // empty declaration if instanced
 	STC stc;
 	Identifier name;
 	this(STC stc,Identifier name){
@@ -11,9 +11,9 @@ class Declaration: Statement{ // empty declaration if instanced
 		this.name=name;
 		sstate = SemState.pre;
 	}
-	override string toString(){return ";";}
 
 	override @property string kind(){return "declaration";}
+	override Declaration isDeclaration(){return this;}
 
 	mixin DownCastMethods!(
 		VarDecl,
@@ -25,6 +25,13 @@ class Declaration: Statement{ // empty declaration if instanced
 		MutableAliasRef,
 		ErrorDecl,
 	);
+
+	mixin Visitors;
+}
+
+class EmptyDecl: Declaration{
+	this(){super(STC.init,null);}
+	override string toString(){return ";";}
 
 	mixin Visitors;
 }
@@ -139,6 +146,8 @@ class TemplateParameter: Node{
 		return (isAlias?"alias ":"")~(type?type.toString()~" ":"")~(name?name.toString():"")~
 			(isTuple?"...":"")~(spec?":"~spec.toString():"")~(init?"="~init.toString():"");
 	}
+	override string kind(){return "template parameter";}
+
 }
 
 class TemplateDecl: OverloadableDecl{
@@ -220,15 +229,6 @@ class TemplateFunctionDecl: OverloadableDecl{
 	}
 }
 
-class CArrayDecl: Declaration{
-	Expression type;
-	Expression init;
-	Expression postfix; // reverse order
-	this(STC stc, Expression type, Identifier name, Expression pfix, Expression initializer)in{assert(type&&name&&pfix);}body{
-		this.stc=stc; this.type=type; postfix=pfix; init=initializer; super(stc,name);
-	}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~type.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
-}
 
 class VarDecl: Declaration{
 	Expression type;
@@ -241,6 +241,19 @@ class VarDecl: Declaration{
 
 	mixin Visitors;
 }
+
+class CArrayDecl: Declaration{
+	Expression type;
+	Expression init;
+	Expression postfix; // reverse order
+	this(STC stc, Expression type, Identifier name, Expression pfix, Expression initializer)in{assert(type&&name&&pfix);}body{
+		this.stc=stc; this.type=type; postfix=pfix; init=initializer; super(stc,name);
+	}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~type.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
+
+	mixin Visitors;
+}
+
 class Declarators: Declaration{
 	VarDecl[] decls;
 	this(VarDecl[] declarations)in{assert(declarations.length>1);foreach(x;declarations) assert(x.type is declarations[0].type);}body{

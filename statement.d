@@ -3,9 +3,17 @@ import std.array, std.algorithm, std.range, std.conv;
 
 import lexer, parser, expression, scope_, semantic, visitors, util;
 
-class Statement: Node{ // empty statement if instanced
+abstract class Statement: Node{
+	override @property string kind(){return "statement";}
+
+	mixin Visitors;
+}
+
+class EmptyStm: Statement{
 	override string toString(){return ";";}
 	override Statement semantic(Scope sc){return this;}
+	
+	mixin Visitors;
 }
 
 class ErrorStm: Statement{

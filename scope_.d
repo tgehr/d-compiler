@@ -56,7 +56,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			}
 			return;
 		}
-		return symtab[decl.name.ptr]=decl;
+		symtab[decl.name.ptr]=decl;
 	}
 	
 	Declaration lookup(Identifier ident, lazy Declaration alt){

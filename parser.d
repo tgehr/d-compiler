@@ -465,7 +465,7 @@ private struct Parser{
 				return res;
 			case Tok!"__error": mixin(rule!(ErrorExp,"_"));
 			mixin(getTTCases(basicTypes)); {
-				auto e=New!BasicType(ttype);
+				Expression e=New!BasicType(ttype); // static type Expression avoids template bloat
 				e.loc=tok.loc;
 				nextToken();
 				return parseIdentifierList(e);
@@ -615,7 +615,7 @@ private struct Parser{
 			mixin(rule!(LabeledStm,Existing,"l",Statement));
 		}
 		switch(ttype){
-			case Tok!";": mixin(rule!(Statement,"_"));
+			case Tok!";": mixin(rule!(EmptyStm,"_"));
 		    case Tok!"{":
 				auto r=parseBlockStm();
 				if(ttype!=Tok!"(") return r;
@@ -1152,7 +1152,7 @@ private struct Parser{
 			auto save = saveState();
 			bool isAA=skip()&&skipType()&&ttype==Tok!"]";
 			restoreState(save);
-			if(isAA){mixin(doParse!("_",Type,"e","]")); pfix=New!IndexExp(pfix,[e]);}
+			if(isAA){auto loc=tok.loc; mixin(doParse!("_",Type,"e","]")); pfix=New!IndexExp(pfix,[e]); pfix.loc = loc.to(ptok.loc);}
 			else pfix=led(pfix);//'Bug': allows int[1,2].
 		}
 		if(ttype==Tok!"=") nextToken(), init=parseInitializerExp(false);
@@ -1291,7 +1291,7 @@ private struct Parser{
 		alias CondDeclBody Body;
 	    dispatch:
 		switch(ttype){
-			case Tok!";": nextToken(); return res=New!Declaration(STC.init,cast(Identifier)null);
+			case Tok!";": mixin(rule!(EmptyDecl,"_"));
 			case Tok!"module":
 				mixin(rule!(ModuleDecl,Existing,"stc","_",IdentifierList,";")); // TODO: disallow ! operator
 			case Tok!"static":

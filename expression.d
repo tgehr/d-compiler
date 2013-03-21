@@ -10,11 +10,17 @@ abstract class Node{
 
 	abstract @property string kind();
 
+	mixin DownCastMethods!(
+		Declaration,
+		//Statement,
+		//Expression,
+	);
+
 	mixin Visitors;
 }
 
 
-class Expression: Node{ // empty expression if instanced
+abstract class Expression: Node{
 	int brackets=0;
 	override string toString(){return _brk("{}()");}
 	protected string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
@@ -61,11 +67,12 @@ class ArrayLiteralExp: Expression{
 }
 
 class FunctionLiteralExp: Expression{
-	FunctionType type;
+	FunctionType fty;
 	BlockStm bdy;
 	bool isStatic;
-	this(FunctionType ft, BlockStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
-	override string toString(){return _brk((isStatic?"function"~(type&&type.ret?" ":""):type&&type.ret?"delegate ":"")~(type?type.toString():"")~bdy.toString());}
+	this(FunctionType ft, BlockStm b, bool s=false){ fty=ft; bdy=b; isStatic=s;}
+	override string toString(){return _brk((isStatic?"function"~(fty&&fty.ret?" ":""):fty&&fty.ret?"delegate ":"")~(fty?fty.toString():"")~bdy.toString());}
+
 	mixin Visitors;
 }
 
@@ -107,17 +114,17 @@ class CastExp: Expression{
 	STC stc;
 	Expression e; Expression ty;
 	this(STC ss,Expression tt,Expression exp){stc=ss; ty=tt; e=exp;}
-	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(ty?" ":""):"")~(ty?type.toString():"")~")"~e.toString());}
+	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(ty?" ":""):"")~(ty?ty.toString():"")~")"~e.toString());}
 
 	mixin Visitors;
 }
 class NewExp: Expression{
 	Expression[] a1;
-	Expression type;
+	Expression ty;
 	Expression[] a2;
-	this(Expression[] args1,Expression type,Expression[] args2){a1=args1; this.type=type; a2=args2;}
+	this(Expression[] args1,Expression type,Expression[] args2){a1=args1; ty=type; a2=args2;}
 	override string toString(){
-		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~type.toString()~(a2?"("~join(map!(to!string)(a2),",")~")":""));
+		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~ty.toString()~(a2?"("~join(map!(to!string)(a2),",")~")":""));
 	}
 }
 class NewClassExp: Expression{
@@ -211,19 +218,19 @@ enum WhichIsExp{
 }
 class IsExp: Expression{
 	WhichIsExp which;
-	Expression type;
+	Expression ty;
 	Identifier ident;
-	Expression typeSpec;
-	TokenType typeSpec2;
+	Expression tySpec;
+	TokenType tySpec2;
 	TemplateParameter[] tparams;
 	this(WhichIsExp w, Expression t, Identifier i, Expression ts, TokenType ts2, TemplateParameter[] tp)
-		in{assert(t&&(which==WhichIsExp.type||typeSpec||typeSpec2!=Tok!"")); assert(which!=WhichIsExp.type||!tparams);}body{
-		which=w; type=t; ident=i; typeSpec=ts;
-		typeSpec2=ts2; tparams=tp;
+		in{assert(t&&(which==WhichIsExp.type||tySpec||tySpec2!=Tok!"")); assert(which!=WhichIsExp.type||!tparams);}body{
+		which=w; ty=t; ident=i; tySpec=ts;
+		tySpec2=ts2; tparams=tp;
 	}
 	override string toString(){
-		return "is("~type.toString()~(ident?" "~ident.toString():"")~(which!=WhichIsExp.type?(which==WhichIsExp.isEqual?"==":": ")~
-			(typeSpec?typeSpec.toString():TokenTypeToString(typeSpec2))~(tparams?","~join(map!(to!string)(tparams),","):""):"")~")";
+		return "is("~ty.toString()~(ident?" "~ident.toString():"")~(which!=WhichIsExp.type?(which==WhichIsExp.isEqual?"==":": ")~
+			(tySpec?tySpec.toString():TokenTypeToString(tySpec2))~(tparams?","~join(map!(to!string)(tparams),","):""):"")~")";
 	}
 }
 
@@ -270,9 +277,9 @@ class StructLiteralExp: InitializerExp{
 // for if(auto x=foo()){} etc
 class ConditionDeclExp: Expression{
 	STC stc;
-	Expression type;
+	Expression ty;
 	Identifier name;
 	Expression init;
-	this(STC s, Expression t, Identifier n, Expression i){stc=s; type=t; name=n; init=i;}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"");}
+	this(STC s, Expression t, Identifier n, Expression i){stc=s; ty=t; name=n; init=i;}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~(ty?ty.toString()~" ":"")~name.toString()~(init?"="~init.toString():"");}
 }

@@ -128,11 +128,6 @@ template keywordTokens(){
 	}();
 }
 
-string lowerf(string s){
-	if('A'<=s[0]&&s[0]<='Z') return cast(char)(s[0]+('a'-'A'))~s[1..$];
-	return s;
-}
-
 string TokenNames(){
 	string r;
 	foreach(t;tokens) r~=lowerf(t[1])~",";
@@ -689,13 +684,13 @@ struct Lexer{
 	}
 	
 	/* Lex a number FSM. TDPL p33/35
-		Returns either a valid literal token or one of the following:
-		errExp       = tokError("exponent expected");
-		errsOverflow = tokError("signed integer constant exceeds long.max");
-		errOverflow  = tokError("integer constant exceeds ulong.max");
-		//errRepr      = tokError("numerical constant is not representable in [float|double|real]");
-		errOctDepr   = tokError("octal literals are deprecated");
-	 */
+	   Returns either a valid literal token or one of the following:
+	   errExp       = tokError("exponent expected");
+	   errsOverflow = tokError("signed integer constant exceeds long.max");
+	   errOverflow  = tokError("integer constant exceeds ulong.max");
+	   //errRepr      = tokError("numerical constant is not representable in [float|double|real]");
+	   errOctDepr   = tokError("octal literals are deprecated");
+	*/
 	private Token lexNumber(ref immutable(char)* _p) {
 		static assert(real.mant_dig <= 64);
 		auto p = _p;

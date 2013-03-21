@@ -50,6 +50,18 @@ bool isNewLine(dchar c){
 	return c=='\u000A'||c=='\u000B'||c=='\u000C'||c=='\u000D'||c=='\u0085'||c=='\u2028'||c=='\u2029';
 }
 
+// useful for getting naming conventions right in string mixins:
+string lowerf(string s){
+	if('A'<=s[0]&&s[0]<='Z') return cast(char)(s[0]+('a'-'A'))~s[1..$];
+	return s;
+}
+
+string upperf(string s){
+	if('a'<=s[0]&&s[0]<='z') return cast(char)(s[0]+('A'-'a'))~s[1..$];
+	return s;	
+}
+
+
 
 // memory allocation stuff
 struct MallocAppender(T:T[]){ // NO RAII. Loosely compatible to the std.array.appender interface.
@@ -130,6 +142,8 @@ private void[] _mlp;
 struct ChunkGCAlloc{
 	static:
 	auto New(T,A...)(A args){ // Simple chunk allocator on top of the GC. Way faster, but not precise
+		auto dg={A a; return new T(a);};
+		static assert(__traits(compiles, {A a;return new T(a);}), "cannot create instance of class "~T.stringof);
 		return emplace!T(NewImpl(__traits(classInstanceSize, T)),args);
 	}
 	void[] NewImpl()(size_t size){

@@ -6,9 +6,11 @@ struct S{
 };
 //int x;
 
+struct V;
 
 int main(int,char **a){
 	//int x;
+	void v;
 	S x;
 	int y=x;
 	1=x;

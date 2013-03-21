@@ -2,15 +2,58 @@
 int xyz();
 int xyz(float);
 
-
 /*class C{
 	class D{}
 }*/
 
+int[] y;
+pragma(msg, "start");
+
+inout(const(int)[]) foo(inout(const(int)[]) x){
+	//inout(const(inout(shared(immutable(inout(int)[]))))[]) y;
+	//const(immutable(int)) y;
+	//pragma(msg, typeof(y));
+	immutable(int*)[] p;
+	const(inout(int*)[]) q=p;
+	pragma(msg, typeof(q));
+	
+	immutable(float) yy;
+	int xx;
+	auto zz = 1 ? xx : yy;
+	auto ww = 1 ? yy : xx;
+	pragma(msg, typeof(zz));
+	pragma(msg, typeof(ww));
+	
+
+	return x;
+}
+
 //x x;
-int x;
-void main(main foo){
-	//typeof(x) x;
+//int x;
+
+void foo(){}
+int bar(){ return 1; }
+void main(){/*
+	//pragma(msg, typeof(q));
+	shared(int) x=cast(const(int))1;
+	const(shared(int)) xxx=1;
+	shared(const(int)) xxy=xxx;
+	immutable(const(int)) xxz;
+	shared(immutable(int)) xxa;
+	immutable(shared(int)) xxb;	
+	//const(shared(immutable(int))) xxc;
+	const(typeof(xxa)) xxc = xxa;
+	immutable(const(int)[]) xxd;
+	pragma(msg, typeof(xxx));
+	pragma(msg, typeof(xxy));
+	pragma(msg, typeof(xxz));
+	pragma(msg, typeof(xxa));
+	pragma(msg, typeof(xxb));
+	pragma(msg, typeof(xxc));
+	pragma(msg, typeof(xxd));
+	//static assert(is(typeof(xxd) == const(immutable(int)*[])));
+	
+	/*int yyy=xxx;
 	ushort wc=((x&1)+1)+1U; int ii=wc;
 	auto arr=[2fi+1L, 1.0L, 2,];
 	float sa=1+1; char cb;//=sa;
@@ -50,11 +93,11 @@ void main(main foo){
 	//{int i(){};}
 	//C c=new C;
 	//C.D d=c.new D;
-	printf("x=%d!\n",x);
+	//printf("x=%d!\n",x);
 	//int i(){}
 	for(int i=0;i<100;i++){
 		//for(int i=0;i<100;i++){}
-	}
+		}*/
 }
 //auto foo(){return bar();return 1;}
 //auto bar(){return foo();}

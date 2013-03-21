@@ -3,7 +3,10 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, util;
 import semantic, scope_, visitors;
 
+
 class Type: Expression{ //Types can be part of Expressions and vice-versa
+	this(){type = this;}
+
 	override string toString(){return "Type";}
 
 	static BasicType get(T)() if(isBasicType!T){
@@ -45,76 +48,29 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!T=New!EmptyArrTy();
 	}
 
-	final{
-	Type getPointer(){
-		if(ptrType) return ptrType;
-		return ptrType=New!PointerTy(this);
-	}
-
-	Type getDynArr(){
-		if(darrType) return darrType;
-		return darrType=New!DynArrTy(this);
-	}
-
-	Type getArray(long size){
-		if(auto r=arrType.get(size,null)) return r;
-		return arrType[size]=New!ArrayTy(this,size);
-	}
-
-	Type getConst(){
-		if(constType) return constType;
-		return constType=New!ConstTy(this);
-	}
-	Type getImmutable(){
-		if(immutableType) return immutableType;
-		return immutableType=New!ImmutableTy(this);
-	}
-	Type getShared(){
-		if(sharedType) return sharedType;
-		return sharedType=New!SharedTy(this);
-	}
-	Type getInout(){
-		if(inoutType) return inoutType;
-		return inoutType=New!InoutTy(this);
-	}
-	}
-
 	override Type isType(){return this;}
 
 	mixin DownCastMethods!(
-	    DynArrTy,
+		ConstTy,
+		ImmutableTy,
+		SharedTy,
+		InoutTy,
+		PointerTy,
+		DynArrTy,
+		ArrayTy,
 	);
 
 	BasicType isIntegral(){return null;}
 	
-	bool implicitlyConvertsTo(Type){
-		return false;
-	}
-	Type combine(Type rhs){
-		if(rhs is this) return this;
-		bool l2r=implicitlyConvertsTo(rhs);
-		bool r2l=rhs.implicitlyConvertsTo(this);
-		if(l2r ^ r2l){
-			if(l2r) return rhs;
-			return this;
-		}
-		return null;
-	}
 
 	mixin Visitors;
 
-private:
+protected:
 	static template uniqueType(T){
 		static if(isBasicType!T) BasicType uniqueType;
 		else Type uniqueType;
 	}
-	PointerTy ptrType;
-	DynArrTy darrType;
-	ArrayTy[long] arrType;
-	ConstTy constType;
-	ImmutableTy immutableType;
-	SharedTy sharedType;
-	InoutTy inoutType;
+	Type[long] arrType;
 }
 
 class ErrorTy: Type{
@@ -132,12 +88,12 @@ struct Class{}
 
 class NullPtrTy: Type{ // typeof(null)
 	this(){sstate = SemState.completed;}
-	override string toString(){return "nullptr_t";}
+	override string toString(){return "null_t";}
 }
 
 class EmptyArrTy: Type{ // typeof([])
 	this(){sstate = SemState.completed;}
-	override string toString(){return "emptyarr_t";} // TODO: fix name for this type
+	override string toString(){return "emptyarray_t";}
 }
 
 
@@ -191,111 +147,6 @@ final class BasicType: Type{
 	TokenType op;
 	this(TokenType op)in{assert(strength[op]||op==Tok!"void");}body{this.op=op; sstate=SemState.completed;}
 	override string toString(){return _brk(TokenTypeToString(op));}
-	
-	BasicType intPromote(){
-		switch(op){
-			case Tok!"bool":
-			case Tok!"byte", Tok!"ubyte", Tok!"char":
-			case Tok!"short", Tok!"ushort", Tok!"wchar":
-				return Type.get!int();
-			case Tok!"dchar":
-				return Type.get!uint();
-			default: return this;
-		}
-	}
-
-	private static immutable int[] strength=
-		[Tok!"bool":1,Tok!"char":2,Tok!"byte":2,Tok!"ubyte":2,Tok!"wchar":3,Tok!"short":3,Tok!"ushort":3,
-		 Tok!"dchar":4,Tok!"int":4,Tok!"uint":4,Tok!"long":5,Tok!"ulong":5,Tok!"float":6,Tok!"double":6,Tok!"real":6,
-		 Tok!"ifloat":-1,Tok!"idouble":-1,Tok!"ireal":-1,Tok!"cfloat":-2,Tok!"cdouble":-2,Tok!"creal":-2];
-
-	override BasicType isIntegral(){return strength[op]>=0 && strength[op]<=5 ? this : null;}
-
-	override bool implicitlyConvertsTo(Type rhs){ // like TDPL p. 44 but transitive.
-		if(auto bt=cast(BasicType)rhs){
-			if(strength[op]>=0 && strength[bt.op]>=0) return strength[op]<=strength[bt.op];
-			if(strength[bt.op]==-2) return true;
-		}
-		return false;
-	}
-
-	override BasicType combine(Type rhs){
-		if(this is rhs) return this;
-		if(auto bt=cast(BasicType)rhs){
-			if(strength[op]>=0&&strength[bt.op]>=0){
-				if(strength[op]<4&&strength[bt.op]<4) return Type.get!int();
-				if(strength[op]<strength[bt.op]) return bt;
-				if(strength[op]>strength[bt.op]) return this;
-			}else{
-				if(strength[bt.op]==-2) return bt.complCombine(this);
-				else if(strength[bt.op]==-1) return bt.imagCombine(this);
-			}
-			switch(strength[op]){
-				case -2:
-					return complCombine(bt);
-				case -1: // imaginary types
-					return imagCombine(bt);
-				case 4:
-					return Type.get!uint();
-				case 5:
-					return Type.get!ulong();
-				case 6:
-					if(op==Tok!"float" && bt.op==Tok!"float") return this;
-					else if(op!=Tok!"real" && bt.op!=Tok!"real") return Type.get!double();
-					else return Type.get!real();
-				default: assert(0);
-			}
-		}
-		return super.combine(rhs);
-	}
-
-	// TODO: compress into a single template and two alias
-	private BasicType imagCombine(BasicType bt)in{assert(strength[op]==-1);}body{
-		if(strength[bt.op]==-1){
-			if(op==Tok!"ifloat" && bt.op==Tok!"ifloat") return this;
-			else if(op!=Tok!"ireal" && bt.op!=Tok!"ireal") return Type.get!idouble();
-			else return Type.get!ireal();
-		}
-		// imaginary + complex
-		if(strength[bt.op]==-2){
-			if(op==Tok!"ifloat" && bt.op==Tok!"cfloat") return Type.get!cfloat();
-			if(op!=Tok!"ireal" && bt.op!=Tok!"creal") return Type.get!cdouble();
-			if(op==Tok!"ireal" || bt.op==Tok!"creal") return Type.get!creal();
-		}
-		// imaginary + 2's complement integer
-		if(strength[bt.op]<6){
-			if(op==Tok!"ifloat") return Type.get!cfloat();
-			if(op==Tok!"idouble") return Type.get!cdouble();
-			if(op==Tok!"ireal") return Type.get!creal();
-		}
-		// imaginary + 'real'
-		if(op==Tok!"ifloat" && bt.op==Tok!"float") return Type.get!cfloat();
-		if(op!=Tok!"ireal" && bt.op!=Tok!"real") return Type.get!cdouble();
-		return Type.get!creal();		
-	}
-	private BasicType complCombine(BasicType bt)in{assert(strength[op]==-2);}body{
-		if(strength[bt.op]==-2){
-			if(op==Tok!"cfloat" && bt.op==Tok!"cfloat") return this;
-			else if(op!=Tok!"creal" && bt.op!=Tok!"creal") return Type.get!idouble();
-			else return Type.get!creal();
-		}
-		// complex + imaginary
-		if(strength[bt.op]==-1){
-			if(op==Tok!"cfloat" && bt.op==Tok!"ifloat") return Type.get!cfloat();
-			if(op!=Tok!"creal" && bt.op!=Tok!"ireal") return Type.get!cdouble();
-			if(op==Tok!"creal" || bt.op==Tok!"ireal") return Type.get!creal();
-		}
-		// complex + 2's complement integer
-		if(strength[bt.op]<6){
-			if(op==Tok!"cfloat") return Type.get!cfloat();
-			if(op==Tok!"cdouble") return Type.get!cdouble();
-			if(op==Tok!"creal") return Type.get!creal();
-		}
-		// complex + 'real'
-		if(op==Tok!"cfloat" && bt.op==Tok!"float") return Type.get!cfloat();
-		if(op!=Tok!"creal" && bt.op!=Tok!"real") return Type.get!cdouble();
-		return Type.get!creal();		
-	}
 
 	mixin Visitors;
 }
@@ -304,6 +155,7 @@ class PointerTy: Type{
 	Expression e;
 	this(Expression next)in{assert(next&&1);}body{e=next;}
 	override string toString(){return _brk(e.toString()~'*');}
+	override PointerTy isPointerTy(){return this;}
 
 	mixin Visitors;
 }
@@ -329,6 +181,7 @@ class ArrayTy: Type{ //purely semantic node
 	long size;
 	this(Expression next, long siz)in{assert(next&&1);}body{e=next; size=siz;}
 	override string toString(){return _brk(e.toString()~'['~to!string(size)~']');}
+	override ArrayTy isArrayTy(){return this;}
 
 	mixin Visitors;
 }
@@ -338,41 +191,41 @@ template QualifiedType(TokenType op){
 	static if(op==Tok!"const") alias ConstTy QualifiedType;
 	else static if(op==Tok!"immutable") alias ImmutableTy QualifiedType;
 	else static if(op==Tok!"shared") alias SharedTy QualifiedType;
-	else static if(op==Tok!"inout") alias SharedTy QualifiedType;
+	else static if(op==Tok!"inout") alias InoutTy QualifiedType;
 }
 
-class ConstTy: Type{
+class QualifiedTy: Type{
 	Expression e;
+}
+
+class ConstTy: QualifiedTy{
 	this(Expression type){e=type;}
-	//override string toString(){return _brk(TokChars!op~(!type.brackets?" ":"")~type.toString());}
 	override string toString(){return _brk("const("~e.toString()~')');}
+	override ConstTy isConstTy(){return this;}
 
 	mixin Visitors;	
 }
 
-class ImmutableTy: Type{
-	Expression e;
+class ImmutableTy: QualifiedTy{
 	this(Expression type){e=type;}
-	//override string toString(){return _brk(TokChars!op~(!type.brackets?" ":"")~type.toString());}
 	override string toString(){return _brk("immutable("~e.toString()~')');}
+	override ImmutableTy isImmutableTy(){return this;}
 
 	mixin Visitors;	
 }
 
-class SharedTy: Type{
-	Expression e;
+class SharedTy: QualifiedTy{
 	this(Expression type){e=type;}
-	//override string toString(){return _brk(TokChars!op~(!type.brackets?" ":"")~type.toString());}
 	override string toString(){return _brk("shared("~e.toString()~')');}
+	override SharedTy isSharedTy(){return this;}
 
 	mixin Visitors;	
 }
 
-class InoutTy: Type{
-	Expression e;
+class InoutTy: QualifiedTy{
 	this(Expression type){e=type;}
-	//override string toString(){return _brk(TokChars!op~(!type.brackets?" ":"")~type.toString());}
 	override string toString(){return _brk("inout("~e.toString()~')');}
+	override InoutTy isInoutTy(){return this;}
 
 	mixin Visitors;	
 }
