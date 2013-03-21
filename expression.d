@@ -119,6 +119,8 @@ abstract class Expression: Node{
 		LiteralExp,
 		ArrayLiteralExp,
 		FunctionLiteralExp,
+		VoidInitializerExp,
+		StructConsExp,
 		TernaryExp,
 		CastExp,
 		Type,
@@ -471,6 +473,9 @@ class DeleteExp: Expression{ // why is this an expression and throw a statement?
 abstract class InitializerExp: Expression{}
 class VoidInitializerExp: InitializerExp{
 	override string toString(){return "void";}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 class StructAssocExp: Expression{

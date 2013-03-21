@@ -19,8 +19,10 @@ mixin template Visitors(){
 	static if(!IsNonASTType!(typeof(this))) mixin Semantic!(typeof(this));
 	// another workaround for DMD bug, other part is in expression.Node
 	static if(!is(typeof(this)==Node)){
-		static if(!is(typeof(this)==AggregateTy)) mixin Analyze; // wtf?
-		mixin CTFEInterpret!(typeof(this));
+		static if(!is(typeof(this)==AggregateTy)){
+			mixin Analyze; // wtf?
+			mixin CTFEInterpret!(typeof(this));
+		}
 		static if(!is(typeof(this)==AggregateTy)) mixin DeepDup!(typeof(this));
 	}
 

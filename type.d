@@ -334,4 +334,5 @@ class AggregateTy: Type{
 	mixin Visitors;
 
 	mixin DeepDup!AggregateTy; // workaround for DMD bug. Should actually be in visitors.d
+	mixin CTFEInterpret!AggregateTy; // ditto
 }

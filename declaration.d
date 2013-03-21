@@ -273,6 +273,7 @@ class StructDecl: ValueAggregateDecl{
 
 	override @property string kind(){ return "struct"; }
 	mixin DownCastMethod;
+	mixin Visitors;
 }
 class UnionDecl: ValueAggregateDecl{
 	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
@@ -280,6 +281,7 @@ class UnionDecl: ValueAggregateDecl{
 
 	override @property string kind(){ return "union"; }
 	mixin DownCastMethod;
+	mixin Visitors;
 }
 class ClassDecl: ReferenceAggregateDecl{
 	this(STC stc,Identifier name, Expression[] p, BlockDecl b)in{assert(!!b);}body{
@@ -303,6 +305,7 @@ class InterfaceDecl: ReferenceAggregateDecl{
 	override @property string kind(){ return "interface"; }
 
 	mixin DownCastMethod;
+	mixin Visitors;
 }
 /+class TemplateAggregateDecl: Declaration{
 	TemplateParameter[] params;
@@ -344,7 +347,7 @@ class VarDecl: Declaration{
 	}body{
 		this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);
 	}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~(name?name.toString():"")~(init?"="~init.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
 

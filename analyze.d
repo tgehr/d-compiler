@@ -28,11 +28,11 @@ mixin template Analyze(){
 				static assert(!is(typeof(_idfododi)));
 				static assert(!is(typeof(_idfofodi2)));
 				foreach(_idfododi; __traits(allMembers, T)){
-					static if(_idfododi.length && (!is(T:Symbol)||_idfododi!="meaning" && _idfododi!="circ" && _idfododi!="clist") && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy") && (!is(T==TemplateInstanceExp)||_idfododi!="inst"&&_idfododi!="eponymous")&&(!is(T==TemplateDecl)||_idfododi!="eponymousDecl")&&(!is(T==VarDecl)||_idfododi!="tupleContext")&&(!is(T==TemplateInstanceDecl)||_idfododi!="parent"&&_idfododi!="constraintEponymousFunctionParameters")&&(!is(T==ReferenceAggregateDecl)||_idfododi!="parents")&&_idfododi!="resolved"){ // hack
+					static if(_idfododi.length && (!is(T:Symbol)||_idfododi!="meaning" && _idfododi!="circ" && _idfododi!="clist") && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy") && (!is(T==TemplateInstanceExp)||_idfododi!="inst"&&_idfododi!="eponymous")&&(!is(T==TemplateDecl)||_idfododi!="eponymousDecl")&&(!is(T==VarDecl)||_idfododi!="tupleContext"&&_idfododi!="type")&&(!is(T==TemplateInstanceDecl)||_idfododi!="parent"&&_idfododi!="constraintEponymousFunctionParameters")&&(!is(T==ReferenceAggregateDecl)||_idfododi!="parents")&&(!is(T==StructConsExp)||_idfododi!="tmpVarDecl"&&_idfododi!="strd")&&(!is(T==CallExp)||_idfododi!="initOf")&&_idfododi!="resolved"){ // hack
 						mixin(`alias `~_idfododi~` _idfofodi2;`);
 						static if(is(typeof(_idfofodi2): Node) && !is(typeof(_idfofodi2): Type)){
-							//import std.stdio; if(_idfofodi2) writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
-
+							// import std.stdio; if(_idfofodi2) writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
+							
 							//if(_idfofodi2) writeln(T.stringof,_idfododi," ",(_idfofodi2));
 
 							if(_idfofodi2) dg(_idfofodi2);

@@ -1,3 +1,4 @@
+
 /+// TODO: this must work! (need notion of potential indirections to support this)
 pragma(msg, {
 	string x = "123";

@@ -1,4 +1,87 @@
 
+int testMutate3(){
+	static struct Cell{
+		int x=1335;
+		void foo(int u){
+			x = u;
+		}
+	}
+	auto c=Cell(), d=Cell();
+	c.foo(2), d.foo(3);
+	assert(c.x==2 && d.x==3);
+	c.x=3;
+	return c.x;
+}
+static assert(testMutate3()==3);
+
+int testMutate2(){
+	static struct Cell{
+		int x=1335;
+	}
+	auto c=Cell(), d=Cell();
+	auto p=&c, q=&d;
+	p.x=2; q.x=3;
+	assert(c.x==2 && d.x==3);
+	assert(p.x==2 && q.x==3);
+	p.x=3;
+	assert(p.x==3);
+	return q.x;
+}
+static assert(testMutate2()==3);
+
+int testMutate(){
+	static struct Cell{
+		int x=1335;
+	}
+	auto c=Cell(), d=Cell();
+	c.x=2; d.x=3;
+	assert(c.x==2 && d.x==3);
+	c.x=3;
+	return c.x;
+}
+static assert(testMutate()==3);
+
+struct Dynamic{
+	// (tests how the interpreter deals with memory layout changes)
+	mixin(foo(Dynamic()));
+	static string foo(Dynamic d){
+		return d.s;
+	}
+	string s = "int b = 2;";
+	static assert({
+		Dynamic d;
+		return d.b==2?foo(d):"fail";
+	}() == "int b = 2;");
+}
+
+auto testStruct2(){
+	static struct S{
+		int x=1;
+		int y=2;
+		int z=4;
+		int w=8;
+	}
+	S s;
+	S* q = &s;
+	return s.x+q.y+(()=>s.z)()+(()=>(()=>s.w)())();
+}
+static assert(testStruct2()==15);
+pragma(msg, "testStruct2: ", testStruct2());
+
+auto testStruct(){
+	static struct S{
+		int x=1;
+		int y=2;
+		int z=3;
+	}
+	S s;
+	return s.x+s.y+s.z;
+}
+
+static assert(testStruct()==6);
+pragma(msg, "testStruct: ", testStruct());
+
+
 int[] evalord(){
 	int[] a=[1,2,3], b=[1,2,3];
 	int c = 1;
@@ -61,11 +144,14 @@ auto memfibonacci(int n) => memoizer([0, 1 ], (recur, int n) => recur(n-2)+recur
 pragma(msg, "memfactorial: ", map!memfactorial(iota(0,19)));
 pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
 
+pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1)))); //TODO
+
+
 // Haskell-Like CPS //
 template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
 auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
-auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
+auto bind(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
 	return (R delegate(B) k)=>me(r=>f(r)(k));
 }
 
@@ -82,7 +168,7 @@ auto testselfapp(){
 
 auto testcallCC(){
 	auto f(Cont!(int,int) delegate(int) cont, int x){
-		return cat(x<3?cont(x):ret!int(1),a=>cont(x+a));
+		return bind(x<3?cont(x):ret!int(1),a=>cont(x+a));
 	}
 	assert(callCC(&f,1)(x=>x)==1);
 	assert(callCC(&f,3)(x=>x)==4);
@@ -92,8 +178,8 @@ auto testcallCC(){
 static assert(testcallCC()==5);
 pragma(msg, "testcallCC: ", testcallCC());
 
-pragma(msg, "callCC: ",callCC!(int,int,int)(ret=>ret(2))(x=>callCC!(int,int,int)(ret=>ret(x+1))(x=>x)));
 
+pragma(msg, "callCC: ",callCC!(int,int,int)(ret=>ret(2))(x=>callCC!(int,int,int)(ret=>ret(x+1))(x=>x)));
 
 auto testcallCC2(){
 	auto f(Cont!(int,int) delegate(int) cont, int x){
@@ -129,9 +215,9 @@ pragma(msg, "testcallCC2: ", testcallCC2()(x=>x));
 
 auto testcps(){
 	return
-		cat(ret!int(1), a =>
-		cat(ret!int(2), b =>
-		cat(ret!int(3), c =>
+		bind(ret!int(1), a =>
+		bind(ret!int(2), b =>
+		bind(ret!int(3), c =>
 		ret!int(a+b+c))))
 		(x=>x);
 }
@@ -141,7 +227,7 @@ pragma(msg, "testcps: ", testcps());
 
 Cont!(int,int) factcps(Cont!(int,int) delegate(int) cont, int n){
 	return 
-		cat!(int,int,int)(n<1 ? cont(1) : ret!int(n-1),
+		bind!(int,int,int)(n<1 ? cont(1) : ret!int(n-1),
 		                  a => cont(callCC!(int,int,int)((x,y)=>factcps(x,y), a)(x=>x)*n));
 }
 
@@ -153,7 +239,7 @@ alias Seq!(void,bool,bool) vbb;
 Cont!vb isprimecps(Cont!vb delegate(bool) cont, int p){
 	Cont!vb loop(int i){
 		return
-			cat!vbb(i > p  ? cont(false) : ret!vb(false), a=>
+			bind!vbb(i > p  ? cont(false) : ret!vb(false), a=>
 			        i == p ? cont(true) :
 			        p % i  ? loop(i+1) :
 			        cont(a));
@@ -184,7 +270,7 @@ Cont!(S,T) arrayToCont(S,T)(T[] a){
 
 auto cartprodcps(T)(T[] a, T[] b){
 	alias arrayToCont i; alias T[][] R;
-	return cat(i!R(a),x=>cat(i!R(b),y=>ret!R([[x,y]])));
+	return bind(i!R(a),x=>bind(i!R(b),y=>ret!R([[x,y]])));
 }
 
 pragma(msg, cartprodcps([1,2,3],[4,5,6])(x=>x));
@@ -205,12 +291,12 @@ auto expCps(T)(T[] a, T[] b){
 	alias Seq!(T[][],T,T) iaaii;
 	alias Seq!(T[][],T[],T) iaaiai;
 
-	//return cat!iaii(i!T(a),x=>cat!iaii(i!T(b),y=>i!T([x,y])));
-	//return cat!iaaiaia(i!(T[])(a),x=>cat!iaaiaia(i!(T[])(b),y=>i!(T[])([[x,y]])));
-	//return cat!(T[],T,T)(i!(T)(a), x=>ret!(T[])(x*2));
-	//return cat!iaaiaia(i!(T[])([a]), x=>ret!(T[][])(x));
+	//return bind!iaii(i!T(a),x=>bind!iaii(i!T(b),y=>i!T([x,y])));
+	//return bind!iaaiaia(i!(T[])(a),x=>bind!iaaiaia(i!(T[])(b),y=>i!(T[])([[x,y]])));
+	//return bind!(T[],T,T)(i!(T)(a), x=>ret!(T[])(x*2));
+	//return bind!iaaiaia(i!(T[])([a]), x=>ret!(T[][])(x));
 
-	//return cat!iaaii(i!(T[])(a),x=>cat!iaaii(i!(T[])(b),y=>ret!(T[][])(x)));
+	//return bind!iaaii(i!(T[])(a),x=>bind!iaaii(i!(T[])(b),y=>ret!(T[][])(x)));
 }
 
 size_t indexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
@@ -221,6 +307,7 @@ size_t indexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 static assert(indexOf("abc",'d')==-1LU);
 
 size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	// TODO: this probably is not supposed to work
 	template bal(string s){ size_t bal = 0; }
 	for(size_t i=0;i<c.length;i++){
 		if(!bal!"'"&&!bal!"\""&&!bal!"("&&!bal!"["&&!bal!"{"&&a(c[i],v)) return i;
@@ -331,7 +418,7 @@ template compr(string c){
 				return @({
 					string r;
 					for(int i=0;i<idents.length;i++)
-						r~="cat(i!R(_"~idents[i]~"),"~idents[i]~"=>!("~conditions[i]~")?ret!(R,R)([]):";
+						r~="bind(i!R(_"~idents[i]~"),"~idents[i]~"=>!("~conditions[i]~")?ret!(R,R)([]):";
 					r~="ret!R(["~exp~"])";
 					for(int i=0;i<idents.length;i++) r~=')';
 					return r;

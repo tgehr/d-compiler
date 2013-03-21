@@ -466,6 +466,8 @@ mixin template Semantic(T) if(is(T==Expression)){
 	void willTakeAddress(){}
 	void willCall(){}
 
+	void initOfVar(VarDecl decl){}
+
 	override void semantic(Scope sc){ sc.error("feature "~to!string(typeid(this))~" not implemented",loc); mixin(ErrEplg); }
 
 	// analysis is trapped because of circular await-relationship involving this node
@@ -596,7 +598,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		return r;
 	}
 	bool typeEquals(Type rhs)in{
-		assert(sstate == SemState.completed, toString());
+		assert(sstate == SemState.completed, text(typeid(this)," ",this," ",sstate," ",loc));
 	}body{
 		return type.equals(rhs);
 	}
@@ -3424,6 +3426,14 @@ private:
 	GaggingScope gscope;
 }
 
+mixin template Semantic(T) if(is(T==VoidInitializerExp)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		type = Type.get!void();
+		mixin(SemEplg);
+	}
+}
+
 
 // abstracts a symbol. almost all circular dependency diagnostics are located here.
 // CallExp is aware of the possibility of circular dependencies too, because it plays an
@@ -3921,6 +3931,11 @@ struct MatchContext{
 
 // aware of circular dependencies
 mixin template Semantic(T) if(is(T==CallExp)){
+	override void initOfVar(VarDecl decl){
+		initOf = decl;
+	}
+	private VarDecl initOf;
+
 	override void semantic(Scope sc){ // TODO: type checking
 		// parameter passing
 		mixin(SemPrlg);
@@ -3930,6 +3945,16 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		mixin(SemChldExp!q{args});
 		mixin(PropErr!q{e});
 
+		if(auto ty=e.isType())
+		if(auto aggrty=ty.getUnqual().isAggregateTy())
+		if(auto strd=aggrty.decl.isStructDecl()){
+			// TODO: could re-use the callexp as the consCall field
+			auto r = New!StructConsExp(ty, args);
+			r.loc = loc;
+			if(initOf) r.initOfVar(initOf);
+			r.semantic(sc);
+			mixin(RewEplg!q{r});
+		}
 		if(fun is null){
 			mixin(MatchCall!q{fun; e, sc, loc, args});
 			if(fun is null) mixin(ErrEplg);
@@ -4315,6 +4340,146 @@ class ImplicitCastExp: CastExp{ // semantic node
 	override string toString(){return e.toString();}
 }
 
+class TmpVarDecl: VarDecl{
+	this(STC stc, Expression rtype, Identifier name, Expression initializer){
+		super(stc, rtype, name, initializer);
+	}
+	
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==TmpVarDecl)){ }
+
+
+/+class TmpVarExp: Expression{
+	VarDecl tempVarDecl;
+	this(VarDecl tempVarDecl){ this.tempVarDecl = tempVarDecl; }
+	void semantic(Scope sc){
+		mixin(SemPrlg);
+		mixin(SemChld!q{tempVarDecl});
+		type = tempVarDecl.type;
+		mixin(SemEplg);
+	}
+	override @property string kind(){ return tempVarDecl.init.kind; }
+	override string toString(){ return tempVarDecl.init.toString(); }
+}+/
+
+class StructConsExp: Expression{
+	Expression[] args;
+
+	Identifier constructor;
+	CallExp consCall;
+
+	VarDecl tmpVarDecl;
+
+	override void initOfVar(VarDecl decl){
+		assert(!tmpVarDecl||tmpVarDecl is decl);
+		tmpVarDecl = decl;
+	}
+
+	invariant(){ assert(cast(AggregateTy)type&&cast(StructDecl)(cast(AggregateTy)(cast()type).getUnqual()).decl);}
+	private @property StructDecl strd(){
+		return cast(StructDecl)cast(void*)(cast(AggregateTy)cast(void*)type.getUnqual()).decl;
+	}
+
+	this(Type type, Expression[] args)in{
+		auto strty = cast(AggregateTy)type.getUnqual();
+		assert(strty&&cast(StructDecl)strty.decl);
+	}body{ this.type=type; this.args=args; }
+
+	override void semantic(Scope sc){
+		assert(!!type);
+		mixin(SemPrlg);
+		mixin(SemChld!q{args});
+		// TODO: static opCall
+		mixin(ResolveConstructor);
+		sstate = SemState.completed;
+		
+		if(!tmpVarDecl){
+			tmpVarDecl = New!TmpVarDecl(STC.init,type,null,this);
+			tmpVarDecl.loc = loc;
+			builtTmpVarDecl = true;
+		}
+		if(builtTmpVarDecl){
+			sstate = SemState.completed;
+			scope(success) sstate = tmpVarDecl.sstate;
+			mixin(SemChld!q{tmpVarDecl});
+		}
+		mixin(SemEplg);
+	}
+	private bool builtTmpVarDecl = false;
+
+	
+	override @property string kind(){ return "struct literal"; }
+	override string toString(){ return strd.name.toString()~"("~join(map!(to!string)(args),",")~")"; }
+
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==StructConsExp)){}
+
+enum ResolveConstructor = q{
+	static if(is(typeof(this)==NewExp)){
+		alias a2 args;
+		auto caggr = aggr.decl;
+	}else auto caggr = strd;
+	// TODO: struct default constructors
+
+	if(auto decl = sc.getDeclaration()){
+		mixin(IsDeclAccessible!q{bool b; decl, caggr});
+
+		if(!b){
+			auto parent=caggr.scope_.getDeclaration();
+			assert(parent.isFunctionDecl()||
+			       parent.isReferenceAggregateDecl()&&caggr.isClassDecl());
+			if(parent.isFunctionDecl()){
+				sc.error(format("cannot construct local %s '%s' outside of its frame", caggr.kind, caggr.name), loc);
+			}else static if(is(typeof(this)==NewExp)){
+				sc.error(format("need 'this' pointer of type '%s' to construct nested class '%s'",parent.name, caggr.name), loc);
+			}else assert(0);
+					
+			mixin(ErrEplg);
+		}
+	}
+	if(!caggr.isStructDecl()||args.length){ // implicit default constructor
+		if(!constructor){
+			constructor = New!Identifier("this");
+			constructor.recursiveLookup = false;
+		}
+		mixin(Lookup!q{_; constructor, caggr.asc});
+		if(auto nr=constructor.needRetry) { needRetry = nr; return; }
+	}
+	if(!constructor||constructor.sstate == SemState.failed){
+		// no constructor for type
+		// TODO: disabled default constructor
+		if(args.length){
+			sc.error("too many arguments to new expression (expected zero)",loc);
+			mixin(ErrEplg);
+		}
+	}else{
+		assert(constructor.meaning.isOverloadSet()&&
+		       constructor.meaning.isOverloadSet().isConstructor());
+		// nested classes cannot be built like this
+		//if(caggr.isReferenceAggregateDecl())
+		MatchContext context;
+		mixin(SemChld!q{constructor});
+		mixin(MatchCallHelper!q{auto r; constructor, sc, loc, type, args, context});
+		if(!r){
+			//sc.error("no matching constructor found", loc);
+			constructor.matchError(sc,loc,type,args);
+			mixin(ErrEplg);
+		}
+		if(!consCall){
+			consCall = New!CallExp(constructor, args);
+			consCall.fun = r;
+			consCall.loc = loc;
+		}
+		mixin(SemChld!q{consCall});
+		/+				assert(constructor.meaning.isFunctionDecl()&&
+		 constructor.meaning.isFunctionDecl().isConstructor());+/
+		mixin(SemChld!q{constructor});
+	}
+};
+
 
 mixin template Semantic(T) if(is(T==NewExp)){
 	Identifier constructor;
@@ -4368,46 +4533,7 @@ mixin template Semantic(T) if(is(T==NewExp)){
 				sc.error(format("cannot create instance of interface '%s'",iface.name), loc);
 				mixin(ErrEplg);
 			}
-			if(!constructor){
-				constructor = New!Identifier("this");
-				constructor.recursiveLookup = false;
-			}
-			mixin(Lookup!q{_; constructor, aggr.decl.asc});
-			if(auto nr=constructor.needRetry) { needRetry = nr; return; }
-			if(constructor.sstate == SemState.failed){
-				// no constructor for type
-				// TODO: struct default constructors
-				if(a2.length){
-					sc.error("too many arguments to new expression (expected zero)",loc);
-					mixin(ErrEplg);
-				}
-			}else{
-				assert(constructor.meaning.isOverloadSet()&&
-				       constructor.meaning.isOverloadSet().isConstructor());
-				// nested classes cannot be built like this
-				if(aggr.decl.isReferenceAggregateDecl())
-				if(auto decl = sc.getDeclaration()){
-					mixin(IsDeclAccessible!q{bool b; decl, constructor.meaning.scope_.getDeclaration()});
-					if(!b){
-						auto parent=aggr.decl.scope_.getDeclaration();
-						assert(parent.isReferenceAggregateDecl()&&aggr.decl.isClassDecl());
-						sc.error(format("need 'this' pointer of type '%s' to construct nested class '%s'",parent.name, aggr.decl.name), loc);
-						mixin(ErrEplg);
-					}
-				}
-				MatchContext context;
-				mixin(SemChld!q{constructor});
-				mixin(MatchCallHelper!q{auto r; constructor, sc, loc, type, a2, context});
-				// TODO: better errors
-				if(!r){
-					//sc.error("no matching constructor found", loc);
-					constructor.matchError(sc,loc,type,a2);
-					mixin(ErrEplg);
-				}
-				assert(constructor.meaning.isFunctionDecl()&&
-				       constructor.meaning.isFunctionDecl().isConstructor());
-				mixin(SemChld!q{constructor});
-			}
+			mixin(ResolveConstructor);
 		}else{
 			if(a2.length>1){
 				sc.error("too many arguments to new expression (expected at most one)",loc);
@@ -7057,15 +7183,32 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		return stc&(STCenum|STCstatic) || isField;
 	}
 
+	protected void defaultInit(){
+		// convention: init is null means that the type should be zeroed out
+		if(!init && type && type.sstate == SemState.completed){
+			// default initializers
+			if(auto aggr=type.getUnqual().isAggregateTy())
+			if(auto strd=aggr.decl.isStructDecl()){
+				init = New!StructConsExp(type,(Expression[]).init);
+				init.loc = loc;
+			}
+		}
+
+	}
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(rtype){
 			type=rtype.typeSemantic(sc);
 			mixin(PropRetry!q{rtype});
 		}
+
+		if(!init) defaultInit();
+
 		if(init){
 			if(init.sstate!=SemState.completed){
 				if(willInterpretInit()) init.prepareInterpret();
+				init.initOfVar(this);
 				mixin(SemChldExpPar!q{init});
 			}
 			// deduce type
@@ -7104,8 +7247,10 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 					mixin(SemChldPar!q{init});
 				}
 				// better error message for type mismatch:
-				mixin(ImplConvertsTo!q{bool iconv; init, type});
-				if(!iconv) mixin(ImplConvertTo!q{init, type});
+				if(!init.isVoidInitializerExp){
+					mixin(ImplConvertsTo!q{bool iconv; init, type});
+					if(!iconv) mixin(ImplConvertTo!q{init, type});
+				}
 				///
 			}
 			if(init) assert(et && et.length==len && init.sstate == SemState.completed);
@@ -7169,7 +7314,9 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			}
 			// order is significant: fully interpreted expressions might carry information
 			// that allows more implicit conversions
-			mixin(ImplConvertTo!q{init,type});
+			if(!init.isVoidInitializerExp()){
+				mixin(ImplConvertTo!q{init,type});
+			}
 			if(!willInterpretInit()) mixin(FinishDeductionProp!q{init});
 		}else if(stc&STCenum){
 			sc.error("manifest constants must have initializers",loc);
@@ -7206,6 +7353,8 @@ mixin template Semantic(T) if(is(T==Parameter)){
 	final bool mustBeTypeDeduced(){
 		return !type && !rtype && !init;
 	}
+
+	override void defaultInit(){} // parameters are not default-initialized
 
 protected:
 	override Parameter newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
@@ -7853,6 +8002,11 @@ mixin template Semantic(T) if(is(T==ClassDecl)){
 	}
 
 }
+mixin template Semantic(T) if(is(T==InterfaceDecl)){}
+mixin template Semantic(T) if(is(T==ValueAggregateDecl)){}
+mixin template Semantic(T) if(is(T==StructDecl)){}
+mixin template Semantic(T) if(is(T==UnionDecl)){}
+
 
 mixin template Semantic(T) if(is(T==AggregateDecl)){
 	/* overridden in ReferenceAggregateDecl */
@@ -7916,6 +8070,10 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 
 	void layoutChanged(){
 		layoutKnown = false;
+	}
+
+	bool isLayoutKnown(){
+		return layoutKnown;
 	}
 
 private:

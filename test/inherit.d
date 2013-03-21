@@ -1,5 +1,9 @@
+auto testLocalClass(){
+	class L{}
+	return new L;
+}
 
-auto testNestedStruct(){
+auto testLocalStruct(){
 	int a;
 	struct S{
 		int foo(){
@@ -8,17 +12,25 @@ auto testNestedStruct(){
 		enum x = 2;
 	}
 	static int foo(){
-		S s;
-		return s.foo(); // error
+		S s; // error
+		return s.foo();
 	}
-	S s;
+	S s; // ok
 	//import std.stdio;
 	//writeln(s.foo);
 	return s;
 }
 
-void nstmain(){
-	auto x=testNestedStruct().x;
+void lclmain(){
+	auto x=testLocalStruct();
+	x = *new typeof(x); // error
+
+	typeof(x) s = void; // ok
+
+	auto y=testLocalClass();
+	y = new typeof(y); // error
+	typeof(y) t; // ok
+
 	//import std.stdio;
 	//writeln(x.foo);
 }
@@ -32,7 +44,6 @@ void testDeflt(){
 }
 
 /+
-
 struct OvStatic{
 	static void foo(int x){}
 	int foo(int x){ return x+1; }
