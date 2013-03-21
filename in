@@ -1,0 +1,4 @@
+<ctwriter filename=`tmp/memoize/test(A...)!("1111111").memoize` mode=`clear`>
+`tuple("1111111")`
+</ctwriter>
+tuple("1111111")

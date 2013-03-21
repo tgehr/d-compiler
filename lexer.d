@@ -2,8 +2,9 @@ module lexer;
 import std.string, utf = std.utf, std.uni;
 import std.stdio, std.conv;
 import std.algorithm : startsWith;
-import std.array : appender;
 import std.traits : EnumMembers;
+
+import util;
 
 // enum TokenType;
 mixin("enum TokenType{"~TokenNames()~"}");
@@ -16,6 +17,9 @@ private immutable{
 string[2][] complexTokens =
 	[["i",     "Identifier"                ],
 	 ["``",    "StringLiteral"             ],
+	 ["``c",   "StringLiteralC"            ],
+	 ["``w",   "StringLiteralW"            ],
+	 ["``d",   "StringLiteralD"            ],
 	 ["''",    "CharacterLiteral"          ],
 	 ["0",     "Integer32Literal"          ],
 	 ["0U",    "Unsigned32Literal"         ],
@@ -23,7 +27,11 @@ string[2][] complexTokens =
 	 ["0LU",   "Unsigned64Literal"         ],
 	 [".0f",   "FloatLiteral"              ],
 	 [".0",    "DoubleLiteral"             ],
-	 [".0L",   "RealLiteral"               ]];
+	 [".0L",   "RealLiteral"               ],
+	 [".0fi",  "ImaginaryFloatLiteral"     ],
+	 [".0i",   "ImaginaryDoubleLiteral"    ],
+	 [".0Li",  "ImaginaryLiteral"          ]];
+ // TODO: imaginary literals
 string[2][] simpleTokens = 
 	[["/",     "Divide"                    ],
 	 ["/=",    "DivideAssign"              ],
@@ -150,25 +158,7 @@ struct Location{
 }
 
 string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
-string escape(string i,bool isc=false){
-	string r;
-	foreach(x;i){
-		switch(x){
-			case '"': if(isc) goto default; r~="\\\""; break;
-			case '\'': if(!isc) goto default; r~="\\'"; break;
-			case '\a': r~="\\a"; break;
-			case '\b': r~="\\b"; break;
-			case '\f': r~="\\f"; break;
-			case '\n': r~="\\n"; break;
-			case '\r': r~="\\r"; break;
-			case '\t': r~="\\t"; break;
-			case '\v': r~="\\v"; break;
-			case '\0': r~="\\0"; break;
-			default: r~=x; break;
-		}
-	}
-	return r;
-}
+
 struct Token{
 	TokenType type;
 	string toString() const{
@@ -177,6 +167,12 @@ struct Token{
 				return name;
 			case Tok!"``":
 				return '"'~escape(str)~'"';
+			case Tok!"``c":
+				return '"'~escape(str)~`"c`;
+			case Tok!"``w":
+				return '"'~escape(str)~`"w`;
+			case Tok!"``d":
+				return '"'~escape(str)~`"d`;
 			case Tok!"''":
 				return '\''~escape(to!string(cast(dchar)int64),false)~'\'';
 			case Tok!"0":
@@ -190,9 +186,15 @@ struct Token{
 			case Tok!".0":
 				return to!string(flt80);
 			case Tok!".0f":
-				return to!string(flt80);//~'f';
+				return to!string(flt80)~'f';
 			case Tok!".0L":
-				return to!string(flt80);//~'L';
+				return to!string(flt80)~'L';
+			case Tok!".0i":
+				return to!string(flt80)~'i';
+			case Tok!".0fi":
+				return to!string(flt80)~"fi";
+			case Tok!".0Li":
+				return to!string(flt80)~"Li";
 			case Tok!"Error":
 				return "error: "~str;
 			default:
@@ -201,8 +203,8 @@ struct Token{
 	}
 	union{
 		string str, name;  // string literals, identifiers
-		real flt80;        // float, double, real literals
 		ulong int64;       // integer literals
+		real flt80;        // float, double, real literals
 	}
 }
 template token(string t){enum token=Token(Tok!t);}
@@ -242,24 +244,26 @@ string caseSimpleToken(string prefix="", bool needs = false){
 	return r;
 }
 
-immutable(Token)[] lex(string code) {
+immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&&!code[$-1]);}body{ // four padding zero bytes required because of UTF
 	if(code.length > int.max) return [tokError("no support for sources exceeding 2GB")];
 	if(!code.length) return [];
-	if(code[$-1]!='\0') code ~= '\0'; //make sure we have an EOF token
-	auto lexed = appender!(immutable(Token)[])();
+	//if(code[$-1]!='\0') code ~= '\0'; //make sure we have an EOF token
+	//auto lexed = appender!(immutable(Token)[])();
+	auto lexed = mallocAppender!(immutable(Token)[])();
 	auto p=code.ptr;
 	auto s=p;
 	Token tok;
 	ulong value;
 	char del;
 	size_t len;
-	auto invCharSeq_l=p-2;
-	void invCharSeq(){if(p>invCharSeq_l+1) invCharSeq_l=p, lexed.put(tokError("invalid character sequence"));}
+	typeof(p) invCharSeq_l=null;
+	void invCharSeq(){if(p>invCharSeq_l+1) invCharSeq_l=p, lexed.put(tokError("invalid character sequence")); p++;}
+	int nl = 0; // count number of newlines to be able to give the unterminated string Error in the approp. place
 	// text macros:
-	enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq(); p++;}};
-	enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq(); p++;}}; // don't break, continue
-	enum caseNl = q{case '\r': p++; if(*p=='\n') p++; case '\n': p++; lexed.put(token!"\n"); continue;};
-	enum caseNl2 = q{case '\r': p++; if(*p=='\n') p++; case '\n': p++; nl++; continue;}; // just count newlines
+	enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}};
+	enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}}; // don't break, continue
+	enum caseNl = q{case '\r':  if(p[1]=='\n') p++; goto case; case '\n': p++; lexed.put(token!"\n"); continue;};
+	enum caseNl2 = q{case '\r': if(p[1]=='\n') p++; goto case; case '\n': p++; nl++; continue;}; // just count newlines
 	loop: for(;;) { // breaks on EOF
 		switch(*p++){
 			// whitespace
@@ -268,7 +272,7 @@ immutable(Token)[] lex(string code) {
 				break loop;
 			case ' ', '\t', '\v':
 				continue;   // ignore whitespace
-			case '\r': if(*p=='\n') p++;
+			case '\r': if(*p=='\n') p++; goto case;
 			case '\n':
 				tok=token!"\n"; // needed for line information in the parser
 				break;
@@ -282,7 +286,7 @@ immutable(Token)[] lex(string code) {
 					case '=': tok = token!"/="; p++;
 					break;
 					case '/': p++;
-						while(*p&&*p!='\r'&&*p!='\n') mixin(skipUnicodeCont);
+						while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
 						continue; // ignore comment
 					case '*':
 						p++;
@@ -295,7 +299,7 @@ immutable(Token)[] lex(string code) {
 							}
 						}
 						continue; // ignore comment
-					case '+':{
+					case '+':
 						int d=1; p++;
 						consumecom3: while(d){
 							switch(*p){
@@ -307,7 +311,6 @@ immutable(Token)[] lex(string code) {
 							}
 						}
 						continue; // ignore comment
-					}
 					default: tok = token!"/";
 				}
 				break;
@@ -328,11 +331,19 @@ immutable(Token)[] lex(string code) {
 			// character literals
 			case '\'':
 				tok.type = Tok!"''";
-				if(*p=='\\') p++, tok.int64 = readEscapeSeq(p);
-				else tok.int64 = *p++;
+				if(*p=='\\'){
+					try p++, tok.int64 = cast(ulong)readEscapeSeq(p);
+					catch(EscapeSeqException e) e.msg?lexed.put(tokError(e.msg)):invCharSeq();
+				}else{
+					try{
+						len=0;
+						tok.int64 = utf.decode(p[0..4],len);
+						p+=len;
+					}catch{invCharSeq();}
+				}
 				if(*p!='\''){
-					while((*p!='\''||(p++,0)) && *p!=0 && *p!=0x1A) mixin(skipUnicodeCont);
-					lexed.put(tokError("unterminated character constant."));
+					//while((*p!='\''||(p++,0)) && *p && *p!=0x1A) mixin(skipUnicodeCont);
+					lexed.put(tokError("unterminated character constant"));
 				}else p++;
 				break;
 			// string literals
@@ -341,36 +352,34 @@ immutable(Token)[] lex(string code) {
 				if(*p!='"') goto case 'R';
 				p++; del='"';
 				goto skipdel;
-			case '`':{
+			case '`':
 				del = '`'; skipdel:
-				int nl = 0; // count number of newlines to be able to give the unterminated Error in the approp. place
+				nl = 0;
 				s = p;
 				readwysiwyg: for(;;){
 					if(*p==del){p++; break;} 
 					switch(*p){
 						mixin(caseNl2); // handle newlines
 						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal."));
+							lexed.put(tokError("unterminated string literal"));
 							break readwysiwyg;
 						default: mixin(skipUnicode);
 					}
 				}
 				tok.type = Tok!"``";
 				tok.str = s[0..p-s-1]; // reference to code
-				lexed.put(tok);
-				foreach(i;0..nl) lexed.put(token!"\n");
-				continue;
-			}
+				goto lexstringsuffix;
 			// token string
 			case 'q':
+				if(*p=='"') goto delimitedstring;
 				if(*p!='{') goto case 'Q';
-				int nl = 0;
+				nl = 0;
 				p++; s = p;
 				readtstring: for(int nest=1;;){
 					switch(*p){
 						mixin(caseNl2);
 						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal."));
+							lexed.put(tokError("unterminated string literal"));
 							break readtstring;
 						case '{': p++; nest++; break;
 						case '}': p++; nest--; if(!nest) break readtstring; break;
@@ -379,24 +388,174 @@ immutable(Token)[] lex(string code) {
 				}
 				tok.type = Tok!"``";
 				tok.str = s[0..p-s-1]; // reference to code
-				lexed.put(tok);
-				foreach(i;0..nl) lexed.put(token!"\n");
-				continue;
+				goto lexstringsuffix;
+				delimitedstring:
+				tok.type = Tok!"``";
+				nl=0;
+				s=++p;
+				switch(*p){
+					case 'a': .. case 'z':
+					case 'A': .. case 'Z':
+						for(;;){
+							switch(*p){
+								case '\r': if(p[1]=='\n') p++; goto case;
+								case '\n': nl++; break;
+								case 0, 0x1A: break;
+								case 'a': .. case 'z':
+								case 'A': .. case 'Z':
+								case '0': .. case '9':
+									p++;
+									continue;
+								case 0x80: .. case 0xFF:
+									len=0;
+									try{auto ch=utf.decode(p[0..4],len);
+										if(isUniAlpha(ch)){p+=len; continue;}
+										break;
+									}catch{invCharSeq(); break;}
+								default: break;
+							}
+							break;
+						}
+						if(*p!='\n' && *p!='\r') lexed.put(tokError("heredoc identifier must be followed by a new line"));
+						while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont); // mere error handling
+						auto ident=s[0..p-s];
+						if(*p=='\r'){nl++; if(*++p=='\n') p++;}
+						else if(*p=='\n') nl++, p++;
+						s=p;
+						readheredoc: while((*p!=0) & (*p!=0x1A)){ // always at start of new line here
+							for(auto ip=ident.ptr, end=ident.ptr+ident.length;;){
+								if(ip==end) break readheredoc;
+								switch(*p){
+									mixin(caseNl2);
+									case 0x80: .. case 0xFF:
+										len=0;
+										try{auto ch=utf.decode(p[0..4],len);
+											if(isUniAlpha(ch)){
+												if(p[0..len]!=ip[0..len]) break;
+												p+=len; ip+=len; continue;
+											}
+											break;
+										}catch{invCharSeq(); break;}
+									default: 
+										if(*p!=*ip) break;
+										p++; ip++; continue;
+								}
+								break;
+							}
+							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
+							if(*p=='\r'){nl++; if(*++p=='\n') p++;}
+							else if(*p=='\n') nl++, p++;
+						}
+						tok.str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
+						if(*p!='"'){lexed.put(tokError("unterminated heredoc string literal")); break;}
+						else p++;
+						break;
+					default:
+						del=*p; char rdel=del; dchar ddel=0;
+						switch(del){
+							case '[': rdel=']'; s=++p; break;
+							case '(': rdel=')'; s=++p; break;
+							case '<': rdel='>'; s=++p; break;
+							case '{': rdel='}'; s=++p; break;
+							case ' ','\t','\v','\r','\n':
+								lexed.put(tokError("string delimiter cannot be whitespace"));
+							case 0x80: case 0xFF:
+								s=p;
+								len=0;
+								try{
+									ddel=utf.decode(p[0..4],len);
+									s=p+=len;
+								}catch{invCharSeq();}
+							default: break;
+						}
+						if(ddel){
+							while((*p!=0) & (*p!=0x1A)){
+								if(*p=='\r'){nl++; if(*++p=='\n') p++;}
+								else if(*p=='\n') nl++, p++;
+								else if(*p<0x80){p++; continue;}
+								try{
+									auto x=utf.decode(p[0..4],len);
+									if(ddel==x){
+										tok.str = s[0..p-s]; // reference to code
+										p+=len; break;
+									}
+									p+=len;
+								}catch{invCharSeq();}								
+							}
+						}else{
+							for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);p++){
+								if(*p=='\r'){nl++; if(*++p=='\n') p++;}
+								else if(*p=='\n') nl++, p++;
+								else if(*p==rdel) nest--;
+								else if(*p==del) nest++;
+								else if(*p & 0x80){
+									try{
+										utf.decode(p[0..4],len);
+										p+=len-1;
+									}catch{invCharSeq();}
+								}
+							}
+							tok.str = s[0..p-s-1]; // reference to code
+						}
+						if(*p!='"') lexed.put(tokError("expected '\"' to close delimited string literal"));
+						else p++;
+						break;
+				}
+				goto lexstringsuffix;
+			// Hex string
+			case 'x':
+				if(*p!='"') goto case 'X';
+				nl=0;
+				auto r=mallocAppender!string(); p++;
+				readhexstring: for(int c=0,ch,d;;p++,c++){
+					switch(*p){ // TODO: display correct error locations
+						mixin(caseNl2); // handle newlines
+						case 0, 0x1A:
+							lexed.put(tokError("unterminated hex string literal"));
+							break readhexstring;
+						case '0': .. case '9': d=*p-'0'; goto handlexchar;
+						case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
+						case 'A': .. case 'F': d=*p-('A'-0xA); goto handlexchar;
+						handlexchar:
+							if(c&1) r.put(ch|d);
+							else ch=d<<4; break;
+						case '"': // TODO: improve error message
+							if(c&1) lexed.put(tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":"")));
+							p++; break readhexstring;
+						default:
+							if(*p<128) lexed.put(tokError(format("found '%s' when expecting hex digit",*p)));
+							else{
+								s=p;
+								len=0;
+								try{
+									utf.decode(p[0..4],len);
+									p+=len-1;
+								}catch{invCharSeq();}
+								lexed.put(tokError(format("found '%s' when expecting hex digit",s[0..len])));
+							}
+							break;
+					}
+				}
+				tok.type = Tok!"``";
+				tok.str = r.data;
+				goto lexstringsuffix;
 			// DQString
-			case '"':{
-				auto r=appender!string("");
-				int nl = 0; // count number of newlines to be able to give the unterminated Error in the approp. place
+			case '"':
+				auto r=mallocAppender!string();
+				nl=0;
 				auto start = p;
 				readdqstring: for(;;){
 					s = p;
 					switch(*p){
-						mixin(caseNl2); // handle newlines
+						case '\r': if(p[1]=='\n') p++; goto case;  // handle newlines
+						case '\n': p++; nl++; break;
 						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal."));
+							lexed.put(tokError("unterminated string literal"));
 							break readdqstring;
 						case '\\':
 							p++;
-							r.put(readEscapeSeq(p));
+							try r.put(readEscapeSeq(p));
+							catch(EscapeSeqException e) e.msg?lexed.put(tokError(e.msg)):invCharSeq(); // TODO: always error out at the correct location
 							continue;
 						case '"': p++; break readdqstring;
 						default: mixin(skipUnicode);
@@ -405,14 +564,17 @@ immutable(Token)[] lex(string code) {
 				}
 				tok.type = Tok!"``";
 				tok.str = r.data;
+				goto lexstringsuffix;
+				lexstringsuffix:
+				if(*p=='c')      tok.type = Tok!"``c", p++;
+				else if(*p=='w') tok.type = Tok!"``w", p++;
+				else if(*p=='d') tok.type = Tok!"``d", p++;
 				lexed.put(tok);
 				foreach(i;0..nl) lexed.put(token!"\n");
 				continue;
-			}
-			continue;
 			// identifiers and keywords
 			case '_':
-			case 'a': .. case 'p': /*q, r*/ case 's': .. case 'z':
+			case 'a': .. case 'p': /*q, r*/ case 's': .. case 'w': /*x*/ case 'y', 'z':
 			case 'A': .. case 'Z':
 				s = p-1;
 				identifier:
@@ -443,16 +605,19 @@ immutable(Token)[] lex(string code) {
 				break;
 			case 0x80: .. case 0xFF:
 				len=0; p--;
-				try if(isUniUpper(utf.decode(p[0..4],len))){
+				try{auto ch=utf.decode(p[0..4],len);
 					s=p, p+=len;
-					goto identifier;
-				}catch{p++;} goto default;
+					if(isUniAlpha(ch)) goto identifier;
+					lexed.put(tokError(format("unsupported character '%s'",ch)));
+					continue;
+				}catch{} goto default; // moved outside handler to make -w shut up
 			default:
 				invCharSeq();
 				continue;
 		}
 		lexed.put(tok);
 	}
+	lexed.put(tok); // for EOF
 	return lexed.data;
 }
 /* Lex a number FSM. TDPL p33/35
@@ -472,6 +637,7 @@ private Token lexNumber(ref immutable(char)* _p) {
 	Token tok;
 	bool leadingzero = 0;
 	bool isfloat = 0;// true if floating point literal
+	bool isimag = 0; // true if imaginary floating point literal. as in DMD, this only works for decimals
 	bool toobig  = 0;// true if value exceeds ulong.max
 	ulong val = 0;   // current literal value
 	real rval = 0.0L;// real value
@@ -506,8 +672,8 @@ private Token lexNumber(ref immutable(char)* _p) {
 								val = val << 4 | *p-('A'-0xA); dig++;
 								break;
 							case '.':
-								if(p[1] != '.' && dot == -1) dot = dig, isfloat=1; // break; }
-								else break readhex;
+								if(p[1] != '.' && dot == -1) dot = dig, isfloat=1;
+								else break readhex; goto case;
 							case '_': // ignore embedded _
 								break; 
 							default:
@@ -527,16 +693,16 @@ private Token lexNumber(ref immutable(char)* _p) {
 								break;
 							case '.':
 								if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
-								else break consumehex;
+								else break consumehex; goto case;
 							case '_': // ignore embedded _
 								break;
-							case 'p', 'P':{
+							case 'p', 'P':
 								isfloat = 1;
 								p++;
 								neg = 0;
 								switch(*p){
-									case '-': neg = 1;
-									case '+': p++;
+									case '-': neg = 1; goto case;
+									case '+': p++;     goto default;
 									default:  break; 
 								}
 								if('0'> *p || *p > '9') goto Lexp;
@@ -552,7 +718,7 @@ private Token lexNumber(ref immutable(char)* _p) {
 									}
 									if(exp > helim){p++;break readhexp;}
 								}
-							}
+								goto default;
 							default:
 								break consumehex;	
 						}
@@ -581,7 +747,7 @@ private Token lexNumber(ref immutable(char)* _p) {
 						switch(*p){
 							case '0', '1':
 								val <<= 1; dig++;
-								val |= *p-'0';
+								val |= *p-'0'; goto case;
 							case '_': // ignore embedded _
 								break;
 							default:
@@ -597,11 +763,11 @@ private Token lexNumber(ref immutable(char)* _p) {
 			}
 			while(*p == '0') p++; // eat leading zeros of decimal
 			if(('1' > *p || *p > '9') && *p != '.'){
-				isfloat |= *p == 'f' || *p == 'F';
+				isfloat |= *p == 'f' || *p == 'F' || (*p=='i'||*p=='L'&&p[1]=='i');
 				leadingzero=0; break;
 			}
 			goto case;
-		case '1': .. case '9':{
+		case '1': .. case '9':
 			readdec: for(;;p++){
 				switch(*p){
 					case '0': .. case '9':
@@ -609,7 +775,7 @@ private Token lexNumber(ref immutable(char)* _p) {
 						break;
 					case '.':
 						if(p[1] != '.' && dot == -1) dot = dig, isfloat=1; // break; }
-						else break readdec;
+						else break readdec; goto case;
 					case '_': // ignore embedded _
 						break;
 					default:
@@ -632,16 +798,16 @@ private Token lexNumber(ref immutable(char)* _p) {
 						break;
 					case '.':
 						if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
-						else break consumedec;
+						else break consumedec; goto case;
 					case '_': // ignore embedded _
 						break;
-					case 'e', 'E':{
+					case 'e', 'E':
 						isfloat = 1;
 						p++;
 						neg = 0;
 						switch(*p){
-							case '-': neg = 1;
-							case '+': p++;
+							case '-': neg = 1; goto case;
+							case '+': p++;     goto default;
 							default:  break; 
 						}
 						if('0'> *p || *p > '9') goto Lexp;
@@ -657,19 +823,19 @@ private Token lexNumber(ref immutable(char)* _p) {
 							}
 							if(exp > elim){p++;break readexp;}
 						}
-					}
+					goto default;
 					default:
 						break consumedec;
 				}
 			}
-			isfloat |= *p == 'f' || *p == 'F';
+			isfloat |= *p == 'f' || *p == 'F' || *p == 'i';
 			if(isfloat){ // compute value of floating point literal (not perfectly accurate)
 				if(dot==-1) dot = dig;
 				if(neg) exp += cast(long) dig - dot - adjexp;
 				else    exp -= cast(long) dig - dot - adjexp;
 				if(exp<0) neg = !neg, exp=-exp;
 				if('0' <= *p && *p <= '9' || exp>=32768 || !val){
-					p++, rval = neg || !val ? .0L : real.infinity;
+					rval = neg || !val ? .0L : real.infinity;
 					while('0' <= *p && *p <= '9') p++; // BUGS: Ignores 'overlong' input.
 				}else{
 					//Move some digits from val to val2 for more precise rounding behavior
@@ -679,15 +845,16 @@ private Token lexNumber(ref immutable(char)* _p) {
 					else for(int i=0,j=1<<15;i<16;i++,j>>=1) if(exp&j) rval*=pw10[i];
 				}
 			}
-		}
-		default: 
+			goto default;
+		default:
 			break;
 	}
 	if(isfloat){
 		tok.flt80 = rval;
 		if(*p == 'f' || *p == 'F') p++, tok.type = Tok!".0f";
-		if(*p == 'L') p++, tok.type = Tok!".0L";
+		else if(*p == 'L') p++, tok.type = Tok!".0L";
 		else tok.type = Tok!".0"; // TODO: Complain if not representable
+		if(*p == 'i') p++, tok.type += 3; static assert(Tok!".0f"+3==Tok!".0fi" && Tok!".0"+3==Tok!".0i" && Tok!".0L"+3==Tok!".0Li");
 		return _p = p, tok;
 	}
 	// parse suffixes:
@@ -724,17 +891,25 @@ private Token lexNumber(ref immutable(char)* _p) {
 			tok.type = Tok!"0LU";
 	}
 	if(tok.type == Tok!"0L"){
-		if(toobig || val > long.max) tok = tokError("signed integer constant exceeds long.max");
+		if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max");
+		else if(val > long.max && base == HEX) tok.type = Tok!"0LU"; // EXTENSION: Just here to match what DMD does
 	}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max");
 	if(leadingzero && val > 7) tok = tokError("octal literals are deprecated");
 	return _p=p, tok;
 	Lexp: return _p=p, tokError("exponent expected");
 }
 
+// Exception thrown on unrecognized escape sequences
+class EscapeSeqException: Exception{this(string msg){super(msg);}}
+
+/* Reads an escape sequence and increases the given pointer to point past the sequence
+	returns a dchar representing the read escape sequence or
+	throws EscapeSeqException if the input is not well formed
+ */
 private dchar readEscapeSeq(ref immutable(char)* _p) {
 	auto p=_p;
 	switch(*p){
-		case '\'','"','\\':
+		case '\'','\?','"','\\':
 		return _p=p+1, *p;
 		case 'a': return _p=p+1, '\a';
 		case 'b': return _p=p+1, '\b';
@@ -743,12 +918,68 @@ private dchar readEscapeSeq(ref immutable(char)* _p) {
 		case 'r': return _p=p+1, '\r';
 		case 't': return _p=p+1, '\t';
 		case 'v': return _p=p+1, '\v';
-		case '0': return _p=p+1, '\0'; // TODO: fix
-		default: assert(0,"TODO: implement escape sequence: "~*p);
+		case '0': .. case '7': // ENHANCEMENT: Actually works for all ASCII characters
+			auto s=p;
+			for(int r=*p++-'0', i=0;;i++, r=(r<<3)+*p++-'0')
+				if(i>2||'0'>*p||*p>'7'){
+					_p=p; if(r>255) throw new EscapeSeqException("escape sequence '\\"~s[0..p-s]~"' exceeds ubyte.max");
+					return cast(dchar)r;
+				}
+		case 'x', 'u', 'U':
+			auto s=p;
+			int numh=*p=='x'?p++,2:*p++=='u'?4:8;
+			int r;
+			foreach(i,x;p[0..numh]){
+				switch(x){
+					case '0': .. case '9': r=r<<4 | x-'0'; break;
+					case 'a': .. case 'f': r=r<<4 | x-('a'-0xa); break;
+					case 'A': .. case 'F': r=r<<4 | x-('A'-0xA); break;
+					default:
+						_p=p;
+						throw new EscapeSeqException(format("escape hex sequence has %s digit%s instead of %s",
+						                                    toEngNum(cast(uint)i),(i!=1?"s":""),toEngNum(numh)));
+				}
+				p++;
+			}
+			_p=p;
+			if(!utf.isValidDchar(cast(dchar)r)) throw new EscapeSeqException(format("invalid UTF character '\\%s'",s[0..p-s]));
+			return cast(dchar)r;
+		case '&':
+			auto s=++p;
+			while('A'<=*p && *p <='Z' || 'a'<=*p && *p <='z') p++;
+			if(*p!=';') throw new EscapeSeqException("unterminated named character entity");
+			_p=p+1;
+			switch(s[0..p-s]){
+				mixin({
+					string r;
+					struct E{string k; uint v;}
+					E[] entities=mixin(import("namedcharentities")); // no AAs in CTFE =@
+					foreach(x;entities) r~=`case "`~x.k~`": return cast(dchar)`~to!string(x.v)~`;`;
+					return r;
+				}());
+				default: throw new EscapeSeqException(format("unrecognized named character entity '\\&%s;'",s[0..p-s]));
+			}
+		default:
+			if(*p<128){_p=p+1; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",*p));}
+			else{
+				auto s=p;
+				size_t len=0;
+				try{
+					utf.decode(p[0..4],len);
+					p+=len;
+				}catch{throw new EscapeSeqException(null);}
+				_p=p; throw new EscapeSeqException(format("unrecognized escape sequence '\\%s'",s[0..len]));
+			}
 	}
 }
 
-private 
+string readDelimitedString(ref immutable(char)* _p, ref MallocAppender!string lexed)in{assert(*_p=='"');}body{
+	auto p=_p+1;
+
+	return "";
+}
+
+
 
 
 unittest{
