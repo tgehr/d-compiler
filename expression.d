@@ -64,11 +64,14 @@ class ErrorExp: Expression{
 }
 
 class StubExp: Expression{
-	this(Type type)in{assert(type && type.sstate==SemState.completed, to!string(type)~(type?" "~to!string(type.sstate):""));}body{
+	private bool _isLvalue;
+	this(Type type, bool isLvalue=false)in{assert(type && type.sstate==SemState.completed, to!string(type)~(type?" "~to!string(type.sstate):""));}body{
 		sstate = SemState.completed;
 		this.type = type;
+		this._isLvalue = isLvalue;
 	}
 	override void semantic(Scope sc){mixin(SemPrlg);mixin(SemEplg);}
+	override bool isLvalue(){ return _isLvalue; }
 }
 
 class LiteralExp: Expression{

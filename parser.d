@@ -1406,7 +1406,7 @@ private struct Parser{
 		int type;
 		Identifier name;
 		TemplateParameter[] params; Expression constraint; bool isTemplate=false;
-		auto parents=appender!(ParentListEntry[])();
+		auto parents=appender!(Expression[])();
 		if(!anonclass){
 			switch(ttype){
 				case Tok!"struct": type=Struct; break;
@@ -1422,16 +1422,19 @@ private struct Parser{
 		if(type>=Class && (!anonclass&&ttype==Tok!":")||(anonclass&&ttype!=Tok!"{")){
 			if(!anonclass) nextToken();
 		readparents: for(;;){
-				auto s=STC.init, nonefound=false;
+				// auto s=STC.init;
 				switch(ttype){
-					mixin({string r; foreach(x;protectionAttributes) r~=`case Tok!"`~x~`": s=STC`~x~`; nextToken(); goto case Tok!"i";`;return r;}());
-					case Tok!".", Tok!"i": parents.put(ParentListEntry(s,parseIdentifierList())); break;
+					// mixin({string r; foreach(x;protectionAttributes) r~=`case Tok!"`~x~`": s=STC`~x~`; nextToken(); goto case Tok!"i";`;return r;}());
+					case Tok!".", Tok!"i": parents.put(parseIdentifierList()); break;
 					default: break readparents;
 				}
 				if(ttype==Tok!",") nextToken();
 				else break;
 			}
-			if(!parents.length) expectErr!"base class or interface"();
+			if(!parents.length){
+				if(type == Class) expectErr!"base class or interface"();
+				else expectErr!"base interfaces"();
+			}
 		}
 		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : (nextToken(),null);
 		auto r=

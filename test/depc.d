@@ -1,9 +1,22 @@
+interface I{ }
 
+class C: D{ }
+
+class D: C{ }
+
+
+/+
 immutable int u = v;
 immutable int v = u;
 
 const int cu = cv;
 const int cv = cu;
+
+int duh(typeof(guh) duh){}
+typeof(duh)* duh(typeof(duh)* duh){return 1;}
+int duh(typeof(guh)){return 1;}
+int guh(typeof(duh)){return 2;}
+
 
 int circdep1(){enum x = circdep2(); return x;}
 int circdep2(){enum y = circdep1(); return y;}
@@ -55,4 +68,12 @@ struct Str{
 	immutable int x=y;
 	immutable int y=TT!();
 }
+
+// +/
+
+
+
+
+
+
 

@@ -1,5 +1,4 @@
 alias immutable(char)[] string;
-
 auto testtemplatefunclit(fun...)(){
 	static if(!fun.length) return "";
 	else{
@@ -15,9 +14,16 @@ struct FunContainer{
 }
 pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
 pragma(msg, "testtemplatefunclit 2: ",testtemplatefunclit!((int x,double y,string z)=>()=>z~"hi2")());
-//immutable u = "123";
+immutable u = "123";
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~" hi3")());
-pragma(msg, "testtemplatefunclit 4: ",testtemplatefunclit!((int x,y,z)=>()=>toString(cast(int)y)~z~" hi4")());
+pragma(msg, "testtemplatefunclit 4: ",testtemplatefunclit!((int x,y,z)=>()=>toString(cast(int)y)~z~"hi4")());
+
+
+template Deflt(T,S=int,R:float=int){
+	enum Deflt = "success";
+}
+pragma(msg, "Deflt: ",Deflt!int);
+
 
 template CircCirc(a...){
 	template F(A){}
@@ -420,7 +426,7 @@ static assert(!is(typeof(ttt!"-")));
 template tt2(long a : 2){enum tt2=a;}
 pragma(msg, tt2!(2));
 static assert(!is(typeof(tt2!(1))));
-+/
+
 
 
 

@@ -160,12 +160,7 @@ mixin template Interpret(T) if(is(T==Type)){
 mixin template Interpret(T) if(is(T==Symbol)){
 	override bool checkInterpret(Scope sc){
 		if(meaning.sstate == SemState.error) return false;
-		if(auto vd = meaning.isVarDecl()){
-			if(vd.stc&STCenum
-			|| vd.stc&(STCimmutable|STCconst)
-			&& vd.init && vd.init.isConstant())
-				return true;
-		}
+		if(isConstant()) return true;
 		return super.checkInterpret(sc);
 	}
 
@@ -3188,6 +3183,12 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		//if(t1.isPointerTy() && t2.isPointerTy()) return;
 		bld.error(format("cannot interpret cast from '%s' to '%s' at compile time", e.type,type),loc);
 	}
+	
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert(e.type.refConvertsTo(type,1)   // ref params
+		       ||type.refConvertsTo(type,1)); // out params
+		return e.byteCompileLV(bld);
+	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==Symbol)){
@@ -3491,6 +3492,11 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 			void perform(AssignExp self){
 				runAnalysis!MarkHeapContext(self.e1);
+			}
+
+			// can happen eg for ref arguments
+			void perform(CastExp self){
+				runAnalysis!MarkHeapContext(self.e);
 			}
 		}
 		// TODO: this is quite conservative for ease of implementation

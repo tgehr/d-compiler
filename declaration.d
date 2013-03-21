@@ -250,9 +250,13 @@ abstract class ValueAggregateDecl: AggregateDecl{
 	this(STC stc, Identifier name, BlockDecl b){super(stc,name,b);}
 	mixin DownCastMethod;
 }
+
 abstract class ReferenceAggregateDecl: AggregateDecl{
+	Expression[] parents;
 	this(STC stc, Identifier name, BlockDecl b){super(stc,name,b);}
+
 	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 class StructDecl: ValueAggregateDecl{
@@ -269,14 +273,8 @@ class UnionDecl: ValueAggregateDecl{
 	override @property string kind(){ return "union"; }
 	mixin DownCastMethod;
 }
-struct ParentListEntry{
-	STC protection;
-	Expression symbol;
-	string toString(){return (protection?STCtoString(protection)~" ":"")~symbol.toString();}
-}
 class ClassDecl: ReferenceAggregateDecl{
-	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"class"~(name?" "~name.toString():"")~
 			(parents.length?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
 
@@ -286,8 +284,7 @@ class ClassDecl: ReferenceAggregateDecl{
 
 }
 class InterfaceDecl: ReferenceAggregateDecl{
-	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"interface"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
 

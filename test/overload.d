@@ -1,3 +1,6 @@
+
+
+
 template iftioverload(T){
 	T iftioverload(T a, float b){return a;}
 	int iftioverload(int a, double b){return a;}
@@ -38,6 +41,13 @@ static assert(!{int x;return testRefOv(x,1);}());
 static assert({int x;return testRefOv(x,1.0);}());
 static assert(!is(typeof({return testRefOv(1,1.0);})));
 
+bool testRefOv2(const ref int){ return true; }
+bool testRefOv2(ref immutable(int)){ return false; }
+
+static assert(is(typeof({immutable int x; return testRefOv2(x);})));
+static assert(!{immutable int x; return testRefOv2(x);}());
+
+
 
 int foo(typeof(foo(2,3)) x){return x;}
 int foo(int,int){return 2;}
@@ -67,11 +77,6 @@ void baz(immutable(int) x, double y){}
 //int lol(int){return 1;}
 
 //int bar(typeof(lol)*x){pragma(msg,typeof(x));return 2;}
-
-int duh(typeof(guh) duh){}
-//typeof(duh)* duh(typeof(duh)* duh){return 1;}
-int duh(typeof(guh)){return 1;}
-//int guh(typeof(duh)){return 2;}
 
 //auto a(){return a(1);}
 //auto a(int){return a();}
