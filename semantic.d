@@ -683,9 +683,9 @@ mixin template Semantic(T) if(is(T==Expression)){
 	}body{
 		assert(0, "unsupported operation");
 	}
-/+	size_t templateParameterToHash(){
+	size_t templateParameterToHash(){
 		assert(0, "unsupported operation");
-	}+/
+	}
 }
 
 
@@ -754,10 +754,11 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 		return interpretV()==rhs.interpretV();
 	}
 
-/+	override size_t templateParameterToHash(){
+	override size_t templateParameterToHash(){
 		assert(!!type,text("no type! ",this));
-		return type.toHash()^value.toHash();
-	}+/
+		import hashtable;
+		return FNV(type.toHash(), value.toHash());
+	}
 }
 
 mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
@@ -828,9 +829,10 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		return interpretV()==rhs.interpretV();
 	}
 
-/+	override size_t templateParameterToHash(){
-		return typeid(TemplExpWrapper[]).getHash(&lit);
-	}+/
+	override size_t templateParameterToHash(){
+		import hashtable;
+		return FNVred(lit);
+	}
 }
 
 mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
@@ -1332,16 +1334,17 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return r;
 	}
 
-	bool templateParameterEquals(Expression rhs){
+	override bool templateParameterEquals(Expression rhs){
 		if(this is rhs) return true;
 		if(auto ae=rhs.isAddressExp())
 		   return e.templateParameterEquals(ae.e);
 		return false;
 	}
 
-/+	size_t templateParameterToHash(){
-		return e.templateParameterToHash();
-	}+/
+	override size_t templateParameterToHash(){
+		import hashtable;
+		return FNV(e.templateParameterToHash());
+	}
 
 	}
 
@@ -2033,7 +2036,7 @@ class ExprTuple: Expression, Tuple{
 	}
 
 
-	Tuple isTuple(){return this;}
+	override Tuple isTuple(){return this;}
 
 	void accessCheckSymbols(){
 		foreach(r; exprs){
@@ -2123,9 +2126,10 @@ class ExprTuple: Expression, Tuple{
 		}
 		return false;
 	}
-/+	override size_t templateParameterToHash(){
-		return typeid(TemplExpWrapper[]).getHash(&exprs);
-	}+/
+	override size_t templateParameterToHash(){
+		import hashtable;
+		return FNVred(exprs);
+	}
 
 private:
 	Expression[] exprs;
@@ -2145,7 +2149,7 @@ class TypeTuple: Type, Tuple{
 		assert(0);
 	}
 
-	Tuple isTuple(){return this;}
+	override Tuple isTuple(){return this;}
 	Expression index(Scope sc,const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
@@ -2190,9 +2194,10 @@ class TypeTuple: Type, Tuple{
 		return false;
 	}
 
-/+	override size_t templateParameterToHash(){
-		return typeid(TemplExpWrapper[]).getHash(&types);
-	}+/
+	override size_t templateParameterToHash(){
+		import hashtable;
+		return FNVred(types);
+	}
 
 private:
 	Type[] types;
@@ -2403,7 +2408,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 private:
 	struct TemplateInstanceStore{
-		TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
+/+		TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
 		
 		/+
 		static double count = 0;
@@ -2432,9 +2437,21 @@ private:
 						return;
 
 			instances~=decl;
-		}
+		}+/
 
-		/+private TemplateInstanceDecl[immutable(TemplExpWrapper)[]] instances;
+		import hashtable;
+		static bool eq(Expression[] a,Expression[] b){
+			if(a.length!=b.length) return false;
+			foreach(i;0..a.length) if(!a[i].templateParameterEquals(b[i])) return false;
+			return true;
+		} // equality check
+		static size_t h0(Expression[] a){ return FNVred(a); }      // hash 1
+		static size_t h1(Expression[] b){ return ~FNVred(b); }     // hash 2
+
+		//private alias Seq!(eq,h0,h1) args;
+		//private CuckooMap!(Expression[],TemplateInstanceDecl, args) instances;
+		private HashMap!(Expression[],TemplateInstanceDecl, eq, h0) instances;
+
 
 		void add(TemplateInstanceDecl decl)in{
 			assert(decl.completedParameterResolution);
@@ -2444,12 +2461,12 @@ private:
 					if(ty.hasPseudoTypes())
 						return;
 			
-			instances[cast(immutable(TemplExpWrapper)[])decl.resolved] = decl;
+			instances[decl.resolved] = decl;
 		}
 
 		TemplateInstanceDecl lookup(Expression[] args){
-			return instances.get(cast(immutable(TemplExpWrapper)[])args,null);
-		}+/
+			return instances.get(args,null);
+		}
 	}
 	
 	TemplateInstanceStore store;
@@ -3162,10 +3179,10 @@ template Semantic(T) if(is(T==TernaryExp)){
 		mixin(SemEplg);
 	}
 
-	bool isConstant(){
+	override bool isConstant(){
 		return e1.isConstant() && e2.isConstant() && e3.isConstant();
 	}
-	bool isConstFoldable(){
+	override bool isConstFoldable(){
 		return e1.isConstFoldable() && e2.isConstFoldable() && e3.isConstFoldable();
 	}
 
@@ -3664,9 +3681,10 @@ class Symbol: Expression{ // semantic node
 		return false;
 	}
 	
-/+	override size_t templateParameterToHash(){
-		return meaning.toHash();
-	}+/
+	override size_t templateParameterToHash(){
+		import hashtable;
+		return FNV(meaning.toHash());
+	}
 }
 
 import visitors;
@@ -3934,7 +3952,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		     :     IntRange(0,1,true);
 	}
 
-	IntRange getIntRange(){
+	override IntRange getIntRange(){
 		auto ty = e.type.getHeadUnqual().isIntegral();
 		auto nt = type.getHeadUnqual().isIntegral();
 		if(!ty||!nt) return type.getIntRange();
@@ -3958,7 +3976,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 			return r;
 		}
 	}
-	LongRange getLongRange(){
+	override LongRange getLongRange(){
 		auto ty = e.type.getHeadUnqual().isIntegral();
 		auto nt = type.getHeadUnqual().isIntegral();
 		if(!ty||!nt) return type.getLongRange();
@@ -4553,7 +4571,7 @@ mixin template Semantic(T) if(is(T==Type)){
 	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
 		return null;
 	}
-	void matchError(Scope sc, Location loc, Expression[] args){
+	override void matchError(Scope sc, Location loc, Expression[] args){
 		sc.error(format("%s '%s' is not callable",kind,toString()),loc);
 	}
 
@@ -4754,9 +4772,9 @@ mixin template Semantic(T) if(is(T==Type)){
 		if(auto type = cast(Type)rhs) return equals(type);
 		return false;
 	}
-/+	override size_t templateParameterToHash(){
+	override size_t templateParameterToHash(){
 		return toHash(); // TODO!: fix!
-	}+/
+	}
 }
 
 
@@ -5553,10 +5571,10 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	/* members
 	 */
 
-	Scope getMemberScope(){ return getUnqual().getMemberScope(); }
+	override Scope getMemberScope(){ return getUnqual().getMemberScope(); }
 
 
-	ulong getSizeof(){return ty.getSizeof();}
+	override ulong getSizeof(){return ty.getSizeof();}
 
 	override IntRange getIntRange(){return ty.getIntRange();}
 	override LongRange getLongRange(){return ty.getLongRange();}
@@ -5667,7 +5685,7 @@ private mixin template GetTailOperations(string tail, string puthead){
 			    }
 				override Type in@(upperf(q))Context(){ // TODO: analyze if memoizing worthwhile
 					assert(@(tail)&&1);
-					return @(tail).in@(upperf(q))Context().@(puthead);;
+					return @(tail).in@(upperf(q))Context().@(puthead);
 				}
 			});
 		}
@@ -6496,7 +6514,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		mixin(SemEplg);
 	}
 
-	void matchError(Scope sc, Location loc, Expression[] args){
+	override void matchError(Scope sc, Location loc, Expression[] args){
 		sc.error(format("%s '%s' of type '%s' is not callable",kind,name.toString(),type.toString()),loc);
 	}
 
@@ -6524,7 +6542,7 @@ mixin template Semantic(T) if(is(T==Parameter)){
 	}
 
 protected:
-	Parameter newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
+	override Parameter newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
 		return New!Parameter(stc,rtype,name,initializer);
 	}
 }
@@ -6670,7 +6688,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
-		if(!aliasee)
+		if(!aliasee){
 		if(auto vd = decl.isVarDecl()){
 			if(vd.init){
 				sc.error("alias declarations cannot have initializers",loc);
@@ -6679,7 +6697,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 			aliasee = vd.rtype;
 		}else if(auto fd = decl.isFunctionDecl()){
 			aliasee = fd.type;
-		}else assert(0);
+		}else assert(0);}
 
 		aliasee.weakenAccessCheck(AccessCheck.none);
 		mixin(SemChld!q{aliasee});
@@ -7768,10 +7786,8 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 
 		if(sc.handler.nerrors != nerrors) mixin(ErrEplg);
 
-		static if(is(T==MixinStm)) r.semantic(sc);
-		else static if(is(T==MixinExp)) r.semantic(sc);
 		else static if(is(T==MixinDecl)) r.pickupSTC(stc);
-		else static assert(0);
+		r.semantic(sc);
 		//ohan.note("mixed in here", loc);
 		// TODO: do we want something like this?
 /+		sc.handler = ohan;
@@ -7788,7 +7804,6 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	override void semantic(Scope sc){
 		auto r=evaluate(sc);
 		mixin(SemCheck);
-		if(is(T==MixinDecl)) r.semantic(sc);
 		mixin(RewEplg!q{r});
 	}
 }

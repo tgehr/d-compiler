@@ -1,9 +1,30 @@
 
+template StaticFilter(alias F, a...){
+	static if(!a.length) alias a StaticFilter;
+	else static if(F!(a[0])) alias TypeTuple!(a[0], Rest) StaticFilter;
+	else alias Rest StaticFilter;
+	static if(a.length) alias StaticFilter!(F,a[1..a.length]) Rest;
+}
+
+template Pred(int x){ enum bool Pred = x&1; }
+pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));
+
+/+
+int a;
+struct T{
+	static assert(is(typeof(a) == float));
+	pragma(msg, typeof(a));
+	pragma(msg, typeof(a));
+	mixin(`float a=`~bar~";");
+	mixin(`const foo=`~c~`;`);
+	mixin(`const bar="`~foo~`";`);
+	mixin(q{mixin(q{mixin(q{const c = "`1.0`";});});});
+}
+
 template MAlias(A,B){ alias A delegate(B) MAlias2; }
 
 auto malias(A,B)(MAlias!(A,B).MAlias2 dg, B arg){ return dg(arg); }
 pragma(msg, malias!(int,int)((int x)=>x,3));
-
 
 int rec(T)(int x){
 	if(!x) return 0;
@@ -38,11 +59,12 @@ auto id(A)(A arg) => arg;
 pragma(msg, id(1));
 
 
-
-struct S{
-	immutable int x=TT!().SS!().TT;
-	template TT(){ template SS(){ alias x TT; } }
-}
+static assert(!is(typeof({
+	struct S{
+		immutable int x=TT!().SS!().TT;
+		template TT(){ template SS(){ alias x TT; } }
+	}
+})));
 
 alias immutable(char)[] string;
 

@@ -75,7 +75,7 @@ abstract class Scope{ // SCOPE
 
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
-		//Identifier.tryAgain = true; // TODO: is this required?
+		Identifier.tryAgain = true; // TODO: is this required?
 		return true;
 	}
 
@@ -131,7 +131,7 @@ abstract class Scope{ // SCOPE
 	void note(lazy string err, Location loc){handler.note(err,loc);}
 
 
-	string toString(){return to!string(typeid(this))~"{"~join(map!(to!string)(symtab.values),",")~"}";}
+	override string toString(){return to!string(typeid(this))~"{"~join(map!(to!string)(symtab.values),",")~"}";}
 
 	final Scope cloneNested(Scope parent){
 		auto r = New!NestedScope(parent);
@@ -189,7 +189,7 @@ class NestedScope: Scope{
 	override LabeledStm lookupLabel(Identifier ident){
 		return parent.lookupLabel(ident);
 	}
-	void registerForLabel(GotoStm stm, Identifier l){
+	override void registerForLabel(GotoStm stm, Identifier l){
 		parent.registerForLabel(stm, l);
 	}
 	override int unresolvedLabels(scope int delegate(GotoStm) dg){
@@ -306,7 +306,7 @@ final class FunctionScope: OrderedScope{
 	override FunctionDef getFunction(){return fun;}
 	override FunctionDef getDeclaration(){return fun;}
 protected:
-	bool canDeclareNested(Declaration decl){ // for BlockScope
+	override bool canDeclareNested(Declaration decl){ // for BlockScope
 		return !(decl.name.ptr in symtab); // TODO: More complicated stuff.
 	}
 private:

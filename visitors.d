@@ -29,10 +29,11 @@ mixin template Visitors(){
 
 import expression,declaration,type;
 mixin template DeepDup(T) if(is(T: BasicType)){
-	@trusted inout(T) ddup()inout{ return this; }
+	override @trusted inout(T) ddup()inout{ return this; }
 }
 
 mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
+	mixin((!is(T==Node)?"override ":"")~q{
 	@trusted inout(T) ddup()inout{
 		static if(is(T:Type) && !is(T:FunctionTy)){
 			if(sstate==SemState.completed) return this;
@@ -60,11 +61,11 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 			res.clearCaches();// TODO: clearCaches is not good enough
 		}
 		return *cast(inout(T)*)&res;
-	}
+	}});
 }
 
 mixin template DeepDup(T: StaticIfDecl) if(is(T==StaticIfDecl)){
-	@trusted inout(T) ddup()inout{
+	override @trusted inout(T) ddup()inout{
 		assert(sstate==SemState.begin||sstate==SemState.pre);
 		enum siz = __traits(classInstanceSize,T);
 		auto data = New!(void[])(siz);
@@ -79,7 +80,7 @@ mixin template DeepDup(T: StaticIfDecl) if(is(T==StaticIfDecl)){
 
 import semantic;
 mixin template DeepDup(T: Symbol) {
-	@trusted inout(T) ddup()inout{
+	override @trusted inout(T) ddup()inout{
 		enum siz = __traits(classInstanceSize,T);
 		auto data = New!(void[])(siz);
 		import std.c.string;

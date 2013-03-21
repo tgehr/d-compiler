@@ -5,6 +5,10 @@ import semantic, scope_;
 import std.algorithm, std.range, std.conv, std.string:join;
 import std.typecons : Tuple, tuple;
 
+import hashtable;
+
+// TODO: make the Scheduler understand all parties that currently make use of
+// Identifier.tryAgain. Then get rid of Identifier.tryAgain
 
 class Scheduler{
 	void add(Node root, Scope sc){
@@ -22,15 +26,18 @@ class Scheduler{
 	}
 	
 	struct WorkingSet{
+		private enum useBuiltin = true;
+		static if(useBuiltin) private template Map(K, V){ alias V[K] Map; }
+		else private template Map(K,V){ alias HashMap!(K, V, "a is b","cast(size_t)cast(void*)a/16") Map; }
 
-		Scope[Node] active;
-		Scope[Node] asleep;
-
-		Node[][Node] awaited;
-
-		bool[Node] done;
-
-		Scope[Node] payload;
+		Map!(Node,Scope) active;
+		Map!(Node,Scope) asleep;
+		
+		Map!(Node,Node[]) awaited;
+		
+		Map!(Node,bool) done;
+		
+		Map!(Node,Scope) payload;
 
 		void add(Node node, Scope sc) {
 			if(node in asleep) return;
@@ -46,6 +53,7 @@ class Scheduler{
 
 			foreach(v; awaited.get(node,[])){
 				if(v !in asleep) continue; // TODO: why needed?
+				Identifier.tryAgain = true;
 				auto sc=asleep[v];
 				active[v]=sc;
 				asleep.remove(v);
@@ -79,7 +87,7 @@ class Scheduler{
 
 			assert({foreach(nd,sc;payload) assert(!nd.rewrite,text(nd)); return 1;}());
 
-			done.clear();
+			done.clear(); assert(!done.length);
 		}
 
 		void buildInterface(){
@@ -87,6 +95,7 @@ class Scheduler{
 		}
 		void semantic(){
 			foreach(nd,sc; payload){
+				//dw("analyzing ",nd);
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
 						assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
@@ -95,6 +104,7 @@ class Scheduler{
 					continue;
 				}else if(nd.sstate == SemState.error) remove(nd);
 				nd.semantic(sc);
+				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 			}
 			update();
 		}
@@ -108,11 +118,14 @@ class Scheduler{
 		workingset.update();
 
 		do{
+			// dw("starting resolution pass");
 			Identifier.tryAgain = true;
 			do{
 				Identifier.tryAgain = false;
 				workingset.semantic();
 			}while(Identifier.tryAgain);
+
+			// dw("starting kill pass");
 			
 			Identifier.allowDelay=false;
 			workingset.semantic();

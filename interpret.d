@@ -2336,7 +2336,7 @@ mixin template CTFEInterpret(T) if(is(T==ExprTuple)){
 
 
 mixin template CTFEInterpret(T) if(is(T==EmptyStm)){
-	void byteCompile(ref ByteCodeBuilder bld){ /+ ; +/ }
+	override void byteCompile(ref ByteCodeBuilder bld){ /+ ; +/ }
 }
 
 mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
@@ -2741,7 +2741,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 					bld.emitConstant(size);
 				}
 			}else static if(isArithmeticOp(Tok!op) && op!="^^"){
-				if(auto bt0=e1.type.getHeadUnqual().isBasicType())
+				if(auto bt0=e1.type.getHeadUnqual().isBasicType()){
 				if(auto bt=bt0.isFloating()){
 					enum which = op=="+"?"add":
 						         op=="-"?"sub":
@@ -2757,7 +2757,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 							break;
 						}
 					}
-				}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());	// TODO: operators for all built-in types
+				}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());}	// TODO: operators for all built-in types
 			}else static if(isRelationalOp(S) && S!=Tok!"in"){
 
 				assert(!e1.type.getElementType()," CTFE array relational operators not implemented yet");
