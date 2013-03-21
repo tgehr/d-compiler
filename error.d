@@ -4,8 +4,6 @@ import std.string, std.range, std.array, std.uni;
 
 import lexer, util;
 
-struct ErrorRecord{string err; Location loc; bool isNote; }
-
 
 abstract class ErrorHandler{
 	//string source;
@@ -17,10 +15,7 @@ abstract class ErrorHandler{
 	void error(lazy string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
 	void note(lazy string note, Location loc)in{assert(loc.rep);}body{};
 
-	final void playErrorRecord(ErrorRecord rec){
-		if(rec.isNote) note(rec.err, rec.loc);
-		else error(rec.err, rec.loc);
-	}
+	bool showsEffect(){ return true; }
 
 	this(){
 		tabsize=getTabSize();

@@ -1,4 +1,69 @@
-//S s;
+void bazz(){}
+static if(!is(typeof(bazz(2)))) void bazz(int){} // TODO!
+
+static if(!is(typeof(c))) enum a = 1;
+static if(is(typeof(b))) enum c = 1;
+enum b = 2;
+
+static assert(!is(typeof(a)));
+static assert(is(typeof(c)));
+
+//enum x = ajoiaj;
+/+static if(!is(typeof(theOther))){
+	enum foo=2;
+	pragma(msg, "foo");
+}+/
+//static if(!is(typeof(theOne))){
+//	enum theOther = 1;
+//}
+static if(!is(typeof(theOther))){
+	enum theOne = 1;
+	pragma(msg, "theOne");
+	static if(!is(typeof(asdf))) enum theOther=2;
+}
+
+//static if(!is(typeof(theOne))) enum asdfg=2; // TODO: this should be OK
+
+static if((0&&foo)^1){pragma(msg, "Fofofo");}
+static if(!!(1||foo)){pragma(msg, "fdofo");}
+int loop(){return loop();}
+enum andshortcuts = 0&&loop();
+enum orshortcuts = 1||loop();
+
+pragma(msg, is(typeof(theOne))," ", is(typeof(theOther)));
+
+//pragma(msg, typeof(theOther));
+
+pragma(msg, "a ",is(typeof(a)));
+pragma(msg, "b ",is(typeof(b)));
+pragma(msg, "c ",is(typeof(c)));
+
+//pragma(msg, 2 !is 1);
+auto test(){return theOne;} // TODO: this should be OK
+static if(test()){pragma(msg, "!!!");} 
+
+//static if(!is(typeof(asdf)))
+void main(){
+	//int asdf=2;
+	static if(!is(typeof(theOther))) asdf=2;
+
+	static if(true){
+		int x = 2;
+		x=3;
+		x-=2;
+		pragma(msg, x);
+	}
+}
+
+static if(!is(typeof(theOther))){
+	static asdf=2;
+	mixin("void the(){enum theOther=2;}");
+}
+
+//else enum a=1;
+
+
+/+//S s;
 
 //static if(!is(typeof(s.d2))) enum d1=0;
 
@@ -13,3 +78,4 @@ void main(){
 	pragma(msg, is(typeof(S.d2)));
 }
 
++/

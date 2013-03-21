@@ -21,7 +21,7 @@ immutable protectionAttributes=["export","package","private","protected","public
 
 immutable attributeSTC=["property","safe","trusted","system","disable"];
 
-immutable functionSTC=["const","immutable","inout","nothrow","pure","shared"];
+immutable functionSTC=["const","immutable","inout","nothrow","pure","shared","ref"];
 
 immutable parameterSTC=["auto","const","final","immutable","in","inout","lazy","out","ref","scope","shared"];
 
@@ -194,6 +194,7 @@ private struct Parser{
 	Code code;
 	ErrorHandler handler;
 	int muteerr=0;
+	bool displayExpectErr = true;
 	this(Code code, ErrorHandler handler){
 		this.code = code;
 		//_tok=&code.front();
@@ -242,8 +243,10 @@ private struct Parser{
 	}
 	static class ParseErrorException: Exception{this(string s){super(s);}} alias ParseErrorException PEE;
 	void expect(TokenType type){
-		if(ttype==type){nextToken(); return;}
+		if(ttype==type){displayExpectErr=true; nextToken(); return;}
 		// employ some bad heuristics to avoid cascading error messages. TODO: make this better
+		if(!displayExpectErr) return;
+		displayExpectErr=false;
 		bool rd=isClosingToken(type);
 		Location loc=tok.loc;
 		import utf=std.utf;
@@ -264,12 +267,14 @@ private struct Parser{
 		if(type!=Tok!";" && type!=Tok!"}"){
 			while(ttype != Tok!";" && ttype != Tok!"}" && ttype != Tok!"EOF") nextToken();
 			if(ttype == Tok!";") nextToken();
-		}else nextToken();
+		}//else nextToken(); // TODO: ok?
 	}
 	void expectErr(string what)(){
+		if(!displayExpectErr) return;
 		if(ttype==Tok!"__error") error("expected "~what,tok.loc);
 		else error("found '" ~ tok.toString() ~ "' when expecting " ~ what,tok.loc);
 		if(ttype!=Tok!")" && ttype!=Tok!"}" && ttype!=Tok!"]" && ttype!=Tok!";") nextToken();
+		displayExpectErr = false;
 	}
 	bool skip(TokenType type){
 		if(ttype != type) return false;
@@ -280,6 +285,7 @@ private struct Parser{
 		string name;
 		if(ttype==Tok!"i") name=tok.name;
 		else{expectErr!"identifier"(); auto e=New!Identifier(cast(string)null); e.loc=tok.loc; return e;}
+		displayExpectErr=true;
 		auto e=New!Identifier(name);
 		e.loc=tok.loc;
 		nextToken();
@@ -290,28 +296,33 @@ private struct Parser{
 		Expression e;
 		void errori(){expectErr!"identifier following '.'"();}
 		static if(T.length==0){
+			auto loc=tok.loc;
 			if(ttype==Tok!"."){e = New!Identifier(""); e.loc=tok.loc; nextToken();}
 			else if(ttype!=Tok!"i"){expectErr!"identifier"(); return New!ErrorExp();}
 			else e = New!Identifier(tok.name); e.loc = tok.loc; nextToken();
-		}else{e=args[0];}
+		}else{
+			e=args[0];
+			auto loc=e.loc;
+		}
+		displayExpectErr=true;
 		for(bool multerr=0;;){
 			if(ttype==Tok!"."){
-				auto loc=tok.loc;
 				nextToken();
 				static if(!instNew){
 					if(ttype!=Tok!"i"){errori(); return e;}
 				}else{
 					if(ttype!=Tok!"i"){
 						if(ttype!=Tok!"new"){errori(); return e;}
-					}else{
-						auto f = New!InstanceNewExp(e,nud());
-						f.loc=e.loc.to(ptok.loc);
-						return f;
+						else{
+							auto f = New!InstanceNewExp(e,nud());
+							f.loc=e.loc.to(ptok.loc);
+							return f;
+						}
 					}
 				}
 				auto i = New!Identifier(tok.name); i.loc=tok.loc;
-				e = New!(BinaryExp!(Tok!"."))(e,i); e.loc=loc.to(ptok.loc);
 				nextToken();
+				e = New!(BinaryExp!(Tok!"."))(e,i); e.loc=loc.to(ptok.loc);
 			}else static if(tmpl){
 				if(ttype==Tok!"!"){
 					e=led(e);
@@ -551,7 +562,7 @@ private struct Parser{
 				// TODO: reconsider during delegate semantic implementation
 				Parameter[] plist;
 				if(!left.isIdentifier()){
-					error("left argument to '=>' must be a parameter list");
+					error("left hand side for '=>' must be a parameter list");
 					plist = null;
 				}else{
 					plist=[New!Parameter(STC.init, left, Identifier.init, Expression.init)];
@@ -1044,8 +1055,8 @@ private struct Parser{
 		expect(Tok!"}");
 		return res=New!BlockStm(s.data);
 	}
-	// @BUG!: Cannot parse alias to a function type or alias to extern(C) type 
-	Declaration parseDeclaration(STC stc=STC.init){ // Helper function for parseDeclDef.
+	// @BUG!: Cannot parse alias to a function type or alias to extern(C) type
+	Declaration parseDeclaration(const ref Location begin,STC stc=STC.init){ // Helper function for parseDeclDef.
 		Expression type;
 		Declaration d;
 		bool isAlias=ttype==Tok!"alias";
@@ -1061,7 +1072,7 @@ private struct Parser{
 				nextToken();
 				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!ThisExp(),cast(Expression)null)); expect(Tok!";"); // alias this
 			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
-		}else if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type);
+		}else if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type,begin);
 		else d=parseDeclarators(stc,type);
 		return d;
 	}
@@ -1099,7 +1110,7 @@ private struct Parser{
 		}
 	}
 
-	//@BUG!: Cannot parse C array parameters 
+	//@BUG!: Cannot parse C array parameters
 	Parameter[] parseParameterList(out VarArgs vararg){
 		vararg=VarArgs.none;
 		auto params=appender!(Parameter[])();
@@ -1146,7 +1157,7 @@ private struct Parser{
 		}
 		post=parseBlockStm(); post.loc=loc.to(post.loc);
 	}
-	Declaration parseFunctionDeclaration(STC stc, Expression ret){
+	Declaration parseFunctionDeclaration(STC stc, Expression ret, const ref Location begin){
 		Identifier name;
 		VarArgs vararg;
 		Expression constr;
@@ -1192,16 +1203,35 @@ private struct Parser{
 			if(ttype==Tok!"in"){Location loc=tok.loc; nextToken(); pre=parseBlockStm(); pre.loc=loc.to(pre.loc);}
 		}
 		FunctionDecl r;
-		if(ttype==Tok!"{"||ttype==Tok!"body"){
+		if(ttype==Tok!"{"||ttype==Tok!"body"||ttype==Tok!"=>"){
 			if(pre||post) expect(Tok!"body");
 			else if(ttype==Tok!"body") nextToken();
-			bdy=parseBlockStm();
+			if(ttype!=Tok!"=>")	bdy=parseBlockStm();
+			else{ // EXTENSION
+				nextToken();
+				auto e = parseExpression(rbp!(Tok!","));
+				expect(Tok!";");
+				auto b = New!ReturnStm(e);
+				e.loc=e.loc;
+				bdy=New!BlockStm([cast(Statement)b]);
+				bdy.loc=e.loc;
+			}
 			r=New!FunctionDef(stc,New!FunctionTy(STC.init,ret,params,vararg),name,pre,post,pres,bdy);
 		}else{
 			if(!pre&&!post) expect(Tok!";");
-			r=New!FunctionDecl(stc,New!FunctionTy(stc,ret,params,vararg),name,pre,post,pres);
+			r=New!FunctionDecl(stc,New!FunctionTy(STC.init,ret,params,vararg),name,pre,post,pres);
 		}
-		return isTemplate ? New!TemplateFunctionDecl(stc,tparam,constr,r) : r;
+		r.loc = begin.to(tok.loc);
+		if(isTemplate){
+			// uncontrolled allocation ahead
+			auto tmplname = New!Identifier(r.name.name);
+			tmplname.loc = name.loc;
+			auto t=New!TemplateDecl(false, stc, tmplname,
+			                        tparam, constr, New!BlockDecl(stc,[cast(Declaration)r]));
+			t.loc = r.loc;
+			return t;
+		}
+		return r;
 	}
 	bool skipFunctionDeclaration(){ // does not skip Parameters, STC contracts or body. I think it does not have to.
 		return skip(Tok!"i") && skip(Tok!"(");// && skipToUnmatched() && skip(Tok!")");//skipSTC!functionSTC();
@@ -1226,7 +1256,6 @@ private struct Parser{
 		BlockStm bdy;
 		if(ttype != Tok!"=>") bdy=parseBlockStm();
 		else{
-			// TODO: This GC heap allocates
 			nextToken();
 			auto e = parseExpression(rbp!(Tok!","));
 			auto r = New!ReturnStm(e);
@@ -1321,7 +1350,10 @@ private struct Parser{
 				nextToken();
 			}else{
 				auto tt=peek().type;
-				if(tt!=Tok!"," && tt!=Tok!":" && tt!=Tok!"=" && tt!=Tok!")" && tt!=Tok!"...") type=parseType();
+				if(tt!=Tok!"," && tt!=Tok!":" && tt!=Tok!"=" && tt!=Tok!")" && tt!=Tok!"..."){
+					type=parseType();
+					which = WhichTemplateParameter.constant;
+				}
 			}
 			auto name=parseIdentifier();
 			Expression spec, init;
@@ -1393,7 +1425,15 @@ private struct Parser{
 			type==Union     ? New!UnionDecl(stc,name,bdy)            :
 			type==Class     ? New!ClassDecl(stc,name,parents.data,bdy)    :
 			                  New!InterfaceDecl(stc,name,parents.data,bdy);
-		return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;
+		if(isTemplate){
+			// uncontrolled allocation ahead
+			auto tmplname = New!Identifier(r.name.name);
+			tmplname.loc = name.loc;
+			return New!TemplateDecl(false, stc, tmplname,
+			                        params, constraint, New!BlockDecl(stc,[cast(Declaration)r]));
+		}
+		return r;
+		//return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;
 	}
 	Expression parseVersionCondition(bool allowunittest=true){
 		if(ttype==Tok!"i"){auto e=New!Identifier(tok.name); e.loc=tok.loc; nextToken(); return e;}
@@ -1477,7 +1517,7 @@ private struct Parser{
 				}
 				expect(Tok!")");
 				return res=New!ExternDecl(stc,lt,cast(Declaration)cast(void*)parseCondDeclBody(flags));
-			case Tok!"typedef": nextToken(); return res=New!TypedefDecl(stc,parseDeclaration());
+			case Tok!"typedef": nextToken(); return res=New!TypedefDecl(stc,parseDeclaration(tok.loc));
 			case Tok!"@": goto case;
 			mixin(getTTCases(cast(string[])toplevelSTC,["align", "enum", "extern","static"]));
 				STC nstc; // parseSTC might parse nothing in case it is actually a type constructor
@@ -1489,8 +1529,8 @@ private struct Parser{
 			case Tok!"{": if(!stc&&!(flags&allowcompound)) goto default; return res=parseBlockDecl(stc);
 			case Tok!":": if(!stc&&!(flags&allowcompound)) goto default; nextToken(); return res=New!AttributeDecl(stc,parseDeclDefs());
 			default:
-				if(!(flags&tryonly)) return res=parseDeclaration(stc);
-				else return stc || isDeclaration() ? res=parseDeclaration(stc) : null;
+				if(!(flags&tryonly)) return res=parseDeclaration(begin,stc);
+				else return stc || isDeclaration() ? res=parseDeclaration(begin,stc) : null;
 		}
 	}
 

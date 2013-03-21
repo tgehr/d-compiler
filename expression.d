@@ -25,6 +25,7 @@ abstract class Node{
 	// Workaround for DMD forward reference bug, other part is in visitors.Visitors
 	mixin CTFEInterpret!Node; // TODO: minimize, report
 	abstract void _doAnalyze(scope void delegate(Node) dg);
+	abstract inout(Node) ddup()inout in{assert(sstate==SemState.begin||sstate==SemState.pre);}body{assert(0);};
 }
 
 abstract class Expression: Node{
@@ -37,9 +38,11 @@ abstract class Expression: Node{
 	mixin DownCastMethods!(
 		Symbol,
 		Identifier,
+		FieldExp,
 		Type,
 		LiteralExp,
 		ArrayLiteralExp,
+		TernaryExp,
 	);
 
 	mixin Visitors;
@@ -113,7 +116,9 @@ class FunctionLiteralExp: Expression{
 
 class Identifier: Symbol{
 	string name;
-	alias name this;
+	// alias name this; // stupid compiler bug prevents this from being useful
+	@property auto ptr(){return name.ptr;}
+	@property auto length(){return name.length;}
 	this(string name){ // TODO: make more efficient, this is a bottleneck!
 		static string[string] uniq;
 		auto n=uniq.get(name,null);
@@ -123,8 +128,7 @@ class Identifier: Symbol{
 	override string toString(){return _brk(name);}
 	override @property string kind(){return meaning?super.kind:"identifier";}
 
-	override Identifier isIdentifier(){return this;}
-
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -238,7 +242,7 @@ class CallExp: Expression{
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
 	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
 
-	override @property string kind(){return "function call";} // TODO: 'struct literal'
+	override @property string kind(){return "result of function call";} // TODO: 'struct literal'
 
 	mixin Visitors;
 }
@@ -247,6 +251,8 @@ class TemplateInstanceExp: Expression{
 	Expression[] args;
 	this(Expression exp, Expression[] a){e=exp; args=a;}
 	override string toString(){return _brk(e.toString()~"!"~(args.length!=1?"(":"")~join(map!(to!string)(args),",")~(args.length!=1?")":""));}
+
+	mixin Visitors;
 }
 
 // super class for all binary expressions
@@ -258,17 +264,27 @@ abstract class ABinaryExp: Expression{
 
 abstract class AssignExp: ABinaryExp{}
 
+abstract class FieldExp: Expression{
+	Expression e1;
+	Symbol e2;
+
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+
 template BinaryExpGetParent(TokenType op){
 	static if(isAssignOp(op)) alias AssignExp result;
+	else static if(op==Tok!".") alias FieldExp result;
 	else alias ABinaryExp result;
 	alias result BinaryExpGetParent;
 }
 
 class BinaryExp(TokenType op): BinaryExpGetParent!op{
-	this(Expression left, Expression right){e1=left; e2=right;}
+	this(Expression left, typeof(e2) right){e1=left; e2=right;}
 	override string toString(){
+		// (the cast is a workaround for a DMD bug)
 		static if(op==Tok!"in"||op==Tok!"is"||op==Tok!"!in"||op==Tok!"!is") return _brk(e1.toString() ~ " "~TokChars!op~" "~e2.toString());
-		else return _brk(e1.toString() ~ TokChars!op ~ e2.toString());
+		else return _brk(e1.toString() ~ TokChars!op ~ (cast(Expression)e2).toString());
 	}
 	//override string toString(){return e1.toString() ~ " "~ e2.toString~TokChars!op;} // RPN
 
@@ -280,6 +296,7 @@ class TernaryExp: Expression{
 	this(Expression cond, Expression left, Expression right){e1=cond; e2=left; e3=right;}
 	override string toString(){return _brk(e1.toString() ~ '?' ~ e2.toString() ~ ':' ~ e3.toString());}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 

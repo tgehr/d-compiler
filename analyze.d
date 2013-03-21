@@ -3,10 +3,6 @@ import expression, type, statement;
 
 import util: ID;
 
-abstract class NodeVisitor{
-	
-}
-
 mixin template Analyze(){
 	alias typeof(this) T;
 	static if(is(T==Node)){
@@ -19,9 +15,9 @@ mixin template Analyze(){
 			// what is part of the AST
 			if(!is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm)){ // hack, annotations will solve this
 				static assert(!is(typeof(_idfododi)));
-				static assert(!is(typeof(_idfododi2)));
+				static assert(!is(typeof(_idfofodi2)));
 				foreach(_idfododi; __traits(allMembers, T)){
-					static if(_idfododi.length && _idfododi!="meaning" && _idfododi!="circ"){ // hack
+					static if(_idfododi.length && _idfododi!="meaning" && _idfododi!="circ" && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy")){ // hack
 						mixin(`alias `~_idfododi~` _idfofodi2;`);
 						static if(is(typeof(_idfofodi2): Node) && !is(typeof(_idfofodi2): Type)){
 						if(_idfofodi2) dg(_idfofodi2);

@@ -2,8 +2,6 @@
 
 import lexer, operators, expression, type, util;
 
-import error;//: ErrorRecord; // fu?
-
 import std.traits: isIntegral, isFloatingPoint, Unqual;
 import std.range: ElementType;
 import std.conv: to;
@@ -134,8 +132,8 @@ private struct RTTypeID{
 				assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
 				return self; // TODO: this is a hack and might break stuff (?)
 			};
-			enum sfx = is(T==string) ? "c" :
-			           is(T==wstring)||is(T==real) ? "w" :
+			enum sfx = is(T==string)  ? "c" :
+			           is(T==wstring) ? "w" :
 				       is(T==dstring) ? "d" : "";
 			r.toString = function string(ref Variant self){
 				return to!string('"'~escape(mixin(`self.`~to!string(occ)))~'"'~sfx);
@@ -186,7 +184,9 @@ private struct RTTypeID{
 				else static if(is(T==idouble)) alias double T;
 				else static if(is(T==ireal)) alias real T;
 
-				return left~to!string(mixin(`cast(T)self.`~to!string(occ)))~right~sfx;
+				string rlsfx = ""; // TODO: remove if Phobos finally decides to fix this.
+				static if(is(T==float)||is(T==double)||is(T==real)) if(self.flt80%1==0) rlsfx=".0";
+				return left~to!string(mixin(`cast(T)self.`~to!string(occ)))~right~rlsfx~sfx;
 			};
 			r.toBCSlice = function BCSlice(ref Variant self){
 				assert(0,"cannot turn basic type into void[]");
@@ -204,15 +204,16 @@ private struct RTTypeID{
 			};
 			r.convertTo = function Variant(ref Variant self, Type to){
 				// assert(to.getHeadUnqual().getElementType()!is null);
-				if(to is Type.get!string()){
+				auto tou = to.getHeadUnqual();
+				if(tou is Type.get!string()){
 					string s;
 					foreach(x; self.arr) s~=cast(char)x.int64;
 					return Variant(s);
-				}else if(to is Type.get!wstring()){
+				}else if(tou is Type.get!wstring()){
 					wstring s;
 					foreach(x; self.arr) s~=cast(wchar)x.int64;
 					return Variant(s);
-				}else if(to is Type.get!dstring()){
+				}else if(tou is Type.get!dstring()){
 					dstring s;
 					foreach(x; self.arr) s~=cast(wchar)x.int64;
 					return Variant(s);
@@ -337,20 +338,6 @@ struct Variant{
 		mixin(to!string(getOccupied!T)~` = value;`);
 	}
 
-	static Variant error(string str, Location loc){
-		Variant r;
-		r.id = null;
-		r.err = [ErrorRecord(str,loc)];
-		return r;
-	}
-
-	bool isError(){
-		return id is null;
-	}
-
-	const(ErrorRecord)[] getErrors()in{assert(isError());}body{
-		return err;
-	}
 
 	private union{
 		typeof(null) none;
@@ -358,7 +345,6 @@ struct Variant{
 		ulong int64;
 		real flt80; ireal fli80; creal cmp80;
 		Variant[] arr;
-		ErrorRecord[] err;
 		// TODO: structs, classes
 	}
 
@@ -462,6 +448,8 @@ struct Variant{
 		return Variant(r);
 	}
 
+	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
+
 	// TODO: BUG: shift ops not entirely correct
 	Variant opBinary(string op)(Variant rhs)in{
 		static if(isShiftOp(Tok!op)){
@@ -517,7 +505,7 @@ struct Variant{
 						enum occ2 = Occupies.flt80;
 					else enum occ2 = occ;
 					assert(id.occupies == occ);
-					assert(rhs.id.occupies == occ2);
+					//assert(rhs.id.occupies == occ2);
 					static if(isShiftOp(Tok!op)|| occ2 != occ) enum cst = ``;
 					else enum cst = q{ cast(T) };
 					enum code = q{

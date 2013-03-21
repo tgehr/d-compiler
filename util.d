@@ -15,7 +15,7 @@ template ID(alias a){alias a ID;}
 template Apply(alias a,T...){alias a!T Apply;}
 
 template ToTuple(alias a){
-	static if(a.length) alias TypeTuple!(a[0],ToTuple!(a[1..$])) ToTuple;
+	static if(a.length){enum val = a[0];alias TypeTuple!(val,ToTuple!(a[1..$])) ToTuple;}
 	else alias TypeTuple!() ToTuple;
 }
 

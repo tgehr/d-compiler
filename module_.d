@@ -27,26 +27,71 @@ class Module: Node{
 		sstate = SemState.pre;
 		if(sc.handler.nerrors) sstate = SemState.error;
 	}
-	Module semantic(){
-		// return null;
-		mixin(SemPrlg);
+
+	static Module current = null;
+
+	Module buildInterface(){
+		mixin(Configure!q{Module.current = this});
+		mixin(Configure!q{Identifier.tryAgain = true});
+		mixin(Configure!q{Identifier.allowDelay = true});
 		if(sstate == SemState.pre) foreach(ref x;decls){
 			x.stc|=STCstatic;
 			x=x.presemantic(sc); // add all to symbol table
 		}
-		do{
-			gRetryAgain = false; // TODO: fix this
-			//mixin(SemChld!q{decls});
-			foreach(ref x;decls){
-				x = x.semantic(sc);
+		while(Identifier.tryAgain){
+			while(Identifier.tryAgain){
+				while(Identifier.tryAgain){
+					Identifier.tryAgain = false;
+					foreach(ref x;decls) x = x.buildInterface();
+					foreach(x;templateDecls) x.updateInstances(_=>_.buildInterface());
+				}
+				Identifier.allowDelay = false;
+				foreach(ref x;decls) x = x.buildInterface();
+				foreach(x;templateDecls) x.updateInstances(_=>_.buildInterface());
+				Identifier.allowDelay = true;
 			}
-			// import std.stdio;writeln("round complete!");
-		}while(gRetryAgain);
+		}
+		// import std.stdio; writeln("built interface!");
+		return this;
+	}
+	Module semantic(){
+		mixin(SemPrlg);
+		mixin(Configure!q{Module.current = this});
+		mixin(Configure!q{Identifier.tryAgain = true});
+		mixin(Configure!q{Identifier.allowDelay = true});
+		auto me = buildInterface();
+		assert(me is this);
+		foreach(ref x;decls) x = x.semantic(sc);
+		foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+		int num = 0;
+		while(Identifier.tryAgain){
+			// TODO: this is a hack to order declarations before references
+			buildInterface();
+			// TODO: replace by comprehensive ordering of non-existence decisions
+			while(Identifier.tryAgain){
+				Identifier.tryAgain = false;
+				foreach(ref x;decls) x = x.semantic(sc);
+				foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+			}
+			Identifier.allowDelay=false;
+			foreach(ref x;decls) x = x.semantic(sc);
+			foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+			Identifier.allowDelay=true;
+		}
+		assert({foreach(x; decls) assert(!x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(PropErr!q{decls});
 		mixin(SemEplg);
 	}
 
+	private TemplateDecl[] templateDecls;
+	void addTemplateDecl(TemplateDecl decl){
+		templateDecls~=decl;
+	}
+
+
 	mixin Analyze;
+	import visitors;
+	mixin DeepDup!Module;
 
 	override @property string kind(){return "module";}
 	override string toString(){return "some module";} // TODO

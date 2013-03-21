@@ -1,30 +1,149 @@
+typeof(null) retnull(){return null;}
+pragma(msg, "retnull: ",retnull());
 
-//pragma(msg, bar());
-pragma(msg, typeof([[[]],[[1]]]));
-pragma(msg, typeof(2?[[]]:[[1]]));
+struct InterpretImmutableField{
+	immutable y=22;
+}
+static assert(InterpretImmutableField.y==22); // TODO!
+static assert((()=>InterpretImmutableField.y==22)()); // TODO!
 
-pragma(msg, typeof([[[]],[[]],[[1]]]));
-pragma(msg, typeof(1?1?[[]]:[[]]:[[1]]));
+mixin(`auto foo1="1.0f";`);
+mixin(`float a11=`~foo1~";");
+
+enum short[] x = rngg();
+int[] rngg(){return [1,2,3,];}
+pragma(msg, "rngg: ", x);
+
+bool testptrcmp(){
+	auto x = [0,1];
+	auto p = &x[0], q = &x[1];
+	assert(*p==0 && *q==1);
+
+	assert(p==p && p is p && p!<>p);
+	assert(!(p!=p) && !(p!is p) && !(p<>p));
+
+	assert(p!=q && p !is q && p<>q && p<>=q);
+	assert(!(p==q) && !(p is q) && !(p!<>q) && !(p!<>=q));
+
+	assert(p<q && p<=q && p!>q && p!>=q);
+	assert(!(p!<q) && !(p!<=q) && !(p>q) && !(p>=q));
+
+	assert(q>p && q>=p && q!<p && q!<=p);
+	assert(!(q!>p) && !(q!>=p) && !(q<p) && !(q<=p));
+
+	assert(*p==0 && *q==1);
+	return true;
+}
+static assert(testptrcmp());
+
+
+bool testrealcmp(){
+	real a = 2, b = 3;
+
+	assert(a==a && a is a && a!<>a);
+	assert(!(a!=a) && !(a!is a) && !(a<>a));
+
+	assert(a!=b && a !is b && a<>b && a<>=b);
+	assert(!(a==b) && !(a is b) && !(a!<>b) && !(a!<>=b));
+
+	assert(a<b && a<=b && a!>b && a!>=b);
+	assert(!(a!<b) && !(a!<=b) && !(a>b) && !(a>=b));
+
+	assert(b>a && b>=a && b!<a && b!<=a);
+	assert(!(b!>a) && !(b!>=a) && !(b<a) && !(b<=a));
+
+	b = 1.0L/0*0;
+	assert(b!=b && b is b && b!<>=b);
+	assert(!(b==b) && !(b!is b) && !(b<>=b));
+
+	for(int i=0;i<3;i++){
+		assert(a!<b && a!>b && a!<=b && a!>=b && a!<>=b && b!<>=b);
+		assert(!(a<b) && !(a>b) && !(a==b) && !(a<=b) && !(a>=b));
+		a=b;
+		assert(a!=a);
+		if(i==3) b=2;
+	}
+	return cast(bool)b;
+}
+static assert(testrealcmp());
+
+real[] testreal(real a, real b){
+	real[] r;
+	r~=a;
+	r~=b;
+	r~=a+b;
+	r~=a-b;
+	r~=a/b;
+	r~=b%a;
+	double d = a, e = b;
+	r~=d;
+	r~=e;
+	r~=d+e;
+	r~=d-e;
+	r~=d/e;
+	r~=e%d;
+	double f = a, g = b;
+	r~=f;
+	r~=g;
+	r~=f+g;
+	r~=f-g;
+	r~=f/g;
+	r~=g%f;
+	//r~=a&b;
+	real[] o;
+	for(real* p = &r[0]; p !is &r[0]+18; p++) o~=*p;
+	return o;
+}
+pragma(msg, "testreal: ",testreal(22.2,39.1));
+
+
+int[] testbitwise(int a, int b){
+	int[] r;
+	r~=a&b;
+	r~=a|b;
+	r~=a^b;
+	return r;
+}
+pragma(msg, "testbitwise: ",testbitwise(2883,28291));
+
+
+
+int fops(int x){return x;}
+
+//static assert(fops(1/fops(0)));
+//static assert(foo(assert(0))); // DMD bug?
+
+//enum x = (fops(),1);
 
 static assert({return rettrue();}());
 auto rettrue(){return {return {return true;}();}();}
 
+// xP
+/+int bug6498(int x)
+{
+	int n = 0;
+	while (n < x)
+		n++;
+	return n;
+}
+static assert(bug6498(10_000_000)!=10_000_000);+/
 
 
 immutable int immu=2;
 int refp(ref immutable int x){
 	return x;
 }
-pragma(msg, refp(immu));// TODO
+pragma(msg, "refp: ",refp(immu));
 
 int testaddr(){
 	immutable int x;
-	auto p = &immu;// TODO
+	auto p = &immu;
 	immutable(int*) id(immutable int* x){return x;}
 	return *id(p);
 	//return *(((immutable int* p)=>p)(p));
 }
 static assert(testaddr()==2);
+pragma(msg, "testaddr: ", testaddr());
 
 void testlocal1(){ // (should not compile)
 	int x = 2;
@@ -40,7 +159,30 @@ int testlocal2(){ // (should compile)
 	static assert(tt());
 }
 
+/+int testlazy(){
+	int x;
+	int foo(lazy int x){return x;}
+	foo(++x);
+	return x;
+}
+pragma(msg, "testlazy: ",testlazy());+/
 
+ref int testrefret(){
+	int x;
+	ref int foo(){ return x; }
+	//ref int bar(){ return 2; }
+	foo()=1;
+	++foo();
+	foo()++;
+	foo()+=3;
+	assert(x==6 && foo()==6);
+	x=0;
+	assert(foo()==0);
+	foo()+=8;
+	return x;
+}
+pragma(msg, "testrefret: ",testrefret());
+static assert(testrefret()==8);
 
 int testrefoutlazy(){
 	int x=1;
@@ -86,7 +228,7 @@ pragma(msg, "createclosure: ",createclosure());
 
 int casts(){
 	int[] a = null;
-	immutable(int)[] b = cast(immutable)a;	// TODO: disallow unsafe cast
+	immutable(int)[] b = cast(immutable)a; // disallow unsafe cast
 	a[0]=2;
 	//int* x = &a[0];
 	return 0;
@@ -98,8 +240,8 @@ int twiceinterpret(){
 	int accessible = 2; // only accessible from 'foo'  on the second invocation
 	immutable zero = 0; // always accessible from 'foo'
 	int foo(bool first){return first?zero:accessible;}
-	enum y = foo(true);
-	return foo(false);
+	enum y = foo(true); // fails
+	return foo(false);  // suceeds
 }
 static assert(twiceinterpret()==2);
 
@@ -107,7 +249,7 @@ static assert(twiceinterpret()==2);
 
 void invtest(){
 	bool x = false;
-	bool foo(){return true&&x;}
+	bool foo(){return true&&x;} // cannot access x
 	bool ttt(){return foo();}
 	static assert(ttt());
 }
@@ -233,8 +375,15 @@ pragma(msg, "addr: ",addr(3));
 
 int tailcalls(int n, int x){
 	if(!n) return x;
-	return tailcalls(n-1, x+n);
+	return 1?tailcalls(n-1, x+n):10;
 }
+
+int tcfac(int n){
+	int loop(int x, int a) => x>n?a: loop(x+1,x*a);
+	return loop(1,1);
+}
+pragma(msg, "tcfac: ", tcfac(10));
+
 
 pragma(msg, "tailcalls: ",tailcalls(10000,0));
 
@@ -254,7 +403,7 @@ pragma(msg, "toEngNum: ",toEngNum(123562222));
 
 pragma(msg, "toEngNum in a loop: ",{
 		immutable(char)[][] r;
-		for(int i=0;i<=1100;i++) r~=toEngNum(i);
+		for(int i=0;i<=1000;i++) r~=toEngNum(i);
 		return r;
 	}());
 
@@ -308,7 +457,7 @@ int[] slice(int[] e, int l, int r){
 	return (&e[0]+1)[-1+l..r-1];
 }
 
-pragma(msg, slice([1,2,3],0,3));
+pragma(msg, "slice: ",slice([1,2,3],0,3));
 
 
 int tt3(){
@@ -316,7 +465,7 @@ int tt3(){
 	return 3;
 }
 
-pragma(msg, tt3());
+pragma(msg, "tt3: ",tt3());
 
 
 int testbrkcnt(){
@@ -359,8 +508,9 @@ static assert(testbrkcnt() == 50);
 pragma(msg, "testbrkcnt: ", testbrkcnt());
 
 
-bool strchr(immutable(char)[] haystack, immutable(char)[] needle){
-	auto p = &haystack[0], q = &needle[0];
+bool strchr(immutable(char)* haystack, immutable(char)* needle){
+	//if(haystack is null || needle is null) return false;
+	auto p = haystack, q = needle;
 	for(;; p++){
 		for(auto h=p, n=q;;h++,n++){
 			if(!*n) return true;
@@ -372,13 +522,13 @@ bool strchr(immutable(char)[] haystack, immutable(char)[] needle){
 	((p))=p;
 	return false;
 }
-
-pragma(msg, "strchr: ", strchr("1234","232"));
-pragma(msg, "strchr: ", strchr("1234","23"));
-pragma(msg, "strchr: ", strchr("1234","023"));
-pragma(msg, "strchr: ", strchr("1234","123"));
-pragma(msg, "strchr: ", strchr("123",""));
-pragma(msg, "strchr: ", strchr("",""));
+pragma(msg, strchr(null, null)); // TODO!
+pragma(msg, "strchr: ", strchr(&"1234"[0],&"232"[0]));
+pragma(msg, "strchr: ", strchr(&"1234"[0],&"23"[0]));
+pragma(msg, "strchr: ", strchr(&"1234"[0],&"023"[0]));
+pragma(msg, "strchr: ", strchr(&"1234"[0],&"123"[0]));
+pragma(msg, "strchr: ", strchr(&"123"[0],&""[0])); // TODO: fix?
+pragma(msg, "strchr: ", strchr(&""[0],&""[0]));
 
 
 int strcmp(immutable(char)[] a, immutable(char)[] b){

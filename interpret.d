@@ -14,8 +14,8 @@ private template NotYetImplemented(T){
 }
 
 enum IntFCEplg = q{needRetry = false; return this;};
-template IntFCChld(string s){
-	enum IntFCChld={
+template IntFCChldNoEplg(string s){
+	enum IntFCChldNoEplg = {
 		string r;
 		auto ss=s.split(",");
 		foreach(t; ss){
@@ -24,8 +24,11 @@ template IntFCChld(string s){
 				mixin(PropRetry!q{@(t)});
 			});
 		}
-		return r~PropErr!s~IntFCEplg;
+		return r~PropErr!s;
 	}();
+}
+template IntFCChld(string s){
+	enum IntFCChld=IntFCChldNoEplg!s~IntFCEplg;
 }
 
 // should never be interpreted:
@@ -43,10 +46,18 @@ mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
 }
 
 mixin template Interpret(T) if(is(T==Expression)){
+
+	final void prepareInterpret(){
+		static struct DontAccessibilityCheckSymbols{
+			void perform(Symbol self){ self.accessCheck = AccessCheck.memberFuns; }
+		}
+		runAnalysis!DontAccessibilityCheckSymbols(this);
+	}
+
 	// scope may be null if it is evident that the expression can be interpreted
 	bool checkInterpret(Scope sc)in{assert(sstate == SemState.completed);}body{
 		assert(sc, loc.rep);
-		sc.error(format("expression '%s' is not interpretable at compile time",loc.rep),loc);
+		sc.error(format("%s '%s' is not interpretable at compile time",kind,loc.rep),loc);
 		sstate = SemState.error;
 		return false;
 	}
@@ -109,7 +120,7 @@ mixin template Interpret(T) if(is(T==CastExp)){
 		if(el&&le&&le.isPolyString()){
 			auto vle=e.interpretV();
 			auto typeu = type.getHeadUnqual();
-			if(typeu.isSomeString()) return e.interpretV().convertTo(type);
+			if(typeu.isSomeString()) return vle.convertTo(type);
 			// TODO: allocation ok?
 			Variant[] r = new Variant[vle.length];
 			foreach(i,ref x;r) x = vle[i].convertTo(el);
@@ -126,22 +137,24 @@ mixin template Interpret(T) if(is(T==Type)){
 
 mixin template Interpret(T) if(is(T==Symbol)){
 	override bool checkInterpret(Scope sc){
-		if(auto vd = meaning.isVarDecl()){
-			if(vd.sstate == SemState.error) return false;
-			if(vd.stc&STCenum
-			|| vd.stc&STCimmutable && vd.init.isConstant())
-				return true;
-		}
+		if(meaning.sstate == SemState.error) return false;
+		if(isConstant()) return true;
 		return super.checkInterpret(sc);
 	}
+
 	override Variant interpretV(){
 		if(auto vd = meaning.isVarDecl()){
 			assert(meaning.sstate == SemState.completed);
-			/+if(vd.stc&STCenum|STCimmutable) +/
 			return vd.init.interpretV();
 		}
 		assert(0);
 	}
+
+	override Expression _interpretFunctionCalls(Scope sc){
+		makeStrong();
+		return semantic(scope_);
+	}
+
 }mixin template Interpret(T) if(!is(T==Symbol) && is(T:Symbol)){}
 mixin template Interpret(T) if(is(T==LiteralExp)){
 	private template getTokOccupied(T){
@@ -300,9 +313,14 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 		return e1.checkInterpret(sc)&e2.checkInterpret(sc);
 	}
 	override Variant interpretV(){
-		static if(S==Tok!","){
+		// first two conditions are a workaround for a segfault in DMD
+		static if(S==Tok!"is"){
+			return Variant(!e1.interpretV().opBinary!"!is"(e2.interpretV));
+		}else static if(S==Tok!"in"){
+			return Variant(!e1.interpretV().opBinary!"!in"(e2.interpretV));				
+		}else static if(S==Tok!","){
 			return e2.interpretV();
-		}else static if(isRelationalOp(S)&&S!=Tok!"is"&&S!=Tok!"in"||isArithmeticOp(S)||isBitwiseOp(S)||isShiftOp(S)||isLogicalOp(S))
+		}else static if(isRelationalOp(S)||isArithmeticOp(S)||isBitwiseOp(S)||isShiftOp(S)||isLogicalOp(S))
 			return e1.interpretV().opBinary!(TokChars!S)(e2.interpretV());
 		else static if(S==Tok!"~"){
 			if(e1.type.equals(e2.type)) return e1.interpretV().opBinary!"~"(e2.interpretV());
@@ -336,7 +354,15 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 		}else return super.interpretV();
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2});}
+	override Expression _interpretFunctionCalls(Scope sc){
+		static if(S==Tok!"&&"||S==Tok!"||"){
+			mixin(IntFCChldNoEplg!q{e1});
+			assert(e1.type is Type.get!bool());
+			if(cast(bool)e1.interpretV()^(S==Tok!"&&")) return e1;
+			mixin(IntFCChld!q{e2});
+		}else mixin(IntFCChld!q{e1,e2});
+
+	}
 }
 
 mixin template Interpret(T) if(is(T==TernaryExp)){
@@ -355,42 +381,65 @@ protected:
 
 mixin template Interpret(T) if(is(T==CallExp)){
 	private Variant val;
-	override bool checkInterpret(Scope sc){return true;} // be optimistic
+	override bool checkInterpret(Scope sc){
+		// TODO: ok?
+		if(fun.type.getFunctionTy().ret is Type.get!void()) return super.checkInterpret(sc);
+		return true; // be optimistic
+	}
 protected:
 	override Expression _interpretFunctionCalls(Scope sc){
-		foreach(ref x; args) x = x.interpret(sc);
-		mixin(PropErr!q{args});
-		import std.algorithm;
-		if(auto sym = fun.isSymbol())
+/+		if(auto sym = fun.isSymbol())
 			if(auto fn = cast(FunctionDef)sym.meaning){
 				sym.makeStrong();
-				foreach(i,x; fn.type.params) if(x.stc & STCbyref||x.stc&STClazy){
-					sc.error(format("'%s' parameters are not yet supported during CTFE",x.stc&STCout?"out":x.stc&STClazy?"lazy":"ref"),args[i].loc); // TODO!
-					mixin(ErrEplg);
-				}
-				mixin(SemChld!q{e});
+				mixin(SemChldPar!q{e});
 				if(fn.sstate == SemState.error){
 					// TODO: better error messages/error message handling scheme
 					sc.error("interpretation of invalid function failed",loc);
 					mixin(ErrEplg);
-				}
-				if(fn.type.ret !is Type.get!void()){
-					Expression r;
-					try{
-						r = fn.interpretCall(array(map!(_=>_.interpretV())(args)), sc.handler).toExpr();
-						r.type = type;
-						r.loc = this.loc;
-						return r;
-					}catch(Exception){
-						sc.note("during evaluation requested here", loc);
-						mixin(ErrEplg);
-					}
-				}
+				}+/
+		//}
+		//if(fn.type.ret is Type.get!void()) return this; // TODO: ok?
+		// better error messages
+		static struct MakeStrong{ void perform(Symbol sym){ sym.makeStrong(); } }
+		runAnalysis!MakeStrong(this);
+		mixin(SemChld!q{e});
+		Expression r;
+		try{
+			if(!ctfeCallWrapper){
+				//if(args.length == 0) ctfeCallWrapper = fn;
+				//else{
+					auto bdy = New!BlockStm(cast(Statement[])[New!ReturnStm(this)]);
+					auto fty=New!FunctionTy(STC.init,cast(Expression)null,cast(Parameter[])null,VarArgs.none);
+					auto dg=New!FunctionDef(STCstatic,fty,New!Identifier(uniqueIdent("__ctfeCallWrapper")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, false);
+					dg.sstate = SemState.begin;
+					dg.scope_ = sc;
+					dg = dg.semantic(sc);
+					//assert(dg.sstate == SemState.completed);
+					while(dg.sstate!=SemState.completed) dg=dg.semantic(sc);
+					ctfeCallWrapper = dg;
+					//}
 			}
-		sc.error(format("cannot interpret function call '%s' at compile time",toString()),loc);
-		mixin(ErrEplg);
+			r = ctfeCallWrapper.interpretCall(sc.handler).toExpr();
+			// TODO: this is maybe too conservative:
+			//if(!(fn.stc&STCstatic)) fn.resetByteCode();
+			r.type = type;
+			r.loc = this.loc;
+			return r;
+		}catch(CTFERetryException e){
+			needRetry = e.needRetry;
+			return this;
+		}catch(Exception){
+			sc.note("during evaluation requested here", loc);
+			mixin(ErrEplg);
+		}
 	}
+	//sc.error(format("cannot interpret function call '%s' at compile time",toString()),loc);
+	//	mixin(ErrEplg);
+private:
+	FunctionDef ctfeCallWrapper;
 }
+
+class CTFERetryException: Exception{ubyte needRetry;this(ubyte b){super("");needRetry=b;}}
 
 // bytecode interpreter for functions
 import expression, declaration, statement;
@@ -471,6 +520,7 @@ enum Instruction : uint{
 	negi,                       // negate top of stack
 	noti,                       // ~ top of stack
 	notb,                       // ! top of stack
+	// integer
 	addi,                       // add 2 ulongs
 	subi,                       // subtract top from ltop
 	muli,                       // multiply 2 ulongs
@@ -478,6 +528,24 @@ enum Instruction : uint{
 	divsi,                      // divide ltop by top signed
 	modi,                       // ltop%top unsigned
 	modsi,                      // ltop%top signed
+	// float
+	addf,
+	subf,
+	mulf,
+	divf,
+	modf,
+	// double
+	addd,
+	subd,
+	muld,
+	divd,
+	modd,
+	// real
+	addr,
+	subr,
+	mulr,
+	divr,
+	modr,
 	// shifts
 	shl32,                      // logic shift left, shamt below 32
 	shr32,                      // logic shift right, shamt below 32
@@ -500,6 +568,30 @@ enum Instruction : uint{
 	cmpai,                      // unsigned >
 	cmpgei,                     // signed >=
 	cmpaei,                     // unsigned >=
+	// float
+	cmpisf,
+	cmpef,
+	cmplf,
+	cmplef,
+	cmpnef,
+	cmpgf,
+	cmpgef,
+	// double
+	cmpisd,
+	cmped,
+	cmpld,
+	cmpled,
+	cmpned,
+	cmpgd,
+	cmpged,
+	// real
+	cmpisr,
+	cmper,
+	cmplr,
+	cmpler,
+	cmpner,
+	cmpgr,
+	cmpger,
 	// array operations
 	ptra,                       // get pointer field
 	lengtha,                    // get length field
@@ -524,6 +616,12 @@ enum Instruction : uint{
 	loadap,                    // generate a pointer to an array location
 	ptrtoa,
 	addp,                      // add an integer to a pointer
+	cmpep,
+	cmpbp,
+	cmpbep,
+	cmpnep,
+	cmpap,
+	cmpaep,
 	// error handling table
 	errtbl,
 }
@@ -556,14 +654,20 @@ size_t numArgs(Instruction inst){
 		 I.int2real:   0, I.real2int:   0,
 		 I.float2real: 0, I.real2float: 0,
 		 I.double2real:0, I.real2double:0,
-		 I.trunc:      1, I.truncs     :1,
+		 I.trunc:      1, I.truncs:     1,
 		 // arithmetics
 		 I.negi: 0, I.noti: 0, I.addi: 0, I.subi: 0,I.muli: 0,
 		 I.divi: 0, I.divsi: 0, I.modi: 0, I.modsi: 0,
+		 I.addf: 0, I.subf: 0, I.mulf: 0, I.divf: 0,
+		 I.addd: 0, I.subd: 0, I.muld: 0, I.divd: 0,
+		 I.addr: 0, I.subr: 0, I.mulr: 0, I.divr: 0,
 		 I.shl32: 0, I.shr32: 0, I.sar32: 0, I.shl64: 0, I.shr64: 0, I.sar64: 0,
 		 // comparison
 		 I.cmpei: 0, I.cmpli: 0, I.cmpbi: 0, I.cmplei: 0, I.cmpbei: 0,
 		 I.cmpnei: 0, I.cmpgi: 0, I.cmpai: 0, I.cmpgei: 0, I.cmpaei: 0,
+		 I.cmpisf: 0, I.cmpef: 0, I.cmplf: 0, I.cmplef: 0, I. cmpnef: 0, I.cmpgf: 0, I.cmpgef: 0,
+		 I.cmpisd: 0, I.cmped: 0, I.cmpld: 0, I.cmpled: 0, I. cmpned: 0, I.cmpgd: 0, I.cmpged: 0,
+		 I.cmpisr: 0, I.cmper: 0, I.cmplr: 0, I.cmpler: 0, I. cmpner: 0, I.cmpgr: 0, I.cmpger: 0,
 		 // array operations
 		 I.ptra: 0, I.lengtha: 0,
 		 I.newarray: 1, I.makearray: 1, I.appenda: 0, I.concata: 0,
@@ -571,6 +675,7 @@ size_t numArgs(Instruction inst){
 		 I.loadaa: 0, I.loadaak: 0, I.storeaa: 0, I.storeaakr: 0, I.storeaakv: 0,
 		 // pointer operations
 		 I.loadap: 1, I.ptrtoa: 0, I.addp: 1,
+		 I.cmpep: 0, I.cmpbp: 0, I.cmpbep: 0, I. cmpnep: 0, I.cmpap: 0, I.cmpaep: 0,
 		 // error handling table
 		 I.errtbl: 0,
 		 ];
@@ -601,6 +706,7 @@ private class HltErrorInfo: Node{
 	// to make it non-abstract, it has to implement those:
 	override string kind(){assert(0);}// kind
 	override void _doAnalyze(scope void delegate(Node) dg){assert(0);}
+	override inout(Node) ddup()inout{assert(0);}
 	string err;
 	Location loc;
 }
@@ -833,7 +939,7 @@ struct ByteCodeBuilder{
 			foreach(l; locs) outer.byteCode[l] = pos;
 		}
 
-		bool initialized(){return outer !is null;}
+		bool initialized(ref ByteCodeBuilder bld){return outer is &bld;}
 	}
 
 	Label getLabel(){
@@ -844,7 +950,7 @@ struct ByteCodeBuilder{
 		emitConstant(~0);
 		return r;
 	}
-	void emitLabel(ref Label lbl)in{assert(lbl.outer is &this);}body{
+	void emitLabel(ref Label lbl)in{assert(lbl.initialized(this));}body{
 		if(~lbl.pos) emitConstant(lbl.pos);
 		else{
 			if(!~lbl.loc) lbl.loc=byteCode.length;
@@ -1162,7 +1268,7 @@ Ltailcall:
 			writeln();
 		}
 
-		final switch(cast(Instruction)byteCode[ip++]){
+		swtch:final switch(cast(Instruction)byteCode[ip++]){
 			alias Instruction I;
 			case I.hlt:
 				goto Lhlt;
@@ -1185,24 +1291,23 @@ Ltailcall:
 				auto nfargs = cast(size_t)byteCode[ip++];
 				Symbol sym = cast(Symbol)cast(void*)stack.pop();
 				sym.makeStrong();
-				sym = sym.semantic(sym.scope_);
-				if(sym.sstate == SemState.error) throw new Exception("");
+				// TODO: allow detailed discovery of circular dependencies
+				sym = cast(Symbol)cast(void*)sym.semantic(sym.scope_);
+				if(sym.needRetry){
+					// TODO: make as unlikely as possible
+					throw new CTFERetryException(sym.needRetry);
+				}
+				if(sym.sstate == SemState.error) goto Linvfunction;
 				assert(cast(FunctionDef)sym.meaning);
 				FunctionDef def = cast(FunctionDef)cast(void*)sym.meaning;
-				assert(def.scope_);
-				if(def.sstate != SemState.completed) def = def.semantic(def.scope_);
-				if(def.sstate != SemState.completed){
-					if(def.sstate == SemState.error) goto Linvfunction;
-					else{assert(def.needRetry); throw new Exception("TODO: retry!");}
-				}
-				if(byteCode[ip] == I.ret){// tail calls
+
+				if(byteCode[ip] == I.ret){ // tail calls
 					// clean up stack
 					stack.popFront(nargs);
 					byteCode = def.byteCode;
 					goto Ltailcall;
 				}
-				 // TODO: make less hacky
-				stack.push(0); stack.pop();
+
 				stack.stp-=nfargs;
 				Stack newstack = Stack(stack.stack[stack.stp+1..$], nfargs-1);
 				doInterpret(def.byteCode, newstack, handler);
@@ -1573,9 +1678,33 @@ Ltailcall:
 				if(val){ stack.top()%=val; break; }
 				goto Ldivbyzero;
 			case I.modsi:
-				long val = stack.pop();
-				if(val){ stack.top()=cast(long)stack.top()%val; break; }
+				long vall = stack.pop();
+				if(vall){ stack.top()=cast(long)stack.top()%vall; break; }
 				goto Ldivbyzero;
+
+				foreach(tt; ToTuple!(["float","double","real"])){
+					enum s = tt[0];
+					mixin("alias "~tt~" T;");
+					case mixin(`I.add`~s):
+						stack.push(stack.pop!T()+stack.pop!T());
+						break swtch;
+					case mixin(`I.sub`~s):
+						auto val = stack.pop!T();
+						stack.push(stack.pop!T()-val);
+						break swtch;
+					case mixin(`I.mul`~s):
+						stack.push(stack.pop!T()*stack.pop!T());
+						break swtch;
+					case mixin(`I.div`~s):
+						auto val = stack.pop!T();
+						stack.push(stack.pop!T()/val);
+						break swtch;
+					case mixin(`I.mod`~s):
+						auto val = stack.pop!T();
+						stack.push(stack.pop!T()%val);
+						break swtch;
+			}
+
 			// shifts
 			case I.shl32:
 				auto val = stack.pop();
@@ -1664,9 +1793,23 @@ Ltailcall:
 				stack.top()=cast(long)stack.top()>=val;
 				break;
 			case I.cmpaei:
-				auto val = stack.pop();
-				stack.top()=stack.top()>=val;
+				auto vall = stack.pop();
+				stack.top()=stack.top()>=vall;
 				break;
+
+			foreach(tt; ToTuple!(["float","double","real"])){
+				enum s = tt[0];
+				mixin("alias "~tt~" T;");
+				enum ops=[["is","is"],["e","=="],["l","<"],["le","<="],["ne","!="],["g",">"],["ge",">="]];
+
+				foreach(i; ToTuple!([0,1,2,3,4,5,6])){
+					enum op = ops[i];
+					case mixin(`I.cmp`~op[0]~s):
+						auto val = stack.pop!T();
+						stack.push(mixin(`stack.pop!T() `~op[1]~` val`));
+						break swtch;
+				}
+			}
 			// array operations
 			case I.ptra:
 				auto bcs = stack.pop!BCSlice();
@@ -1691,43 +1834,9 @@ Ltailcall:
 				auto el = stack.stack[stack.stp+1-stlen..stack.stp+1];
 				auto r = new void[els*len];
 
-				for(size_t i=0,j=0;i<el.length;i+=siz,j+=els){
+				for(size_t i=0,j=0;i<el.length;i+=siz,j+=els)
 					memcpy(&r[j], &el[i], els);
-				}
-/+				switch(els){
-					case 1: foreach(i,x; el) *cast(ubyte*)&r[i]=cast(ubyte)x; break;
-					case 2: foreach(i,x; el) *cast(ushort*)&r[2*i]=cast(ushort)x; break;
-					case 4: foreach(i,x; el) *cast(uint*)&r[4*i]=cast(uint)x; break;
-					case 8: foreach(i,x; el) *cast(ulong*)&r[8*i]=cast(ulong)x; break;
-					case 12: // eg. real, ireal on 32 bit
-						for(size_t i=0,j=0;i<el.length;i+=2,j+=12){
-							*cast(ulong*)&r[j]=cast(ulong)el[i];
-							*(cast(uint*)&r[j]+2)=cast(uint)el[i+1];
-						}
-						break;
-					case 16:
-						for(size_t i=0,j=0;i<el.length;i+=2,j+=16){
-							*cast(ulong*)&r[j]=cast(ulong)el[i];
-							*(cast(ulong*)&r[j]+1)=cast(ulong)el[i+1];
-						}
-						break;
-					case 24:
-						for(size_t i=0,j=0;i<el.length;i+=3,j+=24){
-							*cast(ulong*)&r[j]=cast(ulong)el[i];
-							*(cast(ulong*)&r[j]+1)=cast(ulong)el[i+1];
-							*(cast(ulong*)&r[j]+2)=cast(ulong)el[i+2];
-						}
-						break;
-					case 32:
-						for(size_t i=0,j=0;i<el.length;i+=4,j+=32){
-							*cast(ulong*)&r[j]=cast(ulong)el[i];
-							*(cast(ulong*)&r[j]+1)=cast(ulong)el[i+1];
-							*(cast(ulong*)&r[j]+2)=cast(ulong)el[i+2];
-							*(cast(ulong*)&r[j]+3)=cast(ulong)el[i+3];
-						}
-						break;						
-					default: assert(0, "unsupported size "~to!string(els));
-				}+/
+
 				stack.pop(stlen);
 				stack.push(BCSlice(r));
 				break;
@@ -1760,33 +1869,6 @@ Ltailcall:
 					goto Loutofbounds;
 				}
 				stack.pushRaw(r[i*els..(i+1)*els]);
-/+				switch(els){
-					case 1: stack.push(*cast(ubyte*)&r[i]); break;
-					case 2: stack.push(*cast(ushort*)&r[2*i]); break;
-					case 4: stack.push(*cast(uint*)&r[4*i]); break;
-					case 8: stack.push(*cast(ulong*)&r[8*i]); break;
-					case 12: // eg. real, ireal on 32 bit
-						stack.push(*cast(ulong*)&r[12*i]);
-						stack.push(*(cast(uint*)&r[12*i]+2));
-						break;
-					case 16:
-						stack.push(*cast(ulong*)&r[16*i]);
-						stack.push(*(cast(ulong*)&r[16*i]+1));
-						break;
-					case 24:
-						stack.push(*cast(ulong*)&r[24*i]);
-						stack.push(*(cast(ulong*)&r[24*i]+1));
-						stack.push(*(cast(ulong*)&r[24*i]+2));
-						break;
-					case 32:
-						stack.push(*cast(ulong*)&r[32*i]);
-						stack.push(*(cast(ulong*)&r[32*i]+1));
-						stack.push(*(cast(ulong*)&r[32*i]+2));
-						stack.push(*(cast(ulong*)&r[32*i]+3));
-						break;
-					default: assert(0);
-				}
-+/
 				break;
 			case I.storeakr:
 				keepr = true; goto case I.storea;
@@ -1808,21 +1890,6 @@ Ltailcall:
 					goto Loutofbounds;
 				}
 				r[i*els..(i+1)*els]=data[];
-				/+switch(els){
-					case 1: *cast(ubyte*)&r[i]=cast(ubyte)v1; break;
-					case 2: *cast(ushort*)&r[2*i]=cast(ushort)v1; break;
-					case 4: *cast(uint*)&r[4*i]=cast(uint)v1; break;
-					case 8: *cast(ulong*)&r[8*i]=cast(ulong)v1; break;
-					case 12: // eg. real, ireal on 32 bit
-						*cast(ulong*)&r[12*i]=cast(ulong)v1;
-						*(cast(uint*)&r[12*i]+2)=cast(uint)v2;
-						break;
-					case 16:
-						*cast(ulong*)&r[16*i]=cast(ulong)v1;
-						*(cast(ulong*)&r[16*i]+1)=cast(ulong)v2;
-						break;
-					default: assert(0);
-				}+/
 				if(keepr){
 					stack.push(bcs);
 					stack.push(i);
@@ -1919,6 +1986,17 @@ Ltailcall:
 				ptr.ptr+=val*els;
 				stack.push(ptr);
 				break;
+
+				enum ops=[["e","=="],["b","<"],["be","<="],["ne","!="],["a",">"],["ae",">="]];
+
+				foreach(i; ToTuple!([0,1,2,3,4,5])){
+					enum op = ops[i];
+					case mixin(`I.cmp`~op[0]~'p'):
+						auto b = stack.pop!BCPointer();
+						auto a = stack.pop!BCPointer();
+						stack.push(mixin(`a.ptr`~op[1]~`b.ptr`));
+						break swtch;
+				}
 			case I.errtbl:
 				assert(0);
 		}
@@ -1992,7 +2070,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==EmptyStm) && !is(T==BlockStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==EmptyStm) && !is(T==BlockStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2011,6 +2089,13 @@ mixin template CTFEInterpret(T) if(is(T==Declaration)){
 mixin template CTFEInterpret(T) if(is(T==Expression)){
 	// some expressions can be lvalues
 	LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){assert(0, to!string(typeid(this))~" "~to!string(this));}
+
+	// enable TCO for expressions that include flow control
+	void byteCompileRet(ref ByteCodeBuilder bld, bool isRefReturn){
+		if(isRefReturn) UnaryExp!(Tok!"&").emitAddressOf(bld,this);
+		else byteCompile(bld);
+		bld.emit(Instruction.ret);
+	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==EmptyStm)){
@@ -2061,13 +2146,6 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 			if(tu.isFunctionTy()){
 				assert(!!cast(Symbol)e);
 				auto s = (cast(Symbol)cast(void*)e);
-/+				if(!(s.meaning.stc & STCstatic)){
-					bld.emit(Instruction.pushcontext);
-					assert(s.scope_.functionScopeNestingLevel()>=
-					       s.meaning.scope_.functionScopeNestingLevel());
-					bld.emitConstant(s.scope_.functionScopeNestingLevel() -
-					                 s.meaning.scope_.functionScopeNestingLevel());
-				}+/
 				e.byteCompile(bld);
 			}else{
 				auto strat = e.byteCompileLV(bld);
@@ -2143,10 +2221,8 @@ mixin template CTFEInterpret(T) if(is(T _==PostfixExp!S,TokenType S)){
 			bld.emitConstant(getCTSizeof(ptr.ty));
 		}else{super.byteCompile(bld); assert(0);} // TODO: fix!
 		bld.emitSwap(siz);
-		bld.emit(Instruction.nop);
 		bld.emitTmppush(siz);
 		strat.emitStore(bld);
-		bld.emit(Instruction.nop);
 		bld.emitTmppop(siz);
 	}
 }
@@ -2174,29 +2250,6 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			bld.emit(I.push);
 			bld.emitConstant(0);
 		}
-		/+ (added a bytecode instruction that can do this)
-		static if((void[]).sizeof<=ulong.sizeof){
-			if(type.getElementType()){
-				static assert((void[]).sizeof == ulong.sizeof);
-				static assert((void*).sizeof == uint.sizeof);
-				bld.emit(I.push);
-				bld.emitConstant(2);
-				bld.emit(I.muli);
-				bld.emit(I.loadak);
-				bld.emitConstant(uint.sizeof);
-				bld.emit(I.tmppush); // push length to temp stack
-				bld.emit(I.push);
-				bld.emitConstant(1);
-				bld.emit(I.addi);
-				bld.emit(I.loada);
-				bld.emitConstant(uint.sizeof);
-				bld.emit(I.tmppop);
-				bld.emit(I.swap);
-				bld.emit(I.loadaa);
-				return;
-			}
-		}else static assert((void[]).sizeof == 2*ulong.sizeof);
-		+/
 		if(type.getHeadUnqual().isDynArrTy()){
 			bld.emitUnsafe(I.loadaa, this);
 			return;
@@ -2321,8 +2374,9 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			bld.ignoreResult(getBCSizeof(e1.type));
 			e2.byteCompile(bld);
 		}else static if(isAssignOp(S)&&S!=Tok!"~=" || isArithmeticOp(S) || isShiftOp(S) || isBitwiseOp(S) ||isRelationalOp(S)&&S!=Tok!"in"&&S!=Tok!"!in"){
-
-			if(auto ptr=type.isPointerTy()){
+			auto ptrt=type.isPointerTy();
+			if(auto ptr = ptrt?ptrt:e1.type.isPointerTy()){
+				enum op = TokChars!S;
 				static if(S==Tok!"+"){
 					if(e2.type.isIntegral()){
 						e1.byteCompile(bld);
@@ -2354,6 +2408,23 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 					bld.emitConstant(getCTSizeof(ptr.ty));
 					if(!isLvalue){ strat.emitStoreKV(bld); return null; }
 					else{ strat.emitStoreKR(bld); return strat; }
+				}else static if(isRelationalOp(S)){
+					assert(e2.type is e1.type);
+					e1.byteCompile(bld);
+					e2.byteCompile(bld);
+					static if(op=="=="||op=="is"||op=="!<>") bld.emit(I.cmpep);
+					else static if(op=="!="||op=="!is"||op=="<>") bld.emit(I.cmpnep);
+					else static if(op=="<"||op=="!>=") bld.emit(I.cmpbp);
+					else static if(op=="<="||op=="!>") bld.emit(I.cmpbep);
+					else static if(op==">"||op=="!<=") bld.emit(I.cmpap);
+					else static if(op==">="||op=="!<") bld.emit(I.cmpaep);
+					else static if(op=="<>="||op=="!<>="){
+						bld.ignoreResult(getBCSizeof(e2.type));
+						bld.ignoreResult(getBCSizeof(e1.type));
+						bld.emit(I.push);
+						bld.emitConstant(op=="<>=");
+					}else static assert(0);
+					return null;
 				}
 			}else{
 				assert(type.isBasicType());
@@ -2371,11 +2442,11 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			e2.byteCompile(bld);
 
 
-			if(auto bt=e1.type.getUnqual().isBasicType()){
-				assert(!isShiftOp(S) && !isBitwiseOp(S) || bt.isIntegral());
+			assert(!isShiftOp(Tok!op) && !isBitwiseOp(Tok!op) || type.isIntegral());
+			if(auto bt=e1.type.getHeadUnqual().isIntegral()){
 				auto size = bt.bitSize(), signed = bt.isSigned();
 				static if(op=="<<"||op==">>"||op==">>>"){
-					bool isNarrow = size == 32;
+					bool isNarrow = size <= 32;
 					assert(isNarrow || size == 64);
 				}
 				static if(op=="+") bld.emit(I.addi);
@@ -2404,20 +2475,91 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 					bld.emit(I.push);
 					bld.emitConstant(op=="<>=");
 				}else static assert(0, op);
-				if(S!=Tok!"=" && !isBitwiseOp(S) && !isRelationalOp(S) && size<64){
+				if(S!=Tok!"=" && !isBitwiseOp(Tok!op) && !isRelationalOp(S) && size<64){
 					bld.emit(signed?I.truncs:I.trunc);
 					bld.emitConstant(size);
 				}
-				static if(isAssignOp(S)){
-					if(!isLvalue){ strat.emitStoreKV(bld); return null; }
-					else{ strat.emitStoreKR(bld); return strat; }
+			}else static if(isArithmeticOp(Tok!op) && op!="^^"){
+				if(auto bt0=e1.type.getHeadUnqual().isBasicType())
+				if(auto bt=bt0.isFloating()){
+					enum which = op=="+"?"add":
+						         op=="-"?"sub":
+						         op=="*"?"mul":
+						         op=="/"?"div":
+						         op=="%"?"mod":
+						    /+op=="^^"?+/"pow";
+					foreach(tt; ToTuple!(["float","double","real"])){
+						enum s = tt[0];
+						mixin("alias "~tt~" T;");
+						if(bt is Type.get!T()){
+							bld.emit(mixin(`I.`~which~s));
+							break;
+						}
+					}
+				}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());	// TODO: operators for all built-in types
+			}else static if(isRelationalOp(S) && S!=Tok!"in"){
+				if(auto bt0=e1.type.getHeadUnqual.isBasicType())
+					if(auto bt=bt0.isFloating()){
+					string either(string op1, string op2, bool neg=false){
+						return mixin(X!q{
+						});
+					}
+
+					foreach(tt; ToTuple!(["float","double","real"])){
+						enum s = tt[0];
+						mixin("alias "~tt~" T;");
+						if(bt is Type.get!T()){
+							static if(op=="is") bld.emit(mixin(`I.cmpis`~s));
+							else static if(op=="!is"){
+								bld.emit(mixin(`I.cmpis`~s));
+								bld.emit(I.notb);
+							}else static if(op=="==") bld.emit(mixin(`I.cmpe`~s));
+							else static if(op=="!=") bld.emit(mixin(`I.cmpne`~s));
+							else static if(op=="<") bld.emit(mixin(`I.cmpl`~s));
+							else static if(op=="<=") bld.emit(mixin(`I.cmple`~s));
+							else static if(op==">") bld.emit(mixin(`I.cmpg`~s));
+							else static if(op==">=") bld.emit(mixin(`I.cmpge`~s));
+							else static if(op=="<>"||op=="!<>"){
+								bld.emitDup(2*getBCSizeof(bt));
+								bld.emit(mixin(`I.cmpl`~s));
+								bld.emit(I.tmppush);
+								bld.emit(mixin(`I.cmpg`~s));
+								bld.emit(I.tmppop);
+								bld.emit(I.or);
+								static if(op=="!<>") bld.emit(I.notb);
+							}else static if(op=="<>="||op=="!<>="){
+								auto sz = getBCSizeof(bt);
+								bld.emitDup(sz);
+								bld.emit(mixin(`I.cmpe`~s));
+								bld.emit(I.tmppush);
+								bld.emitDup(sz);
+								bld.emit(mixin(`I.cmpe`~s));
+								bld.emit(I.tmppop);
+								bld.emit(I.and);
+								static if(op == "!<>=") bld.emit(I.notb);
+							}else static if(op=="!<"){
+								bld.emit(mixin(`I.cmpl`~s));
+								bld.emit(I.notb);								
+							}else static if(op=="!<="){
+								bld.emit(mixin(`I.cmpl`~s));
+								bld.emit(I.notb);
+							}else static if(op=="!>="){
+								bld.emit(mixin(`I.cmpge`~s));
+								bld.emit(I.notb);
+							}else static if(op=="!>"){
+								bld.emit(mixin(`I.cmpg`~s));
+								bld.emit(I.notb);
+							}else static assert(0);
+							break;
+						}
+					}
 				}
-			}else{
-				// TODO: operators for all built-in types
-				super.byteCompile(bld);
-				return null;
-			}
-		}else static if(S==Tok!"||"||S==Tok!"&&"){
+			}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());	// TODO: operators for all built-in types
+			static if(isAssignOp(S)){
+				if(!isLvalue){ strat.emitStoreKV(bld); return null; }
+				else{ strat.emitStoreKR(bld); return strat; }
+			 }
+	}else static if(S==Tok!"||"||S==Tok!"&&"){
 			assert(e1.type is Type.get!bool());
 			e1.byteCompile(bld);
 			auto tu = type.getHeadUnqual();
@@ -2467,6 +2609,15 @@ mixin template CTFEInterpret(T) if(is(T==TernaryExp)){
 		end.here();
 	}
 
+	override void byteCompileRet(ref ByteCodeBuilder bld, bool isRefReturn){
+		e1.byteCompile(bld);
+		bld.emit(Instruction.jz);
+		auto otherwise = bld.emitLabel();
+		e2.byteCompileRet(bld,isRefReturn);
+		otherwise.here();
+		e3.byteCompileRet(bld,isRefReturn);
+	}
+
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		alias Instruction I;
 		e1.byteCompile(bld);
@@ -2493,12 +2644,12 @@ mixin template CTFEInterpret(T) if(is(T==BlockStm)){
 }
 mixin template CTFEInterpret(T) if(is(T==LabeledStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		if(!bclabel.initialized()) bclabel = bld.getLabel();
+		if(!bclabel.initialized(bld)) bclabel = bld.getLabel();
 		bclabel.here();
 		s.byteCompile(bld);
 	}
 	ref ByteCodeBuilder.Label getBCLabel(ref ByteCodeBuilder bld){
-		if(!bclabel.initialized()) bclabel = bld.getLabel();
+		if(!bclabel.initialized(bld)) bclabel = bld.getLabel();
 		return bclabel;
 	}
 private:
@@ -2508,8 +2659,8 @@ mixin template CTFEInterpret(T) if(is(T==ExpressionStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		e.byteCompile(bld);
 		auto l = getBCSizeof(e.type);
-		assert(~l);
-		bld.ignoreResult(l);
+		if(~l) bld.ignoreResult(l);
+		else bld.emitUnsafe(Instruction.hlt, this); // TODO: probably redundant
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==IfStm)){
@@ -2608,8 +2759,8 @@ private:
 
 mixin template CTFEInterpret(T) if(is(T==ReturnStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		if(e) e.byteCompile(bld);
-		bld.emit(Instruction.ret);
+		if(e) e.byteCompileRet(bld, isRefReturn);
+		else bld.emit(Instruction.ret);
 	}
 }
 
@@ -2666,8 +2817,23 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				bld.emitConstant(*(cast(ulong*)&r+i+1));				
 			}
 			return;
+		}else{
+			assert(tu is Type.get!(typeof(null))());
+			// TODO: solve more elegantly
+			foreach(i;0..getBCSizeof(Type.get!(typeof(null))())){
+				bld.emit(Instruction.push);
+				bld.emitConstant(0);
+			}
+			return;
 		}
-		bld.error(format("cannot interpret %s during compile time yet.",toString()), loc);
+	}
+
+	// for eg. top-level immutable ref parameters that have been const folded
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		byteCompile(bld);
+		emitMakeArray(bld,type.getDynArr(), 1);
+		bld.emit(Instruction.ptra);
+		return LVpointer(type, this);
 	}
 private:
 	void* bcSaveFromGC;
@@ -2699,6 +2865,10 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		alias Instruction I;
 		auto t1 = e.type.getHeadUnqual(), t2 = type.getHeadUnqual();
 		if(t1.equals(t2)) return;
+		if(t2.getHeadUnqual() is Type.get!void()){
+			bld.ignoreResult(getBCSizeof(t1));
+			return;
+		}
 		if(auto from=t1.isIntegral()){
 			if(auto to=t2.isIntegral()){
 				if(from.bitSize()<=to.bitSize()) return;
@@ -2759,7 +2929,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	   (loads a pointer for STCbyref, loads a delegate for STClazy)
 	 */
 	private void loadVariable(ref ByteCodeBuilder bld, VarDecl vd){
-		if(vd.stc&STCstatic && vd.type !is vd.type.getImmutable()){
+		if(vd.stc&STCstatic && (!(vd.stc&(STCimmutable|STCconst))||!vd.init)){
 			bld.error(format("cannot access variable '%s' at compile time", vd.name.toString()), loc);
 			return;
 		}if(vd.stc&STCenum){
@@ -2770,8 +2940,9 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			// TODO: nested functions
 			size_t len, off = vd.getBCLoc(len);
 			if(!~off || !len){
-				if(vd.stc&STCimmutable && vd.init && vd.init.isConstant()){
-					// TODO: this can be inefficient for immutable variables
+				if(isConstant()){
+					// TODO: this can be inefficient for non-enum variables
+					// and it destroys reference identity for them
 					vd.init.byteCompile(bld);
 					return;
 				}
@@ -2783,8 +2954,8 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 				bld.emitConstant(off);
 				return;
 			}else{
-				auto diff = scope_.functionScopeNestingLevel() -
-					meaning.scope_.functionScopeNestingLevel();
+				auto diff = scope_.getFunctionNesting() -
+					meaning.scope_.getFunctionNesting();
 				if(!diff){
 					bld.emit(Instruction.push);
 					bld.emitConstant(off);
@@ -2804,8 +2975,8 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	}
 
 	override void byteCompile(ref ByteCodeBuilder bld){
-		assert(scope_.functionScopeNestingLevel() >=
-		       meaning.scope_.functionScopeNestingLevel());
+		assert(scope_.getFunctionNesting() >=
+		       meaning.scope_.getFunctionNesting());
 		if(auto vd = meaning.isVarDecl()){
 			loadVariable(bld, vd);
 			if(vd.stc&STCbyref){
@@ -2819,8 +2990,8 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			assert(!(vd.stc&STCbyref)||!(vd.stc&STClazy));
 			return;
 		}else if(meaning.isFunctionDef()){
-			auto diff = scope_.functionScopeNestingLevel() -
-				meaning.scope_.functionScopeNestingLevel();
+			auto diff = scope_.getFunctionNesting() -
+				meaning.scope_.getFunctionNesting();
 			static assert(this.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
 			if(!(meaning.stc&STCstatic)){
 				bld.emit(Instruction.pushcontext);
@@ -2840,7 +3011,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			}
 			size_t len, off = vd.getBCLoc(len);
 			if(!~off || !len){
-				if(vd.stc&STCimmutable && vd.init && vd.init.isConstant()){
+				if(isConstant()){
 					// TODO: this can be inefficient for immutable variables
 					vd.init.byteCompile(bld);
 					emitMakeArray(bld,vd.type.getDynArr(),1);
@@ -2852,12 +3023,22 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			}
 			bld.emit(Instruction.push);
 			bld.emitConstant(off);
-			auto diff = scope_.functionScopeNestingLevel() -
-				meaning.scope_.functionScopeNestingLevel();
+			auto diff = scope_.getFunctionNesting() -
+				meaning.scope_.getFunctionNesting();
 			if(diff){bld.emit(Instruction.push); bld.emitConstant(diff);}
 			return vd.inHeapContext?diff?LVpopcc(vd.type):LVpopc(vd.type):LVpopr(len);
 		}
 		bld.error(format("cannot interpret symbol '%s' at compile time", toString()), loc);
+		return LVpopc(Type.get!void()); // dummy
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==FieldExp)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		bld.error("field access not supported during CTFE yet",loc);
+	}
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		bld.error("field access not supported during CTFE yet",loc);
 		return LVpopc(Type.get!void()); // dummy
 	}
 }
@@ -2876,11 +3057,12 @@ uint getBCSizeof(Type type){
 		if(bt.op == Tok!"void") return 0;
 		return (bt.bitSize()+63)/64;
 	}
-	if(type.isDynArrTy()) return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
+	if(type.isDynArrTy() || type is Type.get!EmptyArray())
+		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return 1;
-		return (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
-	}
+	ptr: return (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
+	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return 2;
 	return -1;
@@ -2955,6 +3137,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		static struct MarkHeapContext{
 			enum manualPropagate = true;
 			void perform(Symbol self){
+				if(!self.meaning) return;
+				//assert(!!self.meaning, self.toString());
 				if(auto vd = self.meaning.isVarDecl()){
 					vd.inHeapContext = true;
 				}
@@ -2977,14 +3161,15 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				runAnalysis!MarkHeapContext(self.e1);
 			}
 		}
+		// TODO: this is quite conservative for ease of implementation
 		static struct HeapContextAnalysis{
 			void perform(UnaryExp!(Tok!"&") self){
 				runAnalysis!MarkHeapContext(self.e);
 			}
 			void perform(Symbol self){
 				if(self.sstate!=SemState.completed) return;
-				if(self.scope_.functionScopeNestingLevel()       >
-				   self.meaning.scope_.functionScopeNestingLevel()){
+				if(self.scope_.getFunctionNesting()       >
+				   self.meaning.scope_.getFunctionNesting()){
 					runAnalysis!MarkHeapContext(self);
 				}
 				if(self.isStrong){
@@ -2999,6 +3184,13 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 						runAnalysis!MarkHeapContext(x);
 				}
 			}
+			void perform(ReturnStm self){
+				if(self.isRefReturn) runAnalysis!MarkHeapContext(self.e);
+			}
+			
+			void perform(FunctionDef self){
+				if(!(self.stc&STCstatic)) self.resetByteCode();
+			}
 		}
 		runAnalysis!HeapContextAnalysis(this);
 
@@ -3012,6 +3204,10 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			loc+=len;
 		}
 		bcnumargs = loc;
+	}
+
+	void resetByteCode(){
+		_byteCode = null;		
 	}
 
 	@property ByteCode byteCode(){
@@ -3064,49 +3260,22 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		return _byteCode;
 	}
 
-	final Variant interpretCall(Variant[] args, ErrorHandler handler)in{
+	final Variant interpretCall(ErrorHandler handler)in{
 		assert(sstate == SemState.completed);
-		assert(type.params.length == args.length);
+		assert(type.params.length == 0);
 	}body{
 		ulong[100] stackst;
 		auto stack=Stack(stackst[]);
 
 		bcpreanalyze();
-		static assert(0UL.sizeof>=(void*).sizeof);
-
-		foreach(i,x; type.params){
-			auto ty = x.type.getHeadUnqual();
-			if(auto bt = ty.isIntegral()){
-				stack.push(args[i].get!ulong());
-				goto paramok;
-			}else if(ty is Type.get!float() || ty is Type.get!ifloat()){
-				stack.push(args[i].get!float());
-				goto paramok;
-			}else if(ty is Type.get!double() || ty is Type.get!idouble()){
-				stack.push(args[i].get!double());
-				goto paramok;
-			}else if(ty is Type.get!real() || ty is Type.get!ireal()){
-				stack.push(args[i].get!real());
-				goto paramok;
-			}else if(ty.getElementType()){
-				stack.push(args[i].get!BCSlice());
-				goto paramok;
-			}
-			assert(0, "unsupported argument type "~x.type.toString());
-		paramok:;
-				auto len = getBCSizeof(ty);
-				//x.setBCLoc(stack.stp-len+1, len);
-		}
 
 		byteCode.doInterpret(stack, handler);
 
-		if(!(stc&STCstatic)) _byteCode = null; // TODO: this is maybe too conservative
-		
 		auto ret = type.ret.getHeadUnqual();
 		if(auto bt = ret.isBasicType()){
 			scope(exit) assert(stack.empty);
 			swtch:switch(bt.op){
-				foreach(x; ToTuple!integralTypes){ // TODO: floating point
+				foreach(x; ToTuple!integralTypes){
 					case Tok!x: return Variant(mixin(`cast(`~x~`)stack.pop()`));
 				}
 				import std.typetuple;
@@ -3116,14 +3285,13 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 		}
 		if(ret.getElementType()) return Variant.fromBCSlice(stack.pop!BCSlice(),ret);
+		else if(ret is Type.get!(typeof(null))) return Variant(null);
 		assert(0,"unsupported return type "~type.ret.toString());
 	}
-
-	// final override void byteCompile(ref ByteCodeBuilder bld){ }
 }
 
 mixin template CTFEInterpret(T) if(is(T==CallExp)){
-	override void byteCompile(ref ByteCodeBuilder bld){
+	private void emitCall(ref ByteCodeBuilder bld){
 		bool ctx = false;
 		if(auto s = fun.isSymbol())if(auto m = s.meaning)
 			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
@@ -3161,6 +3329,15 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 		}
 		bld.emitUnsafe(Instruction.call, this);
 		bld.emitConstant(numargs);
+	}
+	override void byteCompile(ref ByteCodeBuilder bld){
+		emitCall(bld);
+		if(e.type.getFunctionTy().stc&STCref) LVpointer(type, this).emitLoad(bld);
+	}
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert(e.type.getFunctionTy().stc&STCref);
+		emitCall(bld);
+		return LVpointer(type, this);
 	}
 }
 

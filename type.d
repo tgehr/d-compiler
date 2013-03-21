@@ -18,7 +18,9 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 
 	static BasicType get(T)() if(.isBasicType!T){
 		if(uniqueType!T) return uniqueType!T;
-		return uniqueType!T=New!BasicType(Tok!(T.stringof));
+		uniqueType!T=New!BasicType(Tok!(T.stringof));
+		uniqueType!T.sstate = SemState.completed;
+		return uniqueType!T;
 	}
 
 	static Type get(T: T*)(){
@@ -88,6 +90,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		ArrayTy,
 		FunctionTy,
 		DelegateTy,
+		AggregateTy,
 	);
 	
 	mixin Visitors;
@@ -143,9 +146,9 @@ class FunctionTy: Type{
 	Parameter[] params;
 	VarArgs vararg;
 	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; rret=retn; params=plist; vararg=va;}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rret?rret.toString():ret?ret.toString():"")~pListToString();}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rret&&!ret?rret.toString():ret?ret.toString():"")~pListToString();}
 	string pListToString(){
-		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")");
+		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")")~STCtoString(stc);
 	}
 
 	mixin DownCastMethod;
@@ -163,7 +166,7 @@ class FunctionTy: Type{
 class DelegateTy: Type{
 	FunctionTy ft;
 	this(FunctionTy ft)in{assert(ft !is null&&(ft.ret !is null||ft.rret !is null));}body{this.ft=ft;}
-	override string toString(){return (ft.rret?ft.rret.toString():ft.ret?ft.ret.toString:"auto")~" delegate"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");}
+	override string toString(){return (ft.rret&&!ft.ret?ft.rret.toString():ft.ret?ft.ret.toString:"auto")~" delegate"~ft.pListToString();}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -223,7 +226,7 @@ bool basicTypeIsSigned(TokenType op){
 final class BasicType: Type{
 	TokenType op;
 	this(TokenType op)in{assert(strength[op]||op==Tok!"void");}body{
-		this.op=op; sstate=SemState.completed;
+		this.op=op;
 		if(op==Tok!"void") super(0);
 		else super();
 	}
@@ -237,7 +240,7 @@ class PointerTy: Type{
 	Expression e;
 	this(Expression next)in{assert(next&&1);}body{e=next;}
 	override string toString(){
-		if(auto tt=e.isType())if(auto ft=tt.isFunctionTy()) return (ft.rret?ft.rret.toString():ft.ret?ft.ret.toString():"auto")~" function"~ft.pListToString()~(ft.stc?" "~STCtoString(ft.stc):"");
+		if(auto tt=e.isType())if(auto ft=tt.isFunctionTy()) return (ft.rret&&!ft.ret?ft.rret.toString():ft.ret?ft.ret.toString():"auto")~" function"~ft.pListToString();
 		return _brk(e.toString()~'*');
 	}
 	override PointerTy isPointerTy(){return this;}
@@ -317,3 +320,12 @@ class InoutTy: QualifiedTy{
 	mixin Visitors;	
 }
 
+class AggregateTy: Type{
+	AggregateDecl decl;
+	this(AggregateDecl decl){ this.decl = decl; sstate = SemState.completed; }
+
+	override string toString(){return decl.name.name;}
+
+	mixin DownCastMethod;
+	mixin Visitors;
+}

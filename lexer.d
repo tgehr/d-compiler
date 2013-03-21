@@ -442,6 +442,7 @@ private:
 								// make sure the identifier stops here:
 								if('a' <= *p && *p <='z') goto default;
 								if('A' <= *p && *p <='Z') goto default;
+								if('0' <= *p && *p <='9') goto default;
 								if(*p&0x80){
 									try{
 										auto ch=utf.decode(p[0..4],len);

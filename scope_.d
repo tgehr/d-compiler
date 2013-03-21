@@ -34,6 +34,10 @@ class MutableAliasRef: Declaration{ // used if a declaration references another 
 	override MutableAliasRef isMutableAliasRef(){return this;}
 }
 
+class DoesNotExistDecl: Declaration{
+	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
+	Identifier originalReference;
+}
 
 class Scope{ // TOP LEVEL (MODULE) SCOPE
 	this(ErrorHandler handler){this.handler=handler;}
@@ -45,8 +49,12 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		if(auto d=symtab.get(decl.name.ptr,null)){
-			if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
+		if(auto d=lookupHere(decl.name,null)){
+			 if(typeid(d) is typeid(DoesNotExistDecl)){
+				error(format("declaration of '%s' results in potential ambiguity", decl.name), decl.name.loc);
+				note("offending symbol lookup", d.name.loc);
+				return false;
+		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					fd.scope_ = this;
 					os.add(fd);
@@ -65,21 +73,38 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		}
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
+		Identifier.tryAgain = true; // TODO: is this the right place for this?
 		return true;
 	}
 
-	// TODO: useful or just unnecessarily convenient?
-	Declaration lookup(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, alt);
+	bool inexistent(Identifier ident){
+		if(auto d = lookupHere(ident, null)){
+			if(typeid(d) !is typeid(DoesNotExistDecl)){
+				error(format("declaration of '%s' results in potential ambiguity", d.name), d.name.loc);
+				note("offending symbol lookup", ident.loc);
+				return false;
+			}
+		}else insert(New!DoesNotExistDecl(ident));
+		return true;
 	}
-	Declaration lookup(Identifier ident){
-		if(auto lk = lookup(ident, null)) return lk;
-		error(format("undefined identifier '%s'",ident.name), ident.loc);
-		return New!ErrorDecl();
+
+	// scope where the identifier will be resolved next
+	Scope getUnresolved(Identifier ident){
+		return this;
+	}
+
+	Declaration lookup(Identifier ident, lazy Declaration alt){
+		return lookupHere(ident, alt);
+	}
+
+	Declaration lookupHere(Identifier ident, lazy Declaration alt){
+		return symtab.get(ident.ptr, alt);
 	}
 
 	import std.stdio;
 	FunctionDef getFunction(){return null;}
+	AggregateDecl getAggregate(){return null;}
+	Declaration getDeclaration(){return null;}
 	// control flow structures:
 	BreakableStm getBreakableStm(){return null;}
 	LoopingStm getLoopingStm(){return null;}
@@ -94,7 +119,8 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 	int unresolvedLabels(scope int delegate(GotoStm) dg){return 0;}
 
 	// functionality handy for closures:
-	size_t functionScopeNestingLevel(){ return 0; }
+	size_t getFunctionNesting(){ return 0; }
+	size_t getNesting(){ return 0; }
 
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
@@ -109,7 +135,7 @@ private:
 	//FwdRef[] FwdRefs; // TODO: maybe use more efficient datastructure
 }
 
-abstract class NestedScope: Scope{
+class NestedScope: Scope{
 	Scope parent;
 	// override Scope pop(){return parent;}
 	this(Scope parent) in{assert(!!parent);}body{
@@ -118,7 +144,17 @@ abstract class NestedScope: Scope{
 	}
 
 	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, parent.lookup(ident, alt));
+		auto r=super.lookupHere(ident, null);
+		if(!r) return null;
+		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookup(ident, alt);
+		return r;
+	}
+
+	override Scope getUnresolved(Identifier ident){
+		if(auto d=lookupHere(ident, null))
+			if(typeid(d) is typeid(DoesNotExistDecl))
+				return parent.getUnresolved(ident);
+		return this;
 	}
 
 	override bool insertLabel(LabeledStm stm){
@@ -134,18 +170,63 @@ abstract class NestedScope: Scope{
 		return parent.unresolvedLabels(dg);
 	}
 
-	override size_t functionScopeNestingLevel(){ return parent.functionScopeNestingLevel(); }
-
+	override size_t getFunctionNesting(){ return parent.getFunctionNesting(); }
+	override size_t getNesting(){ return parent.getNesting()+1; }
 
 	override FunctionDef getFunction(){return parent.getFunction();}
+	override AggregateDecl getAggregate(){return parent.getAggregate();}
+	override Declaration getDeclaration(){return parent.getDeclaration();}
 
 }
 
-final class FunctionScope: NestedScope{ // Forward references don't get resolved
+class AggregateScope: NestedScope{
+	this(AggregateDecl decl) in{assert(!!decl.scope_);}body{
+		super(decl.scope_);
+		aggr = decl;
+	}
+
+	override AggregateDecl getAggregate(){ return aggr; }
+	override AggregateDecl getDeclaration(){ return aggr; }
+private:
+	AggregateDecl aggr;
+}
+
+class TemplateScope: NestedScope{
+	Scope iparent;
+	TemplateInstanceDecl tmpl;
+	this(Scope parent, Scope iparent, TemplateInstanceDecl tmpl) in{assert(!!parent);}body{
+		super(parent);
+		this.iparent = iparent;
+		this.tmpl=tmpl;
+	}
+
+	override size_t getFunctionNesting(){ return iparent.getFunctionNesting(); }
+	override size_t getNesting(){ return iparent.getNesting()+1; }
+
+	override FunctionDef getFunction(){return iparent.getFunction();}
+	override AggregateDecl getAggregate(){return iparent.getAggregate();}
+	override Declaration getDeclaration(){return iparent.getDeclaration();}	
+}
+
+class OrderedScope: NestedScope{ // Forward references don't get resolved
+	this(Scope parent){super(parent);}
+	override Declaration lookup(Identifier ident, lazy Declaration alt){
+		return lookupHere(ident, parent.lookup(ident, alt));
+	}
+	override bool inexistent(Identifier ident){
+		return parent.inexistent(ident);
+	}
+	override Scope getUnresolved(Identifier ident){
+		return parent.getUnresolved(ident);
+	}
+
+}
+
+final class FunctionScope: OrderedScope{
 	this(Scope parent, FunctionDef fun){
 		super(parent);
 		this.fun=fun;
-	}	
+	}
 
 	override bool insertLabel(LabeledStm stm){
 		if(auto s = lstmsymtab.get(stm.l.ptr,null)){
@@ -170,12 +251,10 @@ final class FunctionScope: NestedScope{ // Forward references don't get resolved
 		else _unresolvedLabels~=stm;
 	}
 
-	override size_t functionScopeNestingLevel(){
-		return parent.functionScopeNestingLevel()+1;
-	}
+	override size_t getFunctionNesting(){ return parent.getFunctionNesting()+1; }
 
 	override FunctionDef getFunction(){return fun;}
-	alias Scope.lookup lookup; // overload lookup
+	override FunctionDef getDeclaration(){return fun;}
 protected:
 	bool canDeclareNested(Declaration decl){ // for BlockScope
 		return !(decl.name.ptr in symtab); // TODO: More complicated stuff.
@@ -186,13 +265,15 @@ private:
 	GotoStm[] _unresolvedLabels;
 }
 
-class BlockScope: NestedScope{ // No shadowing of declarations in the enclosing function.
+class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing function.
 	this(Scope parent){
 		super(parent);
 	}
+
 	override bool insert(Declaration decl){
 		if(!parent.canDeclareNested(decl)){
-			auto confl=parent.lookup(decl.name);
+			auto confl=parent.lookup(decl.name, null);
+			assert(!!confl);
 			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);
 			return false;

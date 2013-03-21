@@ -91,7 +91,7 @@ bool isAssignOp(TokenType op){
 bool isIntRelationalOp(TokenType op){
 	switch(op){
 		// relational operators
-		case Tok!"==",Tok!"!=":
+		case Tok!"==",Tok!"!=",Tok!"is",Tok!"!is":
 		case Tok!">",Tok!"<", Tok!">=",Tok!"<=":
 			return true;
 		default: return false;

@@ -23,9 +23,9 @@ template Moo(){int Moo(int x){return x;}}
 
 //enum int a=b,b=a;
 
-//typeof(z) x;
-//typeof(x) y;
-//typeof(y) z;
+typeof(z) x;
+typeof(x) y;
+typeof(y) z;
 
 
 int foo(int x){return x;}
@@ -41,7 +41,7 @@ void fuz(inout(int)*);
 
 static if(false&&foo||true){}
 
-mixin(`pragma(msg, ["hellooooooo"]~["foo"d]);`);
+mixin(`pragma(msg, ["bar"]~["foo"d]);`);
 
 void main(){
 	immutable(const(int)) u1;

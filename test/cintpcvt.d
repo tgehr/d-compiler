@@ -16,7 +16,8 @@ static assert(x(1.5L) == 1);
 
 static assert(x(1e228) == 0);
 
-// pragma(msg, ((double x)=>(double y)=>x+y)(2)(3)); // TODO: eventually this must work.
+pragma(msg, ((double x)=>(double y)=>x+y)(2)(3));
+
 
 static assert((double x){return cast(short)cast(ulong)x;}(1e10) == -7168);
 static assert(((double x)=>cast(short)x)(1e10) == -7168);
@@ -32,6 +33,8 @@ int y(real a){return cast(int)a;}
 
 //pragma(msg, {return 2.0i+1;}());
 
+const(int) constvar = 2;
+static assert(constvar==2);
 
 uint foo(int x, real y){
 	if(x) return cast(uint)y;

@@ -1,4 +1,5 @@
 // Written in the D programming language.
+import module_;
 
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
@@ -26,12 +27,16 @@ abstract class Declaration: Statement{
 	mixin DownCastMethods!(
 		VarDecl,
 		FunctionDecl,
-		FunctionDef
-,
-		// purely semantic nodes
+		FunctionDef,
+		TemplateDecl,
+		TemplateInstanceDecl,
 		OverloadableDecl,
 		OverloadSet,
-		// FwdRef,
+		GenerativeDecl,
+		AliasDecl,
+		AggregateDecl,
+		ValueAggregateDecl,
+		ReferenceAggregateDecl,
 		MutableAliasRef,
 		ErrorDecl,
 	);
@@ -57,7 +62,7 @@ class ErrorDecl: Declaration{
 class ModuleDecl: Declaration{
 	Expression symbol;
 	this(STC stc, Expression sym){symbol=sym; super(stc, null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"module "~symbol.toString()~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"module "~symbol.toString()~";";}
 }
 
 final class ImportBindingsExp: Expression{
@@ -69,17 +74,24 @@ final class ImportBindingsExp: Expression{
 class ImportDecl: Declaration{
 	Expression[] symbols;
 	this(STC stc, Expression[] sym){symbols=sym; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"import "~join(map!(to!string)(symbols),", ")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"import "~join(map!(to!string)(symbols),", ")~";";}
 }
 class EnumDecl: Declaration{
 	Expression base;
 	Expression[2][] members;
 	this(STC stc,Identifier name, Expression base, Expression[2][] mem){this.base=base; members=mem; super(stc,name);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"enum"~(name?" "~name.toString():"")~(base?":"~base.toString():"")~
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"enum"~(name?" "~name.toString():"")~(base?":"~base.toString():"")~
 			"{"~join(map!((a){return a[0].toString()~(a[1]?"="~a[1].toString():"");})(members),",")~"}";}
 }
 
-abstract class ConditionalDecl: Declaration{
+abstract class GenerativeDecl: Declaration{
+	this(STC stc, Identifier name){super(stc, name);}
+	
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+
+abstract class ConditionalDecl: GenerativeDecl{
 	Statement bdy;
 	Statement els;
 	this(STC stc,Statement b,Statement e)in{assert(b&&1);}body{bdy=b; els=e; super(stc,null);}
@@ -87,94 +99,101 @@ abstract class ConditionalDecl: Declaration{
 class VersionSpecDecl: Declaration{
 	Expression spec;
 	this(STC stc,Expression s)in{assert(s!is null);}body{spec=s; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"version="~spec.toString()~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"version="~spec.toString()~";";}
 }
 class VersionDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e)in{assert(c!is null);}body{cond=c; super(stc,b,e);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"version("~cond.toString()~") "~bdy.toString()~
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"version("~cond.toString()~") "~bdy.toString()~
 			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class DebugSpecDecl: Declaration{
 	Expression spec;
 	this(STC stc,Expression s)in{assert(s!is null);}body{spec=s; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"debug="~spec.toString()~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"debug="~spec.toString()~";";}
 }
 class DebugDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e){cond=c; super(stc,b,e);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"debug"~(cond?"("~cond.toString()~") ":"")~bdy.toString()~
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"debug"~(cond?"("~cond.toString()~") ":"")~bdy.toString()~
 			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticIfDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b,Statement e)in{assert(c&&b);}body{cond=c; super(stc,b,e);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"static if("~cond.toString()~") "~bdy.toString()~
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"static if("~cond.toString()~") "~bdy.toString()~
 			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
+
+	mixin Visitors;
 }
 class StaticAssertDecl: Declaration{
 	Expression[] a;
 	this(STC stc,Expression[] args){a = args; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"static assert("~join(map!(to!string)(a),",")~");";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"static assert("~join(map!(to!string)(a),",")~");";}
 
 	mixin Visitors;
 }
 
-class MixinDecl: Declaration{
+class MixinDecl: GenerativeDecl{
 	Expression e;
 	this(STC stc, Expression exp){e=exp; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"mixin("~e.toString()~");";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"mixin("~e.toString()~");";}
 	mixin Visitors;
 }
 class AliasDecl: Declaration{
 	Declaration decl;
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"alias "~decl.toString();}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"alias "~decl.toString();}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class TypedefDecl: Declaration{
 	Declaration decl;
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"typedef "~decl.toString();}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"typedef "~decl.toString();}
 }
 class BlockDecl: Declaration{
 	Declaration[] decls;
 	this(STC s,Declaration[] declarations){stc=s; decls=declarations; super(stc,null);}
-	override string toString(){return STCtoString(stc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
+	override string toString(){return STCtoString(astStc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
 
 	mixin Visitors;
 }
 class AttributeDecl: Declaration{
 	Declaration[] decls;
 	this(STC stc,Declaration[] declarations){decls=declarations; super(stc,null);}
-	override string toString(){return STCtoString(stc)~":\n"~join(map!(to!string)(decls),"\n");}
+	override string toString(){return STCtoString(astStc)~":\n"~join(map!(to!string)(decls),"\n");}
 }
 
 enum WhichTemplateParameter{
 	type,
 	alias_,
+	constant,
 	this_,
 	tuple,
 }
 
 final class TemplateParameter: Node{
 	Identifier name;
-	Expression type, spec, init;
+	Expression rtype, rspec, init;
+	Type type, spec;
+	Expression espec;
+
 	WhichTemplateParameter which;
 	this(WhichTemplateParameter which, Expression tt, Identifier name, Expression specialization, Expression deflt){
 		this.which = which; this.name = name;
-		type=tt; spec=specialization; init=deflt;
+		rtype=tt; rspec=specialization; init=deflt;
 	}
 	override string toString(){
 		bool isAlias = which == WhichTemplateParameter.alias_;
 		bool isTuple = which == WhichTemplateParameter.type;
-		return (isAlias?"alias ":"")~(type?type.toString()~" ":"")~(name?name.toString():"")~
-			(isTuple?"...":"")~(spec?":"~spec.toString():"")~(init?"="~init.toString():"");
+		return (isAlias?"alias ":"")~(rtype?rtype.toString()~" ":"")~(name?name.toString():"")~
+			(isTuple?"...":"")~(rspec?":"~rspec.toString():"")~(init?"="~init.toString():"");
 	}
 	override string kind(){return "template parameter";}
 
-	mixin Analyze; // Visitors
+	mixin Visitors;
 }
 
 class TemplateDecl: OverloadableDecl{
@@ -186,9 +205,13 @@ class TemplateDecl: OverloadableDecl{
 		ismixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
 	}
 	override string toString(){
-		return (stc?STCtoString(stc)~" ":"")~"template "~name.toString()~"("~join(map!(to!string)(params),",")~")"~
+		return (stc?STCtoString(astStc)~" ":"")~"template "~name.toString()~"("~join(map!(to!string)(params),",")~")"~
 			(constraint?" if("~constraint.toString()~")":"")~bdy.toString();
 	}
+	override string kind(){return "template";}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 class TemplateMixinDecl: Declaration{
@@ -200,40 +223,64 @@ class TemplateMixinDecl: Declaration{
 abstract class AggregateDecl: Declaration{
 	BlockDecl bdy;
 	this(STC stc, Identifier name, BlockDecl b){bdy=b; super(stc,name);}
+
+	override @property string kind(){return "aggregate";}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
-class StructDecl: AggregateDecl{
-	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"struct"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
+
+abstract class ValueAggregateDecl: AggregateDecl{
+	this(STC stc, Identifier name, BlockDecl b){super(stc,name,b);}
+	mixin DownCastMethod;
 }
-class UnionDecl: AggregateDecl{
+abstract class ReferenceAggregateDecl: AggregateDecl{
+	this(STC stc, Identifier name, BlockDecl b){super(stc,name,b);}
+	mixin DownCastMethod;
+}
+
+class StructDecl: ValueAggregateDecl{
 	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"union"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"struct"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
+
+	override @property string kind(){ return "struct"; }
+	//mixin DownCastMethod;
+}
+class UnionDecl: ValueAggregateDecl{
+	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"union"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
+
+	override @property string kind(){ return "union"; }
 }
 struct ParentListEntry{
 	STC protection;
 	Expression symbol;
 	string toString(){return (protection?STCtoString(protection)~" ":"")~symbol.toString();}
 }
-class ClassDecl: AggregateDecl{
+class ClassDecl: ReferenceAggregateDecl{
 	ParentListEntry[] parents;
 	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"class"~(name?" "~name.toString():"")~
-			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"class"~(name?" "~name.toString():"")~
+			(parents.length?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
+
+	override @property string kind(){ return "class"; }
 }
-class InterfaceDecl: AggregateDecl{
+class InterfaceDecl: ReferenceAggregateDecl{
 	ParentListEntry[] parents;
 	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"interface"~(name?" "~name.toString():"")~
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"interface"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
+
+	override @property string kind(){ return "interface"; }
 }
-class TemplateAggregateDecl: Declaration{
+/+class TemplateAggregateDecl: Declaration{
 	TemplateParameter[] params;
 	Expression constraint;
 	AggregateDecl decl;
 	this(STC stc,TemplateParameter[] p, Expression c, AggregateDecl ad){ params=p; constraint=c; decl=ad; super(stc,decl.name); }
 	override string toString(){
 		auto s=cast(StructDecl)decl, u=cast(UnionDecl)decl, c=cast(ClassDecl)decl, i=cast(InterfaceDecl)decl;
-		string r=(stc?STCtoString(stc)~" ":"");
+		string r=(stc?STCtoString(astStc)~" ":"");
 		r~=(s?"struct":u?"union":c?"class":"interface")~(decl.name?" "~name.toString():"")~"("~join(map!(to!string)(params),",")~")";
 		if(c && c.parents) r~=": "~join(map!(to!string)(c.parents),",");
 		if(i && i.parents) r~=": "~join(map!(to!string)(i.parents),",");
@@ -255,17 +302,16 @@ class TemplateFunctionDecl: OverloadableDecl{
 			(fd?(fd.pre||fd.post?"body":"")~fd.bdy.toString():!fdecl.pre&&!fdecl.post?";":"");
 	}
 
-}
+}+/
 
 
 class VarDecl: Declaration{
 	Expression rtype;
 	Expression init;
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rtype?rtype.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
-	override @property string kind(){return "variable";}
 
 	mixin Visitors;
 }
@@ -275,7 +321,7 @@ class CArrayDecl: VarDecl{
 	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
 		postfix=pfix; super(stc, rtype, name, initializer);
 	}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
 
 	mixin Visitors;
 }
@@ -296,7 +342,7 @@ class Declarators: Declaration{
 
 class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach usage
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
-	override string toString(){return STCtoString(stc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():"")~
+	override string toString(){return STCtoString(astStc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():"")~
 			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
 	override @property string kind(){return "parameter";}
 
@@ -315,7 +361,7 @@ class FunctionDecl: OverloadableDecl{
 		this.type=type; pre=pr, post=po; postres=pres; super(stc, name);
 	}
 	final string signatureString(){
-		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");		
 	}
 	override string toString(){
@@ -334,7 +380,7 @@ class FunctionDef: FunctionDecl{
 		this.deduceStatic = deduceStatic;
 	}
 	override string toString(){
-		return (type.stc?STCtoString(type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();
 	}
 
@@ -345,14 +391,14 @@ class FunctionDef: FunctionDecl{
 class UnitTestDecl: Declaration{
 	BlockStm bdy;
 	this(STC stc,BlockStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"unittest"~bdy.toString();}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"unittest"~bdy.toString();}
 }
 
 class PragmaDecl: Declaration{
 	Expression[] args;
 	Statement bdy;
 	this(STC stc,Expression[] a, Statement b)in{assert(b&&1);}body{args=a; bdy=b; super(stc,null);}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~"pragma("~join(map!(to!string)(args),",")~")"~bdy.toString();}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"pragma("~join(map!(to!string)(args),",")~")"~bdy.toString();}
 
 	mixin Visitors;
 }
@@ -374,7 +420,7 @@ class ExternDecl: Declaration{
 		super(stc,d.name);
 	}
 	override string toString(){
-		return (stc?STCtoString(stc)~" ":"")~"extern("~(linktype==LinkageType.CPP?"C++":to!string(linktype))~") "~decl.toString();
+		return (stc?STCtoString(astStc)~" ":"")~"extern("~(linktype==LinkageType.CPP?"C++":to!string(linktype))~") "~decl.toString();
 	}
 }
 class AlignDecl: Declaration{
@@ -385,6 +431,6 @@ class AlignDecl: Declaration{
 		super(stc,d.name);
 	}
 	override string toString(){
-		return (stc?STCtoString(stc)~" ":"")~"align("~to!string(alignment)~") "~decl.toString();
+		return (stc?STCtoString(astStc)~" ":"")~"align("~to!string(alignment)~") "~decl.toString();
 	}
 }
