@@ -17,9 +17,12 @@ const int x;
 
 void main(){
 	pragma(msg, typeof(0.0f&&{}()));
-	pragma(msg, !(is(T==int))*2);
+	pragma(msg, !(is(T==int))^^2);
+	pragma(msg, (){}());
 	pragma(msg, !false);
-	
+	pragma(__p, 1+2+3+4+5+6+true);
+	pragma(msg,1L<<63);
+	//pragma(msg, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff29293393939);
 	char ä='ä';
 	immutable(int)[] a;
 	const(int)[] b;
@@ -30,7 +33,10 @@ void main(){
 	pragma(__range,cast(byte)((y&252)^2)+1);
 	pragma(msg,typeof(cast(byte)((y&252)^2)+1));
 	ubyte[] x = [((y&252)^2)+1];
-	ubyte[] yx = [-127+(y&1)];
+
+	auto xxxx = y+-127;
+
+	//ubyte[] yx = [-127+(y&1)];
 	//ubyte[] x = [cast(byte)y,1];
 	//pragma(__range, );
 	int x = 2;

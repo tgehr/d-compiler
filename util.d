@@ -6,12 +6,17 @@ import std.traits;
 import utf=std.utf, uni=std.uni;
 import std.algorithm, std.conv;
 import std.string;
+import std.typetuple;
 
 import core.memory;
 
 template ID(alias a){alias a ID;}
 template Apply(alias a,T...){alias a!T Apply;}
 
+template ToTuple(alias a){
+	static if(a.length) alias TypeTuple!(a[0],ToTuple!(a[1..$])) ToTuple;
+	else alias TypeTuple!() ToTuple;
+}
 
 // escape a string
 string escape(string i,bool isc=false){ // TODO: COW, replace with std lib one as soon as available

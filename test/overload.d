@@ -13,8 +13,8 @@ void qux2(int,double=2.0){}
 void baz(int x, double y){}
 void baz(immutable(int) x, double y){}+/
 
-auto lol(){return lol(1);}
-int lol(typeof(lol()) x){return lol();}
+//auto lol(){return lol(1);}
+//int lol(typeof(lol()) x){return lol();}
 //int lol(int){return 1;}
 
 //int bar(typeof(lol)*x){pragma(msg,typeof(x));return 2;}
@@ -27,15 +27,21 @@ int lol(typeof(lol()) x){return lol();}
 //auto a(){return a(1);}
 //auto a(int){return a();}
 
+int foo(immutable(char)[] s){return 0;}
+//double foo(immutable(dchar)[] s){return 0;}
+//double foo(immutable(dchar)[] d){return 0;}
+
 
 void main(){
+	pragma(msg, typeof("hello"));
+	pragma(msg, typeof(foo("hello")));
 	/+qux(1);
 	qux2(2);
 
 	//duh(guh);
 	//duh(1);
 	//duh(duh);+/
-	pragma(msg,typeof(lol()));
+	//pragma(msg,typeof(lol()));
 /+
 	foo(1,1);
 	foo(1.0,1);

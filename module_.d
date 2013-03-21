@@ -17,7 +17,7 @@ class Module: Node{
 		string code=cast(string)app.data;
 		sc=new Scope(new FormattingErrorHandler(path, code));
 		//sc=new Scope(new SimpleErrorHandler(path, code));
-		auto lexer = lex(code);
+		//auto lexer = lex(code);
 		// int count=0; foreach(tk;lexer){count++;}writeln(count);
 		decls=parse(code,sc.handler);
 		sstate = SemState.pre;

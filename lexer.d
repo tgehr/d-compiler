@@ -28,7 +28,7 @@ string[2][] complexTokens =
 	 ["``c",   "StringLiteralC"            ],
 	 ["``w",   "StringLiteralW"            ],
 	 ["``d",   "StringLiteralD"            ],
-	 ["''",    "CharacterLiteral"          ],
+	 ["' '",   "CharacterLiteral"          ],
 	 ["0",     "Integer32Literal"          ],
 	 ["0U",    "Unsigned32Literal"         ],
 	 ["0L",    "Integer64Literal"          ],
@@ -167,14 +167,46 @@ struct Location{
 struct Token{
 	TokenType type;
 	string toString() const{
+		if(loc.rep.length) return loc.rep;
+		// TODO: remove boilerplate
+		// TODO: get better representations
 		switch(type){
-			case Tok!"EOF": return "EOF";
-			default: if(loc.rep.length) return loc.rep;
-		}
-		switch(type){
-			case Tok!"true": return "true";
-			case Tok!"false": return "false";
-			default: assert(0);
+			case Tok!"i":
+				return name;
+			case Tok!"``":
+				return '"'~escape(str)~'"';
+			case Tok!"``c":
+				return '"'~escape(str)~`"c`;
+			case Tok!"``w":
+				return '"'~escape(str)~`"w`;
+			case Tok!"``d":
+				return '"'~escape(str)~`"d`;
+			case Tok!"' '":
+				return '\''~escape(to!string(cast(dchar)int64),false)~'\'';
+			case Tok!"0":
+				return to!string(cast(int)int64);
+			case Tok!"0U":
+				return to!string(cast(uint)int64)~'U';
+			case Tok!"0L":
+				return to!string(cast(long)int64)~'L';
+			case Tok!"0LU":
+				return to!string(int64)~"LU";
+			case Tok!".0f":
+				return to!string(flt80)~'f';
+			case Tok!".0":
+				return to!string(flt80);
+			case Tok!".0L":
+				return to!string(flt80)~'L';
+			case Tok!".0i":
+				return to!string(flt80)~'i';
+			case Tok!".0fi":
+				return to!string(flt80)~"fi";
+			case Tok!".0Li":
+				return to!string(flt80)~"Li";
+			case Tok!"Error":
+				return "error: "~str;
+			default:
+				return tokens[cast(int)type][0];case Tok!"true": return "true";
 		}
 	}
 	union{
@@ -184,7 +216,7 @@ struct Token{
 	}
 	Location loc;
 }
-template token(string t){enum token=Token(Tok!t);}
+template token(string t){enum token=Token(Tok!t);} // unions not yet supported
 
 unittest{
 static assert({
@@ -439,7 +471,7 @@ private:
 						else               res[0].type = Tok!"...", p++;
 						break;
 					}
-					p++; goto case;
+					goto case;
 				// numeric literals
 				case '0': .. case '9':
 					res[0] = lexNumber(--p);
@@ -448,7 +480,7 @@ private:
 				// character literals
 				case '\'':
 					s = p; sl = line;
-					res[0].type = Tok!"''";
+					res[0].type = Tok!"' '";
 					if(*p=='\\'){
 						try p++, res[0].int64 = cast(ulong)readEscapeSeq(p);
 						catch(EscapeSeqException e) if(e.msg) errors~=tokError(e.msg,e.loc); else invCharSeq();
@@ -860,6 +892,7 @@ private:
 								else rval *= val;
 							}
 						}
+						if(adjexp) val = ulong.max; // for error handling
 						break selectbase;
 					case 'b', 'B':
 						p++;
@@ -888,7 +921,7 @@ private:
 					leadingzero=0; break;
 				}
 				goto case;
-			case '1': .. case '9':
+			case '1': .. case '9': case '.':
 				readdec: for(;;p++){
 					switch(*p){
 						case '0': .. case '9':
@@ -1019,9 +1052,13 @@ private:
 				tok.type = Tok!"0LU";
 		}
 		if(tok.type == Tok!"0L"){
-			if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
-			else if(val > long.max && base == HEX) tok.type = Tok!"0LU";
-		}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
+			if(toobig) Lerr: tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
+			else if(val > long.max){
+				if(base == HEX) tok.type = Tok!"0LU";
+				else goto Lerr;
+			}
+		}
+		if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
 		if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
 		return _p=p, tok;
 		Lexp: return _p=p, tokError("exponent expected",p[0..1]);

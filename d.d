@@ -12,6 +12,14 @@ import file = std.file;
 
 int Ḁ(){return 0;}
 int main(string[] args){
+	/+import variant,type;
+
+	Variant var = 0L;//"I am a string!";
+	//writeln(var.convertTo(Type.get!ifloat()));
+	writeln(var<<Variant(1L));
+	auto s = cast(ireal)(100000+2i);
+	writeln(s);+/
+
 	//import parser, error;writeln(parse(q{void main(){b.tail!int();}}~"\0\0\0\0", null));
 	//import lexer;
 	//writeln(lex(readln()~"\0\0\0\0"));

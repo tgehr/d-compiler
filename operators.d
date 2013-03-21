@@ -2,6 +2,16 @@
 import std.conv;
 import lexer;
 
+import std.algorithm : canFind;
+
+enum unaryOps = ["&", "*", "-", "++", "--", "+", "!", "~"];
+enum postfixOps=[/*".",*/"++", "--","(","["];
+enum binaryOps=mixin({string r="[";
+        foreach(x;EnumMembers!TokenType)if(getLbp(x)!=-1&&!canFind([Tok!"++",Tok!"--",Tok!"(",Tok!"["],x)) r~=`"`~TokenTypeToString(x)~`",`;
+        return r~"]";
+	}());
+
+
 // expression parser:
 
 // left binding power

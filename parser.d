@@ -7,13 +7,7 @@ import lexer, operators, error, util;
 
 public import expression, statement, declaration, type;
 
-enum literals=["``","``c","``w","``d","''","0","0U","0L","0LU",".0f",".0",".0L",".0fi",".0i",".0Li","null","true","false"];
-enum unaryOps = ["&", "*", "-", "++", "--", "+", "!", "~"];
-enum postfixOps=[/*".",*/"++", "--","(","["];
-enum binaryOps=mixin({string r="[";
-        foreach(x;EnumMembers!TokenType)if(getLbp(x)!=-1&&!canFind([Tok!"++",Tok!"--",Tok!"(",Tok!"["],x)) r~=`"`~TokenTypeToString(x)~`",`;
-        return r~"]";
-	}());
+enum literals=["``","``c","``w","``d","' '","0","0U","0L","0LU",".0f",".0",".0L",".0fi",".0i",".0Li","null","true","false"];
 
 private immutable arrLbp=mixin({string r="[";foreach(t;EnumMembers!TokenType) r~=to!string(isRelationalOp(t)?-2:getLbp(t))~",";return r~"]";}());
 
@@ -478,7 +472,8 @@ private struct Parser{
 			case Tok!"delete": mixin(rule!(DeleteExp,"_",Expression));
 			case Tok!"(":
 				auto tt = peekPastParen().type;
-				if(tt==Tok!"{"||tt==Tok!"=>") return parseFunctionLiteralExp();
+				// TODO: lookup table for all tokens that are attributes
+				if(tt==Tok!"{"||tt==Tok!"=>"||tt==Tok!"pure"||tt==Tok!"nothrow"||tt==Tok!"@") return parseFunctionLiteralExp();
 				nextToken();
 				auto save=saveState();
 				bool isType=skipType() && ttype==Tok!")";

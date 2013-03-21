@@ -3,6 +3,8 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, declaration, statement, type;
 import scope_, semantic, visitors, vrange, util;
 
+import variant;
+
 
 abstract class Node{
 	Location loc;
@@ -17,7 +19,6 @@ abstract class Node{
 
 	mixin Visitors;
 }
-
 
 abstract class Expression: Node{
 	int brackets=0;
@@ -47,8 +48,37 @@ class StubExp: Expression{
 
 
 class LiteralExp: Expression{
-	Token lit;
-	this(Token literal){lit=literal;} // TODO: suitable contract
+	private Token lit;
+	this(Token literal){ // TODO: suitable contract
+		lit=literal;
+		if(lit.type == Tok!"false") lit.int64=0;
+		else if(lit.type == Tok!"true") lit.int64=1;
+	}
+
+	static LiteralExp create(alias New=New,T)(T val){//workaround for long standing bug
+		Token lit;
+
+		static if(is(T==bool)){
+			lit.type = val?Tok!"true":Tok!"false";
+			lit.int64 = val;
+		}else{
+			// TODO: this sometimes allocates.
+			foreach(x; ToTuple!literals){
+				static if(is(typeof(mixin(x))==T)){
+					lit.type = Tok!x;
+					alias typeof(mixin(`lit.`~getTokOccupied!T)) U;
+					static if(x=="``"w||x=="``"d)
+						mixin(`lit.`~getTokOccupied!T) = to!U(val);
+					else mixin(`lit.`~getTokOccupied!T) = cast(U)val;
+
+				}
+			}
+		}
+		return New!LiteralExp(lit).semantic(null);
+		//lit.type = Tok!"``";
+		//lit.str = str;
+	}
+
 	override string toString(){return _brk(lit.toString());}
 	override @property string kind(){return "constant";}
 

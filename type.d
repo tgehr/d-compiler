@@ -54,7 +54,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!T=New!BasicType(Tok!"void"); // TODO: improve		
 	}
 
-	static Type get(T:Null)(){ // typeof(null)
+	static Type get(T:typeof(null))(){
 		if(uniqueType!T) return uniqueType!T;
 		return uniqueType!T=New!NullPtrTy();
 	}
@@ -104,7 +104,7 @@ class ErrorTy: Type{
 
 
 // dummy types:
-struct Null{}
+//struct Null{}
 struct EmptyArray{}
 struct Struct{}
 struct Class{}
@@ -178,6 +178,28 @@ enum basicTypes=["bool","byte","ubyte","short","ushort","int","uint","long","ulo
 template isBasicType(T){
 	enum isBasicType=canFind(basicTypes,T.stringof);
 }
+
+int integralBitSize(TokenType op){
+	switch(op){
+		case Tok!"bool", Tok!"char", Tok!"byte", Tok!"ubyte":
+			return 8;
+		case Tok!"wchar", Tok!"short", Tok!"ushort":
+			return 16;
+		case Tok!"dchar", Tok!"int", Tok!"uint":
+			return 32;
+		case Tok!"long", Tok!"ulong":
+			return 64;
+		default: return -1;
+	}
+}
+bool integralIsSigned(TokenType op){
+	switch(op){
+		case Tok!"bool", Tok!"ubyte", Tok!"ushort", Tok!"dchar", Tok!"uint", Tok!"ulong":
+				return false;
+		default: return true;
+	}
+}
+
 
 final class BasicType: Type{
 	TokenType op;
