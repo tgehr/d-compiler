@@ -4,11 +4,11 @@ ubyte moo;
 //pragma(__range, cast(ushort)-5368096384);
 //pragma(__range, cast(uint)-536870912);
 
-auto a = [[[[&moo]]]];
-auto b = [[[[&a]]]];
-auto c = [[[[&b]]]];
-auto d = [[[[&c]]]];
-pragma(msg, typeof(*d));
+auto a = [[[[&moo]]]]; // TODO
+auto b = [[[[&a]]]];   // TODO
+auto c = [[[[&b]]]];   // TODO
+auto d = [[[[&c]]]];   // TODO
+pragma(msg, typeof(*d)); // error
 //int xyz;
 int xyz();
 int xyz(float);
@@ -45,6 +45,8 @@ inout(const(int)[]) foo(inout(const(int)[]) x){
 	pragma(msg, typeof(zz));
 	auto ww = 1 ? yy : xx;
 	pragma(msg, typeof(ww));
+
+	assert(0 == 0x80000000);
 
 	return x;
 }
@@ -85,7 +87,7 @@ void main(){
 	uint goo;
 	ubyte moo = ((goo&252)^2)+1;
 	pragma(__range,(goo&252)^2);
-	ubyte momo = (goo|1)-1;
+	ubyte momo = (goo|1)-1; // error
 	pragma(msg, typeof((goo%255)<<2));
 	long msmm;
 
@@ -147,3 +149,10 @@ extern(C) int printf(const(char)*, ...);
 
 void fill()(){}
 void fill()(){}
+/+
+enum x = [0,y];
+enum y = [0,x];
+
+enum xx = uu;
+enum uu = xx;
++/
