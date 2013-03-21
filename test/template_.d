@@ -1,4 +1,14 @@
 
+template Ambiguous(int a){ enum Ambiguous = "moo"; }
+template Ambiguous(int a){enum Ambiguous = "foo"; }
+
+pragma(msg, Ambiguous!2);
+
+
+template T(int a) if(!T!a){  // error
+	enum a = false;
+}
+pragma(msg, T!1);            // TODO: show it here!
 
 template factorial(int n){
 	static if(n<=1) enum factorial = 1.0L;
@@ -423,7 +433,7 @@ static assert(!is(typeof(tt2!(1))));
 
 
 
-/+struct S{
+struct S{
 	immutable foo = "222";
 }
 

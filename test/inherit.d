@@ -1,10 +1,214 @@
+
+auto testNestedStruct(){
+	int a;
+	struct S{
+		int foo(){
+			return a;
+		}
+		enum x = 2;
+	}
+	static int foo(){
+		S s;
+		return s.foo(); // error
+	}
+	S s;
+	//import std.stdio;
+	//writeln(s.foo);
+	return s;
+}
+
+void nstmain(){
+	auto x=testNestedStruct().x;
+	//import std.stdio;
+	//writeln(x.foo);
+}
+
+class ConstrDeflt{
+	this(int x = 2){}
+}
+
+void testDeflt(){
+	auto c = new ConstrDeflt();
+}
+
+/+
+
+struct OvStatic{
+	static void foo(int x){}
+	int foo(int x){ return x+1; }
+}
+
+void testOvStatic(){
+	OvStatic ov;
+	ov.foo(2);
+	OvStatic.foo(2);
+}
+
+
+class ConstructorP{
+	this(int x){}
+}
+class ConstructorC: ConstructorP{ // error TODO!
+	
+}
+
+void testConsC(){
+	auto c = new ConstructorC(2); // error TODO!
+	auto x = new int(2);
+	auto y = new int(3.0f); // error
+}
+
+
+static class Foo{
+	static class HazConstructor{
+		int x;
+		this(int x){
+			this.x = x;
+		}
+	}
+	static class HazConstructorOverload{
+		int x;
+		this(int x)immutable{
+			this.x = x; // TODO: relax type checking in constructors
+		}
+		this(int x){
+			this.x = 2;
+		}
+	}
+	static class HazImmutableConstructor{
+		this(int x)immutable{}
+	}
+	static class CanBuildQualified{
+		this(int x)inout{}
+	}
+
+	class NonStatic{
+		this(int x){}
+		static class Static{
+			this(int x){}
+		}
+		class NStatic{}
+	}
+}
+
+void testConstructor(){
+	auto x = new Foo.HazConstructor(2);
+	auto z = new Foo.HazConstructor(2,3); // error
+	auto y = new immutable(Foo.HazConstructorOverload)(3);
+	auto w = new Foo.HazImmutableConstructor(2); // error
+	auto s = new Foo.NonStatic.Static(2);
+
+	auto fo1 = new Foo;
+	auto q = fo1.new NonStatic(2);
+
+	/+/// TODO
+	auto fo2 = new immutable(Foo);
+	auto qq = fo2.new NonStatic; // error
+	auto qqq = fo2.new const(NonStatic)(2); // ok
+	auto qq2 = fo2.new immutable(NonStatic)(2); // ok
+	auto qq3 = fo2.new const(HazConstructor); // error
+	auto qq4 = fo2.new immutable(NonStatic.Static)(2); // error
+	auto qq5 = fo2.new immutable(NonStatic.NStatic)(); // error
+	/// +/
+	new Foo().new NonStatic;
+
+	auto a = new int[2];
+	auto b = new int[](2);
+	auto c = new int[](1,2);
+	auto d = new int[][](1,2);
+	auto e = new int[][](2);
+	struct S{}
+	auto ss = new S;
+	pragma(msg, typeof(ss));
+}
+
+struct FooS{
+	int foo()const{ return 2; }
+	int foo()immutable{ return 2; }
+	int foo(){ return 1; }
+	int foo()inout{ return 2; }
+	int foo()shared{ return 2; }
+	int foo()const shared{ return 2; }
+	// int foo()const inout{ return 3; }
+}
+
+void testFooS(inout int){
+	FooS s1;
+	s1.foo();
+	const(FooS) s2;
+	s2.foo();
+	immutable(FooS) s3;
+	s3.foo();
+	shared(FooS) s4;
+	s4.foo();
+	inout(FooS) s5;
+	s5.foo();
+	const(shared(FooS)) s6;
+	s6.foo();
+	const(inout(FooS)) s7;
+	s7.foo();
+}
+
+class Infty{
+	int foo()const{ return foo()+this.foo(); }
+	int foo(){ return foo()+this.foo(); }
+	int bar(){ return foo()+this.foo(); }
+	int bar()shared{ return foo()+this.foo(); } // error
+
+	auto buz()inout{ return this; }
+	auto bbz()const inout{
+		buz();
+		static assert(is(typeof(buz())==inout(const(Infty))));
+		static assert(is(typeof(this.buz())==inout(const(Infty))));
+	}
+	auto bbz()immutable{
+		static assert(is(typeof(buz())==immutable(Infty)));
+		static assert(is(typeof(this.buz())==immutable(Infty)));
+	}
+	auto bbz() const shared{
+		buz(); // error
+		this.buz(); // error
+	}
+	auto bbz(){
+		static assert(is(typeof(buz())==Infty));
+		static assert(is(typeof(this.buz())==Infty));
+	}
+	auto bbz()const{
+		static assert(is(typeof(buz())==const(Infty)));
+		static assert(is(typeof(this.buz())==const(Infty)));
+	}
+	auto bbz()inout{
+		static assert(is(typeof(buz())==inout(Infty)));
+		static assert(is(typeof(this.buz())==inout(Infty)));
+	}
+
+	auto bzz(inout(int[]) x)inout{ return this; }
+	auto bbz(int[] x){
+		static assert(is(typeof(bzz(x))==Infty));
+		static assert(is(typeof(this.bzz(x))==Infty));
+	}
+	auto bbz(inout(int[])x)immutable{
+		static assert(is(typeof(bzz(x))==const(Infty)));
+		static assert(is(typeof(this.bzz(x))==const(Infty)));
+	}
+	auto bbz(inout(int[])x)inout{
+		static assert(is(typeof(bzz(x))==inout(Infty)));
+		static assert(is(typeof(this.bzz(x))==inout(Infty)));
+	}
+	auto bbz(immutable(int[]) x)immutable{
+		static assert(is(typeof(bzz(x))==immutable(Infty)));
+		static assert(is(typeof(this.bzz(x))==immutable(Infty)));
+	}
+}
+
+
 class OVIC{
 	mixin(q{int foo()immutable{ return 2; }});
 	int foo()        const    { return 2; }
 }
 class OVIbICSC: OVIC{
 	override int foo()immutable           { return 2; }
-	mixin(q{override int foo()const shared{ return 2; }}); // error
+	mixin(q{override int foo()const shared{ return 2; } /* error */});
 	override int foo()const               { return 2;}
 	//int foo()inout{ return 2; }
 }
@@ -14,7 +218,6 @@ class OVIbCCS: OVIC{
 	override int foo()const shared { return 2; }
 }
 
-/+
 int global;
 class Container{
 	int cont;
@@ -61,6 +264,18 @@ class DisjointOverrides: DisjointDecls{
 	override int bar()shared{ return 2; }
 }
 
+class SomeDecl{
+	int foo(){}
+	int foo()immutable{}
+}
+class AmbigOverride: SomeDecl{
+	override int foo()const{ return 2; } // error: TODO: should it guess from the context?
+	override int foo()immutable{ return 2; }
+}
+class CertainlyAmbigOverride: SomeDecl{
+	override int foo()const{ return 2; }
+}
+
 class IHazAllFoo{
 	int[] x = [1,2,3];
 	int[] foo(){
@@ -89,27 +304,27 @@ class OverrideAllFoo: IHazAllFoo{
 	override int[] foo(){
 		static assert(is(typeof(super)==IHazAllFoo));
 		static assert(is(typeof(x)==int[]));
-		return super.foo(); // TODO!
+		return super.foo();
 	}
 	override const(int[]) foo()const{
 		static assert(is(typeof(super)==const(IHazAllFoo)));
 		static assert(is(typeof(x)==const(int[])));
-		return super.foo(); // TODO!
+		return super.foo();
 	}
 	override immutable(int[]) foo()immutable{
 		static assert(is(typeof(super)==immutable(IHazAllFoo)));
 		static assert(is(typeof(x)==immutable(int[])));
-		return super.foo(); // TODO!
+		return super.foo();
 	}
 	override shared(int[]) foo()shared{
 		static assert(is(typeof(super)==shared(IHazAllFoo)));
 		static assert(is(typeof(x)==shared(int[])));
-		return super.foo(); // TODO!
+		return super.foo();
 	}
 }
 
 class IHazFoo{
-	final int x(){ return 2;}
+	final int x()const{ return 2;}
 	int foo(){ return x(); }
 }
 class IHazFoo2: IHazFoo{
@@ -131,8 +346,8 @@ class ConstOverride3: ConstOverride2{
 }
 
 class ConstOverride4: IHazFoo2{
-	override int foo(){ return super.foo(); } // TODO
-	override int foo()inout{ return x(); }
+	override int foo(){ return super.foo(); } // TODO (?)
+	override int foo()inout{ return x(); } // TODO: DMD says this is legal...
 }
 
 class CircOverride1: CircOverride2{

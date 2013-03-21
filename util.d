@@ -156,9 +156,14 @@ auto noOpAppender(T)(size_t initial=1){
 
 alias GCAlloc.New New; // transparently replace allocator
 
+int ctag;
+int[void*] tag;
+
 struct GCAlloc{
 	static:
-	auto New(T,A...)(A args){return new T(args);}
+	auto New(T,A...)(A args){
+		return new T(args);
+	}
 	struct AppWrap(T){
 		std.array.Appender!T pl;
 		auto length(){return pl.data.length;}
@@ -169,7 +174,7 @@ struct GCAlloc{
 private void[] _mlp;
 struct ChunkGCAlloc{
 	static:
-	auto New(T,A...)(A args){ // Simple chunk allocator on top of the GC. Way faster, but not precise
+	auto New(T,A...)(A args){ // Simple chunk allocator on top of the GC. Way faster, but not precise		
 		auto dg={A a; return new T(a);};
 		static assert(__traits(compiles, {A a;return new T(a);}), "cannot create instance of class "~T.stringof);
 		return emplace!T(NewImpl(__traits(classInstanceSize, T)),args);
@@ -326,4 +331,10 @@ bool any(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool)
 bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(/+auto+/ref x;range) if(!a(x)) return false;
 	return true;
+}
+
+bool among(S,T...)(S arg,T args){
+	foreach(ref x; args)
+		if(arg == x) return true;
+	return false;
 }

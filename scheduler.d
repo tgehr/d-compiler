@@ -188,7 +188,7 @@ class Scheduler{
 					continue;
 				}else if(nd.sstate == SemState.error) remove(nd);
 				nd.semantic(sc);
-				assert(nd.needRetry != 2,nd.toString());
+				assert(nd.needRetry != 2,text(nd.toString()," ",nd.loc));
 				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 			}
 			update();

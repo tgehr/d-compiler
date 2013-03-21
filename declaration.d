@@ -415,7 +415,11 @@ class FunctionDecl: OverloadableDecl{
 	override string toString(){
 		return signatureString();
 	}
-	override @property string kind(){return isMemberFunction()?"member function":"function";}
+	override @property string kind(){
+		return
+			isConstructor()?"constructor":
+			isMemberFunction()?"member function":"function";
+	}
 	override FunctionDecl isFunctionDecl(){return this;}
 
 	mixin Visitors;

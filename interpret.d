@@ -63,7 +63,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 	bool checkInterpret(Scope sc)in{assert(sstate == SemState.completed);}body{
 		assert(sc, loc.rep);
 		sc.error(format("%s '%s' is not interpretable at compile time",kind,loc.rep),loc);
-		sstate = SemState.error;
+		mixin(SetErr!q{});
 		return false;
 	}
 	static int numint = 0;

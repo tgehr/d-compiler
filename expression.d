@@ -115,6 +115,7 @@ abstract class Expression: Node{
 		Symbol,
 		Identifier,
 		FieldExp,
+		IndexExp,
 		LiteralExp,
 		ArrayLiteralExp,
 		FunctionLiteralExp,
@@ -215,6 +216,7 @@ class Identifier: Symbol{
 		auto n=uniq.get(name,null);
 		if(n !is null) this.name = n;
 		else this.name = uniq[name] = name;
+		static int x = 0;
 	}
 	override string toString(){return !meaning?_brk(name):super.toString();}
 	override @property string kind(){return meaning?super.kind:"identifier";}
@@ -264,12 +266,15 @@ class CastExp: Expression{
 }
 class NewExp: Expression{
 	Expression[] a1;
-	Expression ty;
+	Expression rty;
 	Expression[] a2;
-	this(Expression[] args1,Expression type,Expression[] args2){a1=args1; ty=type; a2=args2;}
+	this(Expression[] args1,Expression type,Expression[] args2){a1=args1; rty=type; a2=args2;}
 	override string toString(){
-		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~ty.toString()~(a2?"("~join(map!(to!string)(a2),",")~")":""));
+		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~rty.toString()~(a2?"("~join(map!(to!string)(a2),",")~")":""));
 	}
+
+	override @property string kind(){ return "new expression"; }
+	mixin Visitors;
 }
 class NewClassExp: Expression{
 	Expression[] args;
@@ -338,6 +343,7 @@ class IndexExp: Expression, DollarProvider{ //e[a...]
 	override string toString(){return _brk(e.toString()~(a.length?'['~join(map!(to!string)(a),",")~']':"[]"));}
 
 	mixin Visitors;
+	mixin DownCastMethod;
 	// workaround for DMD bug
 	mixin CTFEInterpretIE!IndexExp;
 }

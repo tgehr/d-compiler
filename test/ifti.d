@@ -90,10 +90,8 @@ auto potentiallyambiguous(R)(R delegate(int) a, R delegate(int) b){
 	return true;
 }
 immutable string mxinx = "x";
-pragma(msg, potentiallyambiguous!()(x=>toString(x), x=>mixin(mxinx))); // fail
+pragma(msg, potentiallyambiguous!()(x=>toString(x), x=>mixin(mxinx))); // error. TODO: show it!
 pragma(msg, "notambiguous: ",potentiallyambiguous!()(x=>1.0,x=>1.0L));
-
-
 
 auto qux(S,T...)(S s, T arg){
 	pragma(msg, S, " ", T);

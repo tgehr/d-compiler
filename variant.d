@@ -472,7 +472,7 @@ struct Variant{
 		final switch(id.occupies){
 			case Occupies.none: return 0;
 				foreach(x; EnumMembers!Occupies[1..$]){
-					case x: return typeid(x).getHash(&mixin(to!string(x)));
+					case x: return typeid(mixin(to!string(x))).getHash(&mixin(to!string(x)));
 				}
 		}
 		assert(0); // TODO: file bug

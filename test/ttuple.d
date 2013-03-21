@@ -1,9 +1,10 @@
 
+
+template Seq(T...){ alias T Seq; }
+
 template Alias(T){ alias T Alias; }
 
-template TypeTuple(T...){ alias T TypeTuple; }
-
-alias TypeTuple Seq;
+alias Seq Seq;
 
 auto seqparm(A,B,C...)(Seq!(A,B,C) args){
 	return args[0]+args[1]+args[2]+args[$-1];
@@ -23,9 +24,9 @@ pragma(msg, seqret(1,2));
 
 
 struct Tpl{
-	TypeTuple!(int, double) foo;
+	Seq!(int, double) foo;
 	int a,b;
-	alias TypeTuple!(a,b) c;
+	alias Seq!(a,b) c;
 }
 
 void checkTpl(){
@@ -36,20 +37,25 @@ void checkTpl(){
 	t.foo[0]=2;
 }+/
 
-// template TypeTuple(T...){ alias T TypeTuple; } // TODO: ambiguity error
+// template Seq(T...){ alias T Seq; } // TODO: ambiguity error
 
 
-pragma(msg, TypeTuple!(1,2,3,4)[1..3]);
-TypeTuple!(int,double,float,long)[1..3] xx;
+pragma(msg, Seq!(1,2,3,4)[1..3]);
+Seq!(int,double,float,long)[1..3] xx;
 pragma(msg, typeof(xx));
-pragma(msg, "length: ",TypeTuple!(1,2,3).length);
-pragma(msg, "$ 1: ", TypeTuple!(1,2,3)[$-1]);
+pragma(msg, "length: ",Seq!(1,2,3).length);
+pragma(msg, "$ 1: ", Seq!(1,2,3)[$-1]);
 
-pragma(msg, "$ 2: ", TypeTuple!(int,double)[$-1]);
+pragma(msg, "$ 2: ", Seq!(int,double)[$-1]);
 
-pragma(msg, "$ 3: ", TypeTuple!(1,2,3)[1..$]);
-pragma(msg, "$ 4: ", TypeTuple!(int,int,int)[1..$]);
+pragma(msg, "$ 3: ", Seq!(1,2,3)[1..$]);
+pragma(msg, "$ 4: ", Seq!(int,int,int)[1..$]);
 
+void convErrMsg(){
+	Seq!(int, double) a=Seq!(1.0,2);
+}
+
+static assert(!is(Seq!(int, double)==int));
 
 
 
@@ -57,13 +63,13 @@ template Fst(T...){
 	alias T[0] Fst;
 }
 
-pragma(msg, "Fst: ",[TypeTuple!(Fst!(TypeTuple!("133",2,3,4)),"2","3","4")]);
+pragma(msg, "Fst: ",[Seq!(Fst!(Seq!("133",2,3,4)),"2","3","4")]);
 
 
 
 
 /+int main(){
-	TypeTuple!(int,int) x = TypeTuple!(1,2);
+	Seq!(int,int) x = Seq!(1,2);
 	x[1]=3;
 	x[0]-=11;
 	return x[0]+x[1];
@@ -71,7 +77,7 @@ pragma(msg, "Fst: ",[TypeTuple!(Fst!(TypeTuple!("133",2,3,4)),"2","3","4")]);
 //pragma(msg, main());
 
 
-auto refe(ref TypeTuple!(int,int,int,int) arg){
+auto refe(ref Seq!(int,int,int,int) arg){
 	return ++arg[0]+ ++arg[1]+ --arg[2]+ --arg[3];
 }
 
@@ -82,9 +88,9 @@ auto testt(ref int a, ref int b, ref int c, ref int d){
 auto testAliasTuple(){
 	int a,b,c,d;
 	int x;
-	//alias TypeTuple!(a,b,c,d) tp;
+	//alias Seq!(a,b,c,d) tp;
 	//tp=++x;
-	TypeTuple!(int,int,int,int) tp=++x;
+	Seq!(int,int,int,int) tp=++x;
 	//a=1;b=2;c=1;d=3;
 	//pragma(msg, typeof({tp;tp[0];}));
 	//(){testt(tp);}();
@@ -103,51 +109,51 @@ static assert(testAliasTuple()==[2,3,4,5,3,4,5,6,18,4,5,4,5]);
 pragma(msg, testAliasTuple());
 
 
-pragma(msg, TypeTuple!(1,2,3));
-pragma(msg, typeof(TypeTuple!(1,2,3)));
-pragma(msg, TypeTuple!(1,int,3));
-pragma(msg, typeof(TypeTuple!(1,int,3)));
-pragma(msg, TypeTuple!(float,int,double));
+pragma(msg, Seq!(1,2,3));
+pragma(msg, typeof(Seq!(1,2,3)));
+pragma(msg, Seq!(1,int,3));
+pragma(msg, typeof(Seq!(1,int,3)));
+pragma(msg, Seq!(float,int,double));
 
-static assert(is(TypeTuple!(int,double)==TypeTuple!(int,double)));
-static assert(!is(TypeTuple!(double,int)==TypeTuple!(int,double)));
-static assert(is(TypeTuple!(int delegate(int, int[]))==TypeTuple!(int delegate(int,int[]))));
+static assert(is(Seq!(int,double)==Seq!(int,double)));
+static assert(!is(Seq!(double,int)==Seq!(int,double)));
+static assert(is(Seq!(int delegate(int, int[]))==Seq!(int delegate(int,int[]))));
 
-pragma(msg, TypeTuple!(1,TypeTuple!(int,double),2,TypeTuple!(float,real,int[])));
+pragma(msg, Seq!(1,Seq!(int,double),2,Seq!(float,real,int[])));
 
-TypeTuple!(1,2,3)[1] aaa; // error
+Seq!(1,2,3)[1] aaa; // error
 
-pragma(msg, TypeTuple!(1,2,3,TypeTuple!(1,2,3)));
+pragma(msg, Seq!(1,2,3,Seq!(1,2,3)));
 
-//pragma(msg, TypeTuple!(int,double)[0]);
+//pragma(msg, Seq!(int,double)[0]);
 
-TypeTuple!(int,[2])[0] as;
+Seq!(int,[2])[0] as;
 pragma(msg, typeof(as));
 //pragma(msg, x);
 
 
-Alias!(TypeTuple!(int,2)) a; // error
+Alias!(Seq!(int,2)) a; // error
 
-static assert(TypeTuple!(0,"test")); // error
+static assert(Seq!(0,"test")); // error
 
-static assert(TypeTuple!(1,""));
-void main(){assert(TypeTuple!(1,""));}
-
-
-mixin(TypeTuple!("int x;"));
-
-int[TypeTuple!(1,2)] ad; // error
+static assert(Seq!(1,""));
+void main(){assert(Seq!(1,""));}
 
 
-alias TypeTuple!(1,2) start;
-enum TypeTuple!(int,int) aii = 12;
-//pragma(msg, aii[TypeTuple!(start,3,5,11)]);
+mixin(Seq!("int x;"));
+
+int[Seq!(1,2)] ad; // error
 
 
-//TypeTuple!(int,double) aid = TypeTuple!(1,1,2);
+alias Seq!(1,2) start;
+enum Seq!(int,int) aii = 12;
+//pragma(msg, aii[Seq!(start,3,5,11)]);
+
+
+//Seq!(int,double) aid = Seq!(1,1,2);
 
 void test(){
-	//	aid = TypeTuple!(1,1,2);
+	//	aid = Seq!(1,1,2);
 }
 
 immutable int[2] a2=[1,2];
@@ -155,8 +161,8 @@ immutable int[2] a2=[1,2];
 pragma(msg, a2[1]);
 
 template StaticMap(alias F, a...){
-	static if(a.length) alias TypeTuple!(F!(a[0]), StaticMap!(F,a[1..a.length])) StaticMap;
-	else alias TypeTuple!() StaticMap;
+	static if(a.length) alias Seq!(F!(a[0]), StaticMap!(F,a[1..a.length])) StaticMap;
+	else alias Seq!() StaticMap;
 }
 
 template StaticFoldr(alias F, a...){
@@ -178,7 +184,7 @@ pragma(msg, StaticMap!(Square,StaticIota!(1,31)));
 
 template StaticFilter(alias F, a...){
 	static if(!a.length) alias a StaticFilter;
-	else static if(F!(a[0])) alias TypeTuple!(a[0], Rest) StaticFilter;
+	else static if(F!(a[0])) alias Seq!(a[0], Rest) StaticFilter;
 	else alias Rest StaticFilter;
 	static if(a.length) alias StaticFilter!(F,a[1..a.length]) Rest;
 }
@@ -203,11 +209,11 @@ template isUppercase(string s) if(is(typeof(s[2]))&&!is(typeof(s[3]))){
 //pragma(msg, isUppercase!"AbC");
 //pragma(msg, isUppercase!"DEF");
 
-pragma(msg, StaticFilter!(isUppercase,"123","aBc",TypeTuple!("ABC","AbC"),"DEF"));
+pragma(msg, StaticFilter!(isUppercase,"123","aBc",Seq!("ABC","AbC"),"DEF"));
 
 template StaticIota(int a, int b) if(a<=b){
-	static if(a==b) alias TypeTuple!() StaticIota;
-	else alias TypeTuple!(a,StaticIota!(a+1,b)) StaticIota;
+	static if(a==b) alias Seq!() StaticIota;
+	else alias Seq!(a,StaticIota!(a+1,b)) StaticIota;
 }
 
 

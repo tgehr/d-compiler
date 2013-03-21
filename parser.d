@@ -181,7 +181,7 @@ private template SetLoc(T: Node){
 	enum SetLoc=T.stringof~q{
 		res=null;
 		Location begin=tok.loc;
-		scope(exit){
+		scope(success){
 			if(res) res.loc=begin.to(code.buffer[code.n-1&code.buffer.length-1].loc);
 		}
 	};
@@ -561,9 +561,9 @@ private struct Parser{
 	Expression led(Expression left){
 		Expression res=null;
 		//Location loc=tok.loc;
-		//scope(exit) if(res) res.loc=loc;
+		//scope(success) if(res) res.loc=loc;
 		Location loc=left.loc;
-		scope(exit) if(res) res.loc=loc.to(ptok.loc);
+		scope(success) if(res) res.loc=loc.to(ptok.loc);
 		switch(ttype){
 			//case Tok!"i": return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));// infix
 			case Tok!"=>":
@@ -615,7 +615,7 @@ private struct Parser{
 					if(e.args.length==1) e.args[0].brackets++; expect(Tok!")"); return res=e;
 				}
 				mixin(rule!(TemplateInstanceExp,Existing,q{left,[parseTemplateSingleArg()]}));
-			case Tok!".": return parseIdentifierList(left);
+			case Tok!".": return parseIdentifierList!(true,true)(left);
 			mixin({string r;
 				foreach(x;binaryOps)
 					if(x!="=>" && x!="." && x!="!" && x!="?")

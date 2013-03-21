@@ -305,6 +305,8 @@ class InheritScope: AggregateScope{
 	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
 		// dw("looking up ",ident," in ", this);
 		mixin(LookupHere!q{auto d; super, ident, alt});
+		// TODO: make more efficient than string comparison
+		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!q{
 			auto lkup = parent.asc.lookupHere(ident, null);

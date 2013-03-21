@@ -1,6 +1,16 @@
 
+int[] evalord(){
+	int[] a=[1,2,3], b=[1,2,3];
+	int c = 1;
+	a[c]=b[++c];
+	return a;
+}
+
+pragma(msg, "evalord: ", evalord());
+static assert(evalord()==[1,3,3]); // evaluation from left to right
+
 template CommonType(T...){
-	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }() };
+	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }()};
 	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType;
 	else alias void CommonType;
 }
@@ -1267,6 +1277,14 @@ real testindex(){
 }
 
 pragma(msg, "testindex: ",testindex());
+
+
+int[] errCastConcat(){
+	float[] a = [1,2,3,4];
+	return cast(int[])a~cast(int[])a; // error
+}
+pragma(msg, errCastConcat());
+
 
 real multiindex(){
 	real[][][] x = [[[2,3]],[[4],[5,6]]];

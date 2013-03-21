@@ -198,11 +198,11 @@ static this()
 template InitEntities(T...)
     if(T.length % 2 == 0)
 {
-	pragma(msg, T[0]," ",T[1]);
     static if(T.length == 0)
         enum InitEntities = "";
     else
     {
+	    pragma(msg, T[0]," ",T[1]);
         enum InitEntities = Format!(`htmlEntities["%s"] = "%s";`, T[0], T[1]) ~
                             InitEntities!(T[2 .. $]);
     }
