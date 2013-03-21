@@ -2481,11 +2481,10 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		alias Instruction I;
 
+		e.byteCompile(bld);
 		if(!a.length) return; // TODO: static arrays
 
 		assert(a.length == 1);
-		e.byteCompile(bld);
-
 		auto siz = getCTSizeof(type);
 		mixin(byteCompileDollar);
 
@@ -2515,9 +2514,10 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		alias Instruction I;
-		assert(a.length == 1);
 		e.byteCompile(bld);
 		// TODO: static arrays
+		// TODO: slice assign
+		assert(a.length == 1);
 		auto siz = getCTSizeof(type);
 		mixin(byteCompileDollar);
 
@@ -3495,6 +3495,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				}
 			}
 			void perform(CallExp self){
+				//if(!self.fun || !self.fun.type) return; // TODO: ok?
+				assert(self.fun && self.fun.type, to!string(self));
 				auto tt=self.fun.type.getFunctionTy();
 				assert(!!tt);
 				foreach(i,x; self.args){

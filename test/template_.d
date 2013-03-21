@@ -13,7 +13,7 @@ auto testtemplatefunclit(fun...)(){
 struct FunContainer{
 	static fun(int x,double y,string z)=>()=>z~"hi1";
 }
-pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
+//pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
 pragma(msg, "testtemplatefunclit 2: ",testtemplatefunclit!((int x,double y,string z)=>()=>z~"hi2")());
 immutable u = "123";
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~" hi3")());

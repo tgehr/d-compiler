@@ -156,6 +156,8 @@ class InvariantExp: Identifier{
 class DollarExp: Identifier{
 	this(){ super(q{$}); }
 
+	override @property string kind(){return "array length";}
+
 	mixin Visitors;
 }
 
@@ -216,9 +218,15 @@ class AssertExp: Expression{
 class UnaryExp(TokenType op): Expression{
 	Expression e;
 	this(Expression next){e = next;}
-	override string toString(){return _brk(TokChars!op~e.toString());}
+	override string toString(){
+		if(auto s=e.isSymbol())if(s.isFunctionLiteral) return s.meaning.loc.rep;
+		return _brk(TokChars!op~e.toString());
+	}
 	static if(op==Tok!"&"){
-		override @property string kind(){return "address";}
+		override @property string kind(){
+			if(auto s=e.isSymbol())if(s.isFunctionLiteral) return "function literal";
+			return "address";
+		}
 		//override UnaryExp!(Tok!"&") isAddressExp(){return this;}
 	}
 	mixin Visitors;
@@ -254,7 +262,7 @@ class CallExp: Expression{
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
 	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
 
-	override @property string kind(){return "result of function call";} // TODO: 'struct literal'
+	override @property string kind(){return "function call result";} // TODO: 'struct literal'
 
 	mixin Visitors;
 }

@@ -34,7 +34,7 @@ mixin template DeepDup(T) if(is(T: BasicType)){
 
 mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 	@trusted inout(T) ddup()inout{
-		static if(is(T:Type)){
+		static if(is(T:Type) && !is(T:FunctionTy)){
 			if(sstate==SemState.completed) return this;
 			assert(sstate == SemState.begin);
 		}
@@ -57,7 +57,7 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 			}// else{ import std.stdio; writeln("not copying "~T.stringof,".",x);}
 		}
 		static if(is(T==FunctionTy)){
-			res.clearCaches();
+			res.clearCaches();// TODO: clearCaches is not good enough
 		}
 		return *cast(inout(T)*)&res;
 	}

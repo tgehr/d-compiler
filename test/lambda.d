@@ -1,4 +1,63 @@
 
+
+void testinex(){
+	void foo(int delegate(int) dg){}
+	foo(x=>y);
+}
+
+
+pragma(msg, (int x, int y){}());
+
+
+alias immutable(char)[] string;
+
+auto testdederr()=>(x,y,z,w)=>{return y;}(2,"hello",4,5)(); // deduction failure
+typeof(x=>x) testdederr2; // deduction failure
+
+auto testdederr3(){
+	auto a=(x=>x(2))(x=>x); // deduction failure (no inference)
+	auto b=(cast(int function(int function(int)))x=>x(2))(x=>x); // ok
+	static assert(is(typeof(b)==int));
+}
+
+
+
+auto testdedinit(bool b){
+	string delegate(int, double, string)[] dgs =
+		[(x,y,z)=>toString(x),(x,y,z)=>toString(cast(int)y),(x,y,z)=>z];
+
+	template Seq(T...){ alias T Seq;}
+
+	alias Seq!(int, double, string) P;
+
+	double delegate(P)[] dg2 = b?[(x,y,z)=>x]:[(x,y,z)=>y];
+
+	alias Seq!(1,2,"3") args;
+
+	return dgs[0](args)~dgs[1](args)~dgs[2](args)~(dg2[0](1,2,"3")==2?"2":"?");
+}
+
+pragma(msg, "testdedinit 1: ",testdedinit(false));
+pragma(msg, "testdedinit 2: ",testdedinit(true));
+
+static assert(testdedinit(false)=="1232" && testdedinit(true)=="123?");
+
+
+auto deduceparamfromdollar(){
+	int[] x=[-1,1,1337,3,0,0,0];
+	return x[][][0..$-1][][][1..$-1][][][0..$-1][][]
+	[
+	 ((x,y,z,w)=>{
+		 assert(x==z && y[0]=='$' && z+1==w && w==3 && $==3);
+		 return x-1;
+	 })($-1,"$-1",$-1,$)()
+	];
+}
+static assert(deduceparamfromdollar()==1337);
+pragma(msg, "deduceparamfromdollar: ",deduceparamfromdollar());
+
+
+
 shared(typeof(delegate()const{})) x;
 pragma(msg,shared(typeof(cast()x)));
 

@@ -1,7 +1,7 @@
-
 template Alias(T){ alias T Alias; }
 
 template TypeTuple(T...){ alias T TypeTuple; }
+
 
 pragma(msg, TypeTuple!(1,2,3,4)[1..3]);
 TypeTuple!(int,double,float,long)[1..3] xx;
@@ -167,7 +167,7 @@ template isUppercase(string s) if(is(typeof(s[2]))&&!is(typeof(s[3]))){
 //pragma(msg, isUppercase!"AbC");
 //pragma(msg, isUppercase!"DEF");
 
-pragma(msg, StaticFilter!(isUppercase,5,"123","aBc",TypeTuple!("ABC","AbC"),"DEF"));
+pragma(msg, StaticFilter!(isUppercase,"123","aBc",TypeTuple!("ABC","AbC"),"DEF"));
 
 template StaticIota(int a, int b) if(a<=b){
 	static if(a==b) alias TypeTuple!() StaticIota;

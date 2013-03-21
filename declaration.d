@@ -32,6 +32,7 @@ abstract class Declaration: Statement{
 		TemplateInstanceDecl,
 		OverloadableDecl,
 		OverloadSet,
+		OverloadMatcher,
 		GenerativeDecl,
 		AliasDecl,
 		AggregateDecl,
@@ -310,7 +311,11 @@ class TemplateFunctionDecl: OverloadableDecl{
 class VarDecl: Declaration{
 	Expression rtype;
 	Expression init;
-	this(STC stc, Expression rtype, Identifier name, Expression initializer){this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);}
+	this(STC stc, Expression rtype, Identifier name, Expression initializer)in{
+		assert(!!name||typeid(this) !is typeid(VarDecl));
+	}body{
+		this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);
+	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
@@ -344,7 +349,7 @@ class Declarators: Declaration{
 
 class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach usage
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
-	override string toString(){return STCtoString(astStc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():type?type.toString()~" ":"")~
+	override string toString(){return (rtype?STCtoString(astStc)~(astStc?" ":"")~rtype.toString():type?STCtoString(stc)~(stc?" ":"")~type.toString()~" ":"")~
 			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
 	override @property string kind(){return "parameter";}
 

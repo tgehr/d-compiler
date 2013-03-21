@@ -3,7 +3,7 @@ bool isLvalue(int x){return false;}
 
 static assert(!isLvalue(1));
 static assert({int x;return isLvalue(x);}());
-
+/+
 bool testRefOv(ref int x, double y){return true;}
 bool testRefOv(int x, int y){return false;}
 
@@ -80,4 +80,4 @@ void main(){
 	bar(1);
 +/
 	//baz(1,1);
-}
+}+/

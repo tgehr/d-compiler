@@ -1,4 +1,5 @@
 
+
 /+
 // TODO: do we want deterministic slice aliasing in CTFE?
 auto testsetlengthdet(){
@@ -57,11 +58,11 @@ bool bsearch(T)(T[] haystack, T needle){
 }
 
 pragma(msg, "bsearch1: ",bsearch!int([1,2,3],0));
-pragma(msg, "bsearch2: ",bsearch!int([0,2,5],2));
+pragma(msg, "bsearch2: ",bsearch!float([0,2,5],2));
 pragma(msg, "bsearch3: ",bsearch!int([0,2,5],3));
-pragma(msg, "bsearch4: ",bsearch!int([],0));
+pragma(msg, "bsearch4: ",bsearch!real([],0));
 
-
+ 
 auto testdollar(){
 	int[] x = [1,2,3,4];
 	auto ptr=&x[(x~=cast(int)$,x~=cast(int)$,0)];
@@ -98,13 +99,14 @@ auto testlambda(){
 pragma(msg, "testlambda: ",testlambda());
 
 
-auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0]))[])){
+auto map(alias a,T)(T[] arg) {//if(is(typeof(a(arg[0]))[])){
 	typeof(a(arg[0]))[] r;
 	for(int i=0;i<arg.length;i++)
 		r~=a(arg[i]);
 	return r;
 }
 pragma(msg, typeof(map!(toString,int)));
+
 
 int[] iota(int a, int b){ int[] r; for(int i=a;i<b;i++) r~=i; return r; }
 
@@ -114,9 +116,9 @@ bool pred(string s){
 	return c>=2;
 }
 
-pragma(msg, filter!(pred,string)(map!(toString,int)(iota(0,1000))));
+//pragma(msg, filter!(pred,string)(map!(toString,int)(iota(0,1000))));
 
-auto filter(alias a,T)(T[] arg) if(is(typeof(cast(bool)a(arg[0])):bool)){
+auto filter(alias a,T)(T[] arg) {//if(is(typeof(cast(bool)a(arg[0])):bool)){
 	typeof(arg) r;
 	for(int i=0;i<arg.length;i++)
 		if(a(arg[i])) r~=arg[i];
@@ -141,7 +143,6 @@ auto sort(alias p,T)(T[] arg){
 }
 
 
-
 auto mod(int x){return (int y)=>y%x;}
 
 
@@ -150,6 +151,7 @@ auto mod10(int y){return mod(10)(y);}
 enum unsorted = [3,28,1,29,33,828,11,282,34,378,122,122];
 
 pragma(msg, sort!("a<b",int)(map!(mod10,int)(unsorted)));
+
 
 //pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
 
@@ -1107,14 +1109,14 @@ pragma(msg, "oOoOoO: ",xxx);
 
 auto dg = (delegate int(int x) => x)(2);+/
 
-
++/
 
 //int x;
 //pragma(__p, [2,x]~1);
 
 // +/
 // +/
-
+// +/
 alias immutable(char)[] string;
 
 auto toString(int i){
