@@ -9,9 +9,5 @@ ttt: $(OBJFILES)
 %.o: %.d
 	$(DMD) -J. -c $<
 
-parser.o: parser.d
-	$(DMD) -J. -c $< 2>&1 | ./ctwriter
-
-
 clean:
 	rm *.o ttt

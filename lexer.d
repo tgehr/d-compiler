@@ -147,6 +147,9 @@ string TokCharsImpl(){
 	return r;
 }
 }
+string TokenTypeToString(TokenType type){
+	return tokens[cast(int)type][0];
+}
 
 struct Location{
 	string mod;
@@ -198,7 +201,7 @@ struct Token{
 			case Tok!"Error":
 				return "error: "~str;
 			default:
-				return tokens[cast(int)type][0];
+				return TokenTypeToString(type);
 		}
 	}
 	union{

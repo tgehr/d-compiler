@@ -846,25 +846,16 @@ int getLbp(TokenType type) pure{ // operator precedence
 	default: return -1;
 	}
 }
-
-enum literals=["``","``c","``w","``d","''","0","0U","0L","0LU",".0f",".0",".0L",".0fi",".0i",".0Li","null","true","false"];
-template isLiteral(TokenType type){
-	enum isLiteral = canFind(literals,TokChars!type);
-}
 // unary exp binding power
 enum nbp=140;
-template isUnaryOp(TokenType type){
-	enum isUnaryOp = canFind(["&", "*", "-", "++", "--", "+", "!", "~"],TokChars!type);
-}
-template isSimplePostfixOp(TokenType type){
-	enum bool isSimplePostfixOp = canFind([/*".",*/ "++", "--"],TokChars!type);
-}
-template isPostfixOp(TokenType type){
-	enum bool isPostfixOp = isSimplePostfixOp!type || canFind(["(", "["],TokChars!type);
-}
-template isBinaryOp(TokenType type){
-	enum bool isBinaryOp = lbp!type!=-1 && !isPostfixOp!type;
-}
+
+enum literals=["``","``c","``w","``d","''","0","0U","0L","0LU",".0f",".0",".0L",".0fi",".0i",".0Li","null","true","false"];
+enum unaryOps = ["&", "*", "-", "++", "--", "+", "!", "~"];
+enum postfixOps=[/*".",*/"++", "--","(","["];
+enum binaryOps=mixin({string r="[";
+        foreach(x;EnumMembers!TokenType)if(getLbp(x)!=-1&&!canFind([Tok!"++",Tok!"--",Tok!"(",Tok!"["],x)) r~=`"`~TokenTypeToString(x)~`",`;
+        return r~"]";
+	}());
 
 enum basicTypes=["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar","float","double","real","ifloat","idouble","ireal","cfloat","cdouble","creal","void"];
 
@@ -966,7 +957,7 @@ private template doParseImpl(bool d,T...){
 				case "OPT":
 				static if(T[0]=="OPT")
 					return (d?"auto ":"")~T[2]~" = tok.type==Tok!\""~T[3]~"\" || tok.type==Tok!\")\" ? null : "~
-						"parse"~T[1].stringof~"();\n"~doParseImpl!(d,T[3..$]);
+						getParseProc!(T[1..$]).prc~";\n"~doParseImpl!(d,T[1+getParseProc!T.off..$]);
 				default: return "expect(Tok!\""~T[0]~"\");\n"~doParseImpl!(d,T[1..$]);;
 			}
 		}();
@@ -974,8 +965,8 @@ private template doParseImpl(bool d,T...){
 	else enum doParseImpl=(d?"auto ":"")~T[1]~" = "~getParseProc!T.prc~";\n"~doParseImpl!(d,T[getParseProc!T.off..$]);
 }
 
-private template doParse(T...){ alias Apply!(MemoizeTemplate!doParseImpl,true,T) doParse; }
-private template doParseNoDef(T...){ alias Apply!(MemoizeTemplate!doParseImpl,false,T) doParseNoDef; }
+private template doParse(T...){ alias doParseImpl!(true,T) doParse; }
+private template doParseNoDef(T...){ alias doParseImpl!(false,T) doParseNoDef; }
 
 private template parseDefOnly(T...){
 	static if(T.length==0) enum parseDefOnly="";
@@ -1023,13 +1014,12 @@ private template getParseNames(T...){
 	}
 }
 
-private template ruleImpl(T...){ // applies a grammar rule and returns the result
-	enum ruleImpl={
+private template rule(T...){ // applies a grammar rule and returns the result
+	enum rule={
 		alias fillParseNames!("e",T[1..$]) a;
 		return doParse!(a)~"return New!"~T[0].stringof~"("~getParseNames!a~");";
 	}();
 }
-alias MemoizeTemplate!ruleImpl rule;
 
 
 alias immutable(Token)[] Code;
@@ -1099,16 +1089,6 @@ private struct Parser(alias New=MallocNew){
 		nextToken(); return true;
 	}
 	bool skip(){nextToken(); return true;}
-	auto dp(alias a, T...)(T args){ // dynamic dispatch based on token type (TODO: redesign, too much code replication)
-		final switch(tok.type){
-			mixin({
-				string r;
-				foreach(t;__traits(allMembers, TokenType)) r~=`case TokenType.` ~ t ~ `:  return a!(TokenType.` ~ t ~ `)(args);`;
-				return r;
-			}());
-		}
-		return cast(Expression)null;
-	}
 	Identifier parseIdentifier(){ // Identifier(null) is the error value
 		string name;
 		if(tok.type==Tok!"i") name=tok.name;
@@ -1132,7 +1112,7 @@ private struct Parser(alias New=MallocNew){
 				if(tok.type!=Tok!"i"){errori(); return New!(BinaryExp!(Tok!"."))(e,New!ErrorExp);}
 				e = New!(BinaryExp!(Tok!"."))(e,New!Identifier(tok.str));
 				nextToken();
-			}else if(tok.type==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){e=led!(Tok!"!")(e);}
+			}else if(tok.type==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){e=led(e);}
 			else break;
 		}
 		return e;
@@ -1221,141 +1201,163 @@ private struct Parser(alias New=MallocNew){
 	}
 	// Operator precedence expression parser
 	// null denotation
-	Expression nud(TokenType type)() {
-		static if(type==Tok!"i" || type == Tok!".") return parseIdentifierList();
-		else static if(isBasicType!type){mixin(doParse!("_","."));return parseIdentifierList(New!BasicType(type));}
-		else static if(type==Tok!"``"||type==Tok!"``c"||type==Tok!"``w"||type==Tok!"``d"){ // adjacent string tokens get concatenated
-			Token t=tok;
-			static if(type!=Tok!"``") for(nextToken();tok.type==type||tok.type==Tok!"``";nextToken()) t.str~=tok.str;
-			else for(nextToken();tok.type==Tok!"``";nextToken()) t.str~=tok.str;
-			return New!LiteralExp(t);
-		}else static if(isLiteral!type){auto e=New!LiteralExp(tok); nextToken(); return e;}
-		else static if(type == Tok!"this"){mixin(rule!(ThisExp,"_"));}
-		else static if(type == Tok!"super"){mixin(rule!(SuperExp,"_"));}
-		else static if(type == Tok!"$"){mixin(rule!(DollarExp,"_"));}
-		else static if(type == Tok!"cast"){
-			nextToken(); expect(Tok!"(");
-			STC stc;
-			Expression tt=null;
-			if(tok.type!=Tok!")"){
-				stc=parseSTC!toplevelSTC();
-				if(tok.type!=Tok!")") tt=parseType();
-			}
-			expect(Tok!")");
-			auto e=dp!nud();
-			return New!CastExp(stc,tt,e);
-		}else static if(type == Tok!"is"){
-			mixin(doParse!("_","(",Type,"type"));
-			Identifier ident; // optional
-			if(tok.type==Tok!"i") ident=New!Identifier(tok.name), nextToken();
-			auto which = WhichIsExp.type;
-			if(tok.type==Tok!":") which = WhichIsExp.implicitlyConverts;
-			else if(tok.type==Tok!"==") which = WhichIsExp.isEqual;
-			else if(tok.type==Tok!"*=" && peek().type==Tok!"=") type = New!Pointer(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
-			else{expect(Tok!")");return New!IsExp(which,type,ident,cast(Expression)null,Tok!"",cast(TemplateParameter[])null);}
-			nextToken();
-			Expression typespec=null;
-			TokenType typespec2=Tok!"";
-			if(which==WhichIsExp.isEqual){
-				switch(tok.type){
-					case Tok!"const", Tok!"immutable", Tok!"inout", Tok!"shared":
-						auto tt=peek().type; if(tt==Tok!","||tt==Tok!")") goto case; goto default;
-					case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface", Tok!"enum", Tok!"function", Tok!"delegate", 
-						 Tok!"super", Tok!"return", Tok!"typedef":
-						typespec2=tok.type; nextToken(); break;
-					default: goto parsetype;
-			}
-			}else parsetype: typespec=parseType();
-			TemplateParameter[] tparams = null;
-			if(tok.type==Tok!","){
+	Expression nud() {
+		switch(tok.type){
+			case Tok!"i",Tok!".": return parseIdentifierList();
+			case Tok!"``", Tok!"``c", Tok!"``w", Tok!"``d": // adjacent string tokens get concatenated
+				Token t=tok;
+				for(nextToken();tok.type==t.type||tok.type==Tok!"``";nextToken()){
+					if(t.type==Tok!"``" && Tok!"``c"<=tok.type && tok.type<=Tok!"``d") t.type=tok.type; // ENHANCEMENT
+					t.str~=tok.str;
+				}
+				return New!LiteralExp(t);
+			mixin(getTTCases(literals,["``","``c","``w","``d"])); {auto e=New!LiteralExp(tok); nextToken(); return e;}
+			case Tok!"this": mixin(rule!(ThisExp,"_"));
+			case Tok!"super": mixin(rule!(SuperExp,"_"));
+			case Tok!"$": mixin(rule!(DollarExp,"_"));
+			case Tok!"cast":
+				nextToken(); expect(Tok!"(");
+				STC stc;
+				Expression tt=null;
+				if(tok.type!=Tok!")"){
+					stc=parseSTC!toplevelSTC();
+					if(tok.type!=Tok!")") tt=parseType();
+				}
+				expect(Tok!")");
+				auto e=nud();
+				return New!CastExp(stc,tt,e);
+			case Tok!"is":
+				mixin(doParse!("_","(",Type,"type"));
+				Identifier ident; // optional
+				if(tok.type==Tok!"i") ident=New!Identifier(tok.name), nextToken();
+				auto which = WhichIsExp.type;
+				if(tok.type==Tok!":") which = WhichIsExp.implicitlyConverts;
+				else if(tok.type==Tok!"==") which = WhichIsExp.isEqual;
+				else if(tok.type==Tok!"*=" && peek().type==Tok!"=") type = New!Pointer(type), nextToken(), which=WhichIsExp.isEqual; // EXTENSION
+				else{expect(Tok!")");return New!IsExp(which,type,ident,cast(Expression)null,Tok!"",cast(TemplateParameter[])null);}
 				nextToken();
-				if(ident&&tok.type!=Tok!")") tparams = parseTemplateParameterList();
-			}
-			expect(Tok!")");
-			return New!IsExp(which,type,ident,typespec,typespec2,tparams);
-		}else static if(type == Tok!"__traits"){mixin(rule!(TraitsExp,"_","(",Tuple,")"));}
-		else static if(type == Tok!"delete"){mixin(rule!(DeleteExp,"_",Expression));}
-		else static if(type == Tok!"__error"){mixin(rule!(ErrorExp,"_"));}
-		else static if(type==Tok!"("){
-			if(peekPastParen().type==Tok!"{") return parseFunctionLiteralExp();
-			nextToken();
-			auto save=saveState();
-			bool isType=skipType() && tok.type==Tok!")";
-			restoreState(save);
-			Expression e;
-			if(isType){mixin(doParseNoDef!(Type,"e",")"));} // does not necessarily parse a type, eg arr[10]
-			else{mixin(doParseNoDef!(Expression,"e",")"));}
-			e.brackets++;
-			return e;
-		}else static if(typeQualifiers.canFind(TokChars!type)){
-			nextToken(); expect(Tok!"(");
-			auto e=parseType(); e.brackets++;
-			expect(Tok!")");
-			return New!(QualifiedType!type)(e);
-		}else static if(type==Tok!"{" || type==Tok!"delegate" || type==Tok!"function") return parseFunctionLiteralExp(); // TODO: struct literals
-		else static if(type==Tok!"["){
-			nextToken(); if(tok.type==Tok!"]") return nextToken(), New!ArrayLiteralExp(cast(Expression[])null);
-			mixin(rule!(ArrayLiteralExp,AssocArgumentList,"]"));
-		}else static if(isUnaryOp!type){nextToken(); return New!(UnaryExp!type)(parseExpression(nbp));}
-		else static if(type == Tok!"new"){
-			nextToken();
-			if(tok.type==Tok!"class"){
-				mixin(doParse!("_","OPT"q{"(",ArgumentList,"args",")"}));
-				auto aggr=cast(ClassDecl)cast(void*)parseAggregateDecl(STC.init,true); // it is an anonymous class, static cast is safe
-				return New!NewClassExp(args,aggr);
-			}else{mixin(rule!(NewExp,"OPT"q{"(",ArgumentList,")"},Type,"OPT"q{"(",ArgumentList,")"}));}
-		}else static if(type == Tok!"assert"){mixin(rule!(AssertExp,"_","(",ArgumentList,")"));}
-		else static if(type == Tok!"mixin"){mixin(rule!(MixinExp,"_","(",AssignExp,")"));}
-		else static if(type == Tok!"import"){mixin(rule!(ImportExp,"_","(",AssignExp,")"));}
-		else static if(type == Tok!"typeid"){mixin(rule!(TypeidExp,"_","(",TypeOrExpression,")"));}
-		else static if(type==Tok!"typeof"){
-			nextToken(); expect(Tok!"(");
-			if(tok.type==Tok!"return"){nextToken(); expect(Tok!")"); return New!TypeofReturnExp();}
-			mixin(doParse!(Expression,"e1",")"));
-			Expression e2=New!TypeofExp(e1);
-			if(tok.type==Tok!"."){nextToken(); e2=parseIdentifierList(e2);}
-			return e2;
+				Expression typespec=null;
+				TokenType typespec2=Tok!"";
+				if(which==WhichIsExp.isEqual){
+					switch(tok.type){
+						case Tok!"const", Tok!"immutable", Tok!"inout", Tok!"shared":
+							auto tt=peek().type; if(tt==Tok!","||tt==Tok!")") goto case; goto default;
+						case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface", Tok!"enum", Tok!"function", Tok!"delegate", 
+							Tok!"super", Tok!"return", Tok!"typedef":
+							typespec2=tok.type; nextToken(); break;
+						default: goto parsetype;
+					}
+				}else parsetype: typespec=parseType();
+				TemplateParameter[] tparams = null;
+				if(tok.type==Tok!","){
+					nextToken();
+					if(ident&&tok.type!=Tok!")") tparams = parseTemplateParameterList();
+				}
+				expect(Tok!")");
+				return New!IsExp(which,type,ident,typespec,typespec2,tparams);
+			case Tok!"__traits": mixin(rule!(TraitsExp,"_","(",Tuple,")"));
+			case Tok!"delete": mixin(rule!(DeleteExp,"_",Expression));
+			case Tok!"(":
+				if(peekPastParen().type==Tok!"{") return parseFunctionLiteralExp();
+				nextToken();
+				auto save=saveState();
+				bool isType=skipType() && tok.type==Tok!")";
+				restoreState(save);
+				Expression e;
+				if(isType){mixin(doParseNoDef!(Type,"e",")"));} // does not necessarily parse a type, eg arr[10]
+				else{mixin(doParseNoDef!(Expression,"e",")"));}
+				e.brackets++;
+				return e;
+			case Tok!"__error": mixin(rule!(ErrorExp,"_"));
+			mixin(getTTCases(basicTypes)); {mixin(doParse!("_","."));return parseIdentifierList(New!BasicType(tok.type));} // int.max etc
+			mixin({string r; // immutable(int).max etc
+				foreach(type;typeQualifiers){
+					r~=q{case Tok!}`"`~type~`":`q{
+						nextToken(); expect(Tok!"(");
+						auto e=parseType(); e.brackets++;
+						expect(Tok!")");
+						expect(Tok!".");
+						return parseIdentifierList(New!(QualifiedType!(Tok!}"`"~type~"`"q{))(e));
+					};
+				}
+				return r;
+			}());
+			case Tok!"{", Tok!"delegate", Tok!"function": return parseFunctionLiteralExp(); // TODO: struct literals
+			case Tok!"[": mixin(rule!(ArrayLiteralExp,"_","OPT",AssocArgumentList,"]"));
+			case Tok!"new":
+				nextToken();
+				if(tok.type==Tok!"class"){
+					mixin(doParse!("_","OPT"q{"(",ArgumentList,"args",")"}));
+					auto aggr=cast(ClassDecl)cast(void*)parseAggregateDecl(STC.init,true); // it is an anonymous class, static cast is safe
+					return New!NewClassExp(args,aggr);
+				}else{mixin(rule!(NewExp,"OPT"q{"(",ArgumentList,")"},Type,"OPT"q{"(",ArgumentList,")"}));}
+			case Tok!"assert": mixin(rule!(AssertExp,"_","(",ArgumentList,")"));
+			case Tok!"mixin": mixin(rule!(MixinExp,"_","(",AssignExp,")"));
+			case Tok!"import": mixin(rule!(ImportExp,"_","(",AssignExp,")"));
+			case Tok!"typeid": mixin(rule!(TypeidExp,"_","(",TypeOrExpression,")"));
+			case Tok!"typeof":
+				nextToken(); expect(Tok!"(");
+				if(tok.type==Tok!"return"){nextToken(); expect(Tok!")"); return New!TypeofReturnExp();}
+				mixin(doParse!(Expression,"e1",")"));
+				Expression e2=New!TypeofExp(e1);
+				if(tok.type==Tok!"."){nextToken(); e2=parseIdentifierList(e2);}
+				return e2;
+				mixin({string r;
+					foreach(x;unaryOps) r~=q{case Tok!}`"`~x~`":`q{nextToken(); return New!(UnaryExp!(Tok!}`"`~x~`"`q{))(parseExpression(nbp));};
+					return r;
+				}());
+			default: throw new PEE("invalid unary operator '"~tok.toString()~"'");
 		}
-		else throw new PEE("invalid unary operator '"~tok.toString()~"'");
 	}
 	// left denotation
-	Expression led(TokenType type)(Expression left){
-		//static if(type == Tok!"i") return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));else // infix
-		static if(type == Tok!"?"){mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",Expression));}
-		else static if(type == Tok!"["){
-			nextToken();
-			if(tok.type==Tok!"]"){nextToken(); return New!IndexExp(left,cast(Expression[])null);}
-			auto l=parseExpression(rbp!(Tok!","));
-			if(tok.type==Tok!".."){nextToken(); auto r=parseExpression(rbp!(Tok!",")); expect(Tok!"]"); return New!SliceExp(left, l,r);}
-			else{auto e=New!IndexExp(left,parseArgumentList!"]"(l)); expect(Tok!"]"); return e;}
+	Expression led(Expression left){
+		switch(tok.type){
+			//case Tok!"i": return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));// infix
+			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",Expression));
+			case Tok!"[":
+				nextToken();
+				if(tok.type==Tok!"]"){nextToken(); return New!IndexExp(left,cast(Expression[])null);}
+				auto l=parseExpression(rbp!(Tok!","));
+				if(tok.type==Tok!".."){nextToken(); auto r=parseExpression(rbp!(Tok!",")); expect(Tok!"]"); return New!SliceExp(left, l,r);}
+				else{auto e=New!IndexExp(left,parseArgumentList!"]"(l)); expect(Tok!"]"); return e;}
+			case Tok!"(": mixin(rule!(CallExp,"_",Existing,"left",ArgumentList,")"));
+			case Tok!"!":
+				nextToken();
+				if(tok.type==Tok!"is") goto case Tok!"!is";
+				else if(tok.type==Tok!"in") goto case Tok!"!in";
+				if(tok.type==Tok!"("){
+					nextToken(); auto e=New!TemplateInstanceExp(left,parseTuple!")");
+					if(e.args.length==1) e.args[0].brackets++; expect(Tok!")"); return e;
+				}
+				return New!TemplateInstanceExp(left,[parseTemplateSingleArg()]);
+			case Tok!".": nextToken(); return parseIdentifierList(left);
+			mixin({string r;
+				foreach(x;binaryOps)
+					if(x!="." && x!="!" && x!="?")
+						r~=q{case Tok!}`"`~x~`":`q{nextToken(); return New!(BinaryExp!(Tok!}`"`~x~`"`q{))(left,parseExpression(rbp!(Tok!}`"`~x~`"`q{)));};
+				return r;
+			}());
+			//pragma(msg,TokenTypeToString(cast(TokenType)61));
+			mixin({string r;
+				foreach(x;postfixOps)
+					if(x!="(" && x!="[")
+						r~=q{case Tok!}`"`~x~`":`q{nextToken();return New!(PostfixExp!(Tok!}`"`~x~`"`q{))(left);};
+				return r;
+			}());
+			default: throw new PEE("invalid binary operator '"~tok.toString()~"'");
 		}
-		else static if(type == Tok!"("){mixin(rule!(CallExp,"_",Existing,"left",ArgumentList,")"));}
-		else static if(type == Tok!"!"){
-			nextToken();
-			if(tok.type==Tok!"is") return led!(Tok!"!is")(left);
-			else if(tok.type==Tok!"in") return led!(Tok!"!in")(left);
-			if(tok.type==Tok!"("){
-				nextToken(); auto e=New!TemplateInstanceExp(left,parseTuple!")");
-				if(e.args.length==1) e.args[0].brackets++; expect(Tok!")"); return e;
-			}
-			return New!TemplateInstanceExp(left,[parseTemplateSingleArg()]);
-		}
-		else static if(type == Tok!"."){nextToken(); return parseIdentifierList(left);}
-		else static if(isBinaryOp!type){nextToken(); return New!(BinaryExp!type)(left,parseExpression(rbp!type));}
-		else static if(isPostfixOp!type){nextToken();return New!(PostfixExp!type)(left);}
-		else throw new PEE("invalid binary operator '"~TokChars!type~"'");
 	}
 	Expression parseExpression(int rbp = 0){
 		Expression left;
-		try left = dp!nud();catch(PEE err){error("found '"~tok.toString()~"' when expecting expression");nextToken();return new ErrorExp();}
+		try left = nud();catch(PEE err){error("found '"~tok.toString()~"' when expecting expression");nextToken();return new ErrorExp();}
 		while(rbp < arrLbp[tok.type]){ // TODO: replace with array lookup
-			try left = dp!led(left); catch(PEE err){error(err.msg);}
+			try left = led(left); catch(PEE err){error(err.msg);}
 		}
 		return left;
 	}
 	Expression parseExpression2(Expression left, int rbp = 0){ // already know what left is
 		while(rbp < arrLbp[tok.type]){ // TODO: replace with array lookup
-			try left = dp!led(left); catch(PEE err){error(err.msg);}
+			try left = led(left); catch(PEE err){error(err.msg);}
 		}
 		return left;
 	}
@@ -1576,7 +1578,7 @@ private struct Parser(alias New=MallocNew){
 					foreach(x;typeQualifiers) r~=`case Tok!"`~x~`": nextToken();
 if(tok.type==Tok!"(") brk=true, nextToken(); auto e=parseType(); e.brackets+=brk; tt=New!(QualifiedType!(Tok!"`~x~`"))(e);brk&&expect(Tok!")"); break;`;
 					return r;}());
-			case Tok!"typeof": tt=nud!(Tok!"typeof")(); break;
+			case Tok!"typeof": tt=nud(); break;
 			default: error("found '"~tok.toString()~"' when expecting "~expectwhat); nextToken(); return New!ErrorExp;
 		}
 		for(;;){
@@ -1587,7 +1589,7 @@ if(tok.type==Tok!"(") brk=true, nextToken(); auto e=parseType(); e.brackets+=brk
 					bool isAA=skip()&&skipType()&&tok.type==Tok!"]";
 					restoreState(save);
 					if(isAA){mixin(doParse!("_",Type,"e","]")); tt=New!IndexExp(tt,[e]);}
-					else tt=led!(Tok!"[")(tt); continue; //'Bug': allows int[1,2].
+					else tt=led(tt); continue; //'Bug': allows int[1,2].
 				case Tok!"function":
 					nextToken();
 					VarArgs vararg;
@@ -1907,7 +1909,7 @@ if(tok.type==Tok!"(") brk=true, nextToken(); auto e=parseType(); e.brackets+=brk
 			bool isAA=skip()&&skipType()&&tok.type==Tok!"]";
 			restoreState(save);
 			if(isAA){mixin(doParse!("_",Type,"e","]")); pfix=New!IndexExp(pfix,[e]);}
-			else pfix=led!(Tok!"[")(pfix);//'Bug': allows int[1,2].
+			else pfix=led(pfix);//'Bug': allows int[1,2].
 		}
 		if(tok.type==Tok!"=") nextToken(), init=parseInitializerExp(false);
 		expect(Tok!";");
