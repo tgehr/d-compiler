@@ -1,7 +1,9 @@
+// Written in the D programming language.
 
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, scope_, semantic, visitors, util;
+
 
 abstract class Statement: Node{
 	override @property string kind(){return "statement";}
@@ -9,6 +11,7 @@ abstract class Statement: Node{
 	mixin DownCastMethods!(
 		BlockStm,
 	);
+
 	mixin Visitors;
 }
 

@@ -1,15 +1,38 @@
-import lexer, expression, semantic, scope_, type;
-import std.string;
+// Written in the D programming language.
 
+import lexer, expression, semantic, scope_, type;
+import util;
+import std.string;
 
 private template NotYetImplemented(T){
 	static if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryExp!(Tok!".")))
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp);
 }
 
+enum IntFCEplg = q{needRetry = false; return this;};
+template IntFCChld(string s){
+	enum IntFCChld={
+		string r;
+		auto ss=s.split(",");
+		foreach(t; ss){
+			r~=mixin(X!q{
+				@(t) = @(t)._interpretFunctionCalls(sc);
+				mixin(PropRetry!q{@(t)});
+			});
+		}
+		return r~PropErr!s~IntFCEplg;
+	}();
+}
+
+// should never be interpreted:
+mixin template Interpret(T) if(is(T==MixinExp) || is(T==IsExp)){
+	override bool checkInterpret(Scope sc){assert(0);}
+	override Expression interpret(Scope sc){assert(0);}
+	protected override Expression _interpretFunctionCalls(Scope sc){assert(0);}
+}
 mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
 	override Expression interpret(Scope sc){
 		assert(sc, "expression "~toString()~" was assumed to be interpretable");
@@ -23,12 +46,17 @@ mixin template Interpret(T) if(is(T==Expression)){
 	bool checkInterpret(Scope sc)in{assert(sstate == SemState.completed);}body{
 		assert(sc, loc.rep);
 		sc.error(format("expression '%s' is not interpretable at compile time",loc.rep),loc);
+		sstate = SemState.error;
 		return false;
 	}
-	Expression interpret(Scope sc)in{assert(sstate == SemState.completed);}body{
+	Expression interpret(Scope sc)in{assert(sstate == SemState.completed);	}body{
 		if(!checkInterpret(sc)) mixin(ErrEplg);
-		auto r = interpretV().toExpr();
-		r.loc=loc;
+		auto a=_interpretFunctionCalls(sc);
+		mixin(PropRetry!q{a});
+		if(a.sstate == SemState.error) return a;
+		auto r = a.interpretV().toExpr();
+		r.loc=a.loc;
+		assert(!isConstant() || !needRetry); // TODO: file bug, so that this can be 'out'
 		return r; 
 	}
 	Variant interpretV()in{assert(sstate == SemState.completed);}body{
@@ -36,6 +64,9 @@ mixin template Interpret(T) if(is(T==Expression)){
 		return Variant("TODO: cannot interpret "~to!string(this)~" yet");
 		//return Variant.init;
 	}
+protected:
+	// for interpret.d internal use only, protection system cannot express this.
+	Expression _interpretFunctionCalls(Scope sc){return this;}
 }
 
 mixin template Interpret(T) if(is(T==CastExp)){
@@ -58,6 +89,8 @@ mixin template Interpret(T) if(is(T==CastExp)){
 			return Variant(r);
 		}else return e.interpretV().convertTo(type);
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
 }
 mixin template Interpret(T) if(is(T==Type)){
 	override bool checkInterpret(Scope sc){return true;}
@@ -163,11 +196,20 @@ mixin template Interpret(T) if(is(T==ArrayLiteralExp)){
 		foreach(i, ref x; res) res[i] = lit[i].interpretV();
 		return Variant(res);
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){
+		foreach(ref x; lit){
+			x = x._interpretFunctionCalls(sc);
+			mixin(PropRetry!q{x});
+		}
+		mixin(PropErr!q{lit});
+		mixin(IntFCEplg);
+	}
 }
 
 mixin template Interpret(T) if(is(T==IndexExp)){
 	override bool checkInterpret(Scope sc){
-		if(a.length==0) return e.checkInterpret(sc);
+		if(!a.length) return e.checkInterpret(sc);
 		assert(a.length==1);
 		return e.checkInterpret(sc)&a[0].checkInterpret(sc);
 	}
@@ -180,6 +222,19 @@ mixin template Interpret(T) if(is(T==IndexExp)){
 		if(lit.isEmpty() || ind.isEmpty()) return Variant.init;
 		return lit[ind];
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){
+		e=e._interpretFunctionCalls(sc);
+		mixin(PropRetry!q{e});
+		mixin(PropErr!q{e});
+		if(a.length>=1){
+			assert(a.length==1);
+			a[0] = a[0]._interpretFunctionCalls(sc);
+			mixin(PropRetry!q{a[0]});
+			mixin(PropErr!q{a[0]});
+		}
+		mixin(IntFCEplg);
+	}
 }
 
 mixin template Interpret(T) if(is(T==SliceExp)){
@@ -189,6 +244,8 @@ mixin template Interpret(T) if(is(T==SliceExp)){
 	override Variant interpretV(){
 		return e.interpretV()[l.interpretV()..r.interpretV()];
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e,l,r});}
 }
 
 mixin template Interpret(T) if(is(T _==UnaryExp!S,TokenType S)){
@@ -199,6 +256,8 @@ mixin template Interpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 	override Variant interpretV(){
 		return e.interpretV().opUnary!(TokChars!S)();
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
 }
 
 
@@ -223,6 +282,8 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 			return Variant([e1.interpretV()]).opBinary!"~"(e2.interpretV());
 		}else return super.interpretV();
 	}
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2});}
 }
 
 mixin template Interpret(T) if(is(T==TernaryExp)){
@@ -234,14 +295,140 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 		assert(r.getType() is Type.get!bool(), to!string(r.getType()));
 		return r ? e2.interpretV() : e3.interpretV();
 	}
+
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2,e3});}
 }
 
-/+mixin template Interpret(T) if(is(T==CallExp)){
+mixin template Interpret(T) if(is(T==CallExp)){
 	private Variant val;
-	final override bool checkInterpret(Scope sc){
-		// TODO: interpret
-		// TODO: 
+	override bool checkInterpret(Scope sc){return true;} // be optimistic
+protected:
+	override Expression _interpretFunctionCalls(Scope sc){
+		sc.error("cannot interpret function calls yet",loc);
+		mixin(ErrEplg);
+		//mixin(RetryEplg);
+	}
+}
+
+// bytecode interpreter for functions
+import expression, declaration, statement;
+
+enum Instruction : uint{
+	hlt, 
+	jmp,
+	jz,
+	jnz, 
+	call, 
+	ret, 
+}
+private enum isize = Instruction.sizeof;
+
+size_t numArgs(Instruction inst){
+	switch(inst){
+		alias Instruction I;
+		case I.jmp, I.jz, I.jnz:
+			return 1;
+		case I.call:
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+struct ByteCodeBuilder{
+	private uint[] byteCode;
+	debug{
+		enum State{
+			idle,
+			waitingForLabel,
+		}
+		State state;
+	}
+	immutable(uint)[] getByteCode(){
+		auto r = cast(immutable(uint)[])byteCode;
+		byteCode = null;
+		return r;
+	}
+	void ignoreResult(){assert(0);}
+	
+	void emit(Instruction inst){
+		assert(byteCode.length<uint.max); // TODO: add this restriction explicitly
+		byteCode~=inst;
+	}
+
+	Label emitLabel(){
+		auto r = Label(&this, byteCode.length);
+		byteCode~=~0;
+		return r;
+	}
+
+	struct Label{
+		private{
+			ByteCodeBuilder* outer;
+			uint loc;
+		}
+		void here()in{
+			assert(outer.byteCode[loc] == ~0);
+		}body{
+			assert(outer.byteCode.length<=uint.max); // TODO: add this restriction explicitly
+			outer.byteCode[loc] = cast(uint)outer.byteCode.length-1;
+		}
+	}
+}
+
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==BlockStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm)){}
+
+mixin template CTFEInterpret(T) if(is(T==Node)){
+	void byteCompile(ref ByteCodeBuilder bld){assert(0);}
+}
+
+mixin template CTFEInterpret(T) if(is(T==BlockStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){ foreach(x; s) x.byteCompile(bld); }
+}
+mixin template CTFEInterpret(T) if(is(T==LabeledStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){ s.byteCompile(bld); } // TODO: label resolution
+}
+mixin template CTFEInterpret(T) if(is(T==ExpressionStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		e.byteCompile(bld);
+		bld.ignoreResult();
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==IfStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		bld.Label otherwise, end;
+		e.byteCompile(bld);
+		bld.emit(Instruction.jz);
+		otherwise=bld.emitLabel();
+		s1.byteCompile(bld);
+		if(s2){
+			bld.emit(Instruction.jmp);
+			end = bld.emitLabel();
+			otherwise.here();
+			s2.byteCompile(bld);
+			end.here();
+		}else otherwise.here();
+	}
+}
+
+
+mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
+	immutable(uint)[] byteCode;
+	final Variant interpretCall(Variant[] args){
+		if(byteCode is null){
+			ByteCodeBuilder bld;
+			byteCompile(bld);
+			byteCode = bld.getByteCode();
+		}
+		return Variant(0);
+	}
+
+	final override void byteCompile(ref ByteCodeBuilder bld){
+		// TODO: parameters and locals
 		assert(0);
 	}
-	override 
-}+/
+}
+
+
+

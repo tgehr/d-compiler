@@ -1,4 +1,4 @@
-module parser;
+// Written in the D programming language.
 
 import std.algorithm, std.range, std.conv;
 import std.typetuple;
@@ -237,7 +237,6 @@ private struct Parser{
 		auto t=tok;
 		restoreState(save);
 		return t;
-
 	}
 	static class ParseErrorException: Exception{this(string s){super(s);}} alias ParseErrorException PEE;
 	void expect(TokenType type){
@@ -1523,18 +1522,18 @@ private struct Parser{
 	}
 }
 
-Declaration[] parse(string code, ErrorHandler handler){
-	return Parser(lex(code),handler).parse();
+Declaration[] parse(Source source, ErrorHandler handler){
+	return Parser(lex(source),handler).parse();
 }
 
-Expression parseExpression(string code, ErrorHandler handler){
-	return Parser(lex(code),handler).parseExpression();
+Expression parseExpression(Source source, ErrorHandler handler){
+	return Parser(lex(source),handler).parseExpression();
 }
 
-Statement[] parseStatements(string code, ErrorHandler handler){
-	return Parser(lex(code),handler).parseStatements();
+Statement[] parseStatements(Source source, ErrorHandler handler){
+	return Parser(lex(source),handler).parseStatements();
 }
 
-Declaration[] parseDeclDefs(string code, ErrorHandler handler){
-	return Parser(lex(code),handler).parseDeclDefs();
+Declaration[] parseDeclDefs(Source source, ErrorHandler handler){
+	return Parser(lex(source),handler).parseDeclDefs();
 }

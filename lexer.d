@@ -1,10 +1,13 @@
-module lexer;
+// Written in the D programming language.
+
 import std.string, utf = std.utf, std.uni;
 import std.stdio, std.conv;
-import std.algorithm : startsWith;
+import std.algorithm : startsWith, swap;
 import std.traits : EnumMembers;
 
 import core.memory;
+
+import util : lowerf, escape, mallocAppender, toEngNum;
 
 // enum TokenType;
 //mixin("enum TokenType{"~import("tokennames")~"}");
@@ -14,11 +17,9 @@ mixin("enum TokenType{"~TokenNames()~"}");
 	none,whitespace,comment,dokComment,newLine,error,errorLiteral,eof,identifier,stringLiteral,stringLiteralC,stringLiteralW,stringLiteralD,characterLiteral,integer32Literal,unsigned32Literal,integer64Literal,unsigned64Literal,floatLiteral,doubleLiteral,realLiteral,imaginaryFloatLiteral,imaginaryDoubleLiteral,imaginaryLiteral,divide,divideAssign,dot,dotDot,dotDotDot,and,andAssign,andAnd,or,orAssign,orOr,minus,minusAssign,minusMinus,plus,plusAssign,plusPlus,less,lessEqual,leftShift,leftShiftAssign,lessGreater,lessGreaterEqual,greater,greaterEqual,rightShiftAssign,arithmeticRightShiftAssign,rightShift,arithmeticRightShift,exclamationMark,notEqual,notLessGreater,unordered,notLess,notLessEqual,notGreater,notGreaterEqual,leftParen,rightParen,leftBracket,rightBracket,leftCurly,rightCurly,questionMark,comma,semicolon,colon,dollar,assign,goesTo,equal,star,multiplyAssign,modulo,moduloAssign,xor,xorAssign,pow,powAssign,concat,concatAssign,at,autoRef,notIs,notIn,abstract_,alias_,align_,asm_,assert_,auto_,body_,bool_,break_,byte_,case_,cast_,catch_,cdouble_,cent_,cfloat_,char_,class_,const_,continue_,creal_,dchar_,debug_,default_,delegate_,delete_,deprecated_,do_,double_,else_,enum_,export_,extern_,false_,final_,finally_,float_,for_,foreach_,foreach_reverse_,function_,goto_,idouble_,if_,ifloat_,immutable_,import_,in_,inout_,int_,interface_,invariant_,ireal_,is_,lazy_,long_,macro_,mixin_,module_,new_,nothrow_,null_,out_,override_,package_,pragma_,private_,protected_,public_,pure_,real_,ref_,return_,scope_,shared_,short_,static_,struct_,super_,switch_,synchronized_,template_,this_,throw_,true_,try_,typedef_,typeid_,typeof_,ubyte_,ucent_,uint_,ulong_,union_,unittest_,ushort_,version_,void_,volatile_,wchar_,while_,with_,__gshared_,__thread_,__traits_,
 }+/
 
-import scope_, util; // ugly: if expression is imported before the mixin, it cannot reference the mixin with DMD
 
 template Tok(string type){mixin(TokImpl());}
 template TokChars(TokenType type){mixin(TokCharsImpl());}
-
 
 
 private immutable {
@@ -155,12 +156,54 @@ string TokenTypeToString(TokenType type){
 
 string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
 
+class Source{
+	immutable{
+		string name;
+		string code;
+	}
+	this(string name, string code)in{auto c=code;assert(c.length>=4&&!c[$-4]&&!c[$-3]&&!c[$-2]&&!c[$-1]);}body{ // four padding zero bytes required because of UTF{
+		this.name = name;
+		this.code = code[0..$-4]; // don't expose the padding zeros
+		sources ~= this;
+	}
+	string getLineOf(string rep)in{assert(this is get(rep));}body{
+		string before=code.ptr[0..code.length+4][0..rep.ptr-code.ptr];
+		string after =code.ptr[0..code.length+4][rep.ptr-code.ptr..$];
+		immutable(char)* start=code.ptr, end=&code[$-1]+1;
+		foreach_reverse(ref c; before) if(c=='\n'||c=='\r'){start = &c+1; break;}
+		foreach(ref c; after) if(c=='\n'||c=='\r'){end = &c; break;}
+		return start[0..end-start];
+	}
+	static Source get(string rep){
+		foreach(x; sources) if(rep.ptr>=x.code.ptr &&&rep[$-1]<=&x.code[$-1]+4) return x;
+		return null;
+	}
+	void dispose(){
+		foreach(i,x; sources) if(x is this){
+			swap(sources[i], sources[$-1]);
+			sources=sources[0..$-1];
+			sources.assumeSafeAppend();
+		}
+		assert(0);
+	}
+	private static Source[] sources;
+}
+
 struct Location{
-	string rep; // slice of the code representing the Location
-	int line;   // line number at start of location
-	Location to(Location end)const{// in{assert(rep.ptr<=end.rep.ptr);}body{ // requiring that is not robust enough
-		if(rep.ptr>end.rep.ptr) return this;
-		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length], line);
+	string rep;    // slice of the code representing the Location
+	int line;      // line number at start of location
+
+	// reference to the source the code belongs to
+	@property Source source()const{
+		auto src = Source.get(rep);
+		assert(src, "source not found!");
+		return src;
+	}	// perfectly safe, because location is tail-immutable: TODO: report bug, it should work
+	//ref Location _toMutable()const{return *cast(Location*)&this;}alias _toMutable this;
+	Location to(const(Location) end)const{// in{assert(end.source is source);}body{
+		// in{assert(rep.ptr<=end.rep.ptr);}body{ // requiring that is not robust enough
+		if(rep.ptr>end.rep.ptr) return cast()this;
+		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length],line);
 	}
 }
 
@@ -250,8 +293,8 @@ string caseSimpleToken(string prefix="", bool needs = false)pure{
 }
 
 
-auto lex(string code){ // pure
-	return Lexer(code);
+auto lex(Source source){ // pure
+	return Lexer(source);
 }
 
 struct Anchor{
@@ -262,6 +305,7 @@ struct Lexer{
 	string code; // Manually allocated!
 	Token[] buffer;
 	Token[] errors;
+	Source source;
 	size_t n,m; // start and end index in buffer
 	size_t s,e; // global start and end index
 	size_t numAnchors;  // number of existing anchors for this lexer
@@ -273,8 +317,9 @@ struct Lexer{
 		assert(numAnchors||firstAnchor==size_t.max);
 	}+/
 	//pure: phobos ...
-	this(string c)in{assert(c.length>=4&&!c[$-4]&&!c[$-3]&&!c[$-2]&&!c[$-1]);}body{ // four padding zero bytes required because of UTF
-		code = c;
+	this(Source src){
+		source = src;
+		code = src.code.ptr[0..src.code.length+4]; // rely on 4 padding zero bytes
 		enum initsize=4096;//685438;//
 		buffer = new Token[](initsize);//
 		//buffer = (cast(Token*)malloc(Token.sizeof*initsize))[0..initsize];//
@@ -284,7 +329,7 @@ struct Lexer{
 		n=s=0;
 		e=lexTo(buffer);
 		m=e&buffer.length-1;
-		if(code.length > int.max) errors~=tokError("no support for sources exceeding 2GB",null),code.length=int.max;
+		if(src.code.length > int.max) errors~=tokError("no support for sources exceeding 2GB",null),code.length=int.max;
 	}
 	@property ref const(Token) front()const{return buffer[n];}
 	@property bool empty(){return buffer[n].type==Tok!"EOF";}

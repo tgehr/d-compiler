@@ -5,7 +5,17 @@ immutable(int)[] x = [1];
 //immutable rp=p;
 immutable a=2;
 //int foo(){*p=[2];return 0;}
+
+int fun(int x){return 1+x;}
+
+int gun(int x){
+	if(x) return x+1;
+	return x<100?100:1000;
+}
+
 void main(){
+	enum ass = (assert(0),2);
+
 	*cast(int*)&x[0] = 2;
 	immutable int x=a;
 	//pragma(msg, x);
@@ -26,9 +36,17 @@ void main(){
 	pragma(msg, "hell"=="hello");
 	pragma(msg, [1,2]!<=[1]);
 	enum u = (1/0.0f-1/0.0f);
-	pragma(msg, u!<>=u);
+	static assert(u!<>=u);
 
-	pragma(msg, mixin(q{mixin(q{mixin(q{mixin})})}));
+	static assert(!is(typeof(mixin(q{mixin(q{mixin(q{mixin})})}))));
+	pragma(msg, fun(10)+10);
+
+	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d";
+	pragma(msg, idc);
+
+	enum cic = cast(dchar[][])["test"];
+	pragma(msg, cic);
+
 	//pragma(msg, []<[1]);
 	//enum zz2 = [zz];
 	//pragma(msg, (cast(dchar[])zz)[2]);
@@ -37,4 +55,4 @@ void main(){
 	//pragma(msg, /*cast(int)*/[][y]);
 	//pragma(msg, [][y]);
 }
-mixin("pragma(msg)");
+//mixin("pragma(msg)");

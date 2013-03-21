@@ -1,3 +1,5 @@
+alias void foo(){};
+
 void main(){
 	//auto x = r"\ ";
 	//import std.stdio;
@@ -6,8 +8,9 @@ void main(){
 	//1 < 2 < 3;
 	//@@=;
 
-	auto dg = (int)@ => 2;
+	static assert(!is(typeof({mixin(`auto dg = (int)@ => 2;`);})));
 
+	auto dg = (int)@safe pure nothrow=> 2;
 	//pragma(msg, is(typeof(true&true==true,true==true&true)));
 	//int[] a;
 	//foreach(x;a){}
@@ -24,7 +27,7 @@ void main(){
 
 	if(false)
 		if(false)
-			if(false);
+			if(false){}
 			else if(false){}// if(false){}
 			else{}
 	//x="";

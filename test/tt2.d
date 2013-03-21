@@ -44,6 +44,14 @@ static if(false&&foo||true){}
 mixin(`pragma(msg, ["hellooooooo"]~["foo"d]);`);
 
 void main(){
+	immutable(const(int)) u1;
+	const(inout(shared(int))) u2;
+	inout(const(shared(int))) u3;
+	const(inout(shared(int))) u4;
+	inout(shared(const(int))) u5;
+	shared(const(inout(int))) u6;
+	shared(inout(const(int))) u7;
+
 	fuz(&kkk);
 	pragma(msg,mmo(1));
 	foo(&kkk)+1="bar";

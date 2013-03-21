@@ -1,3 +1,5 @@
+// Written in the D programming language.
+
 import std.stdio, std.algorithm, std.array;
 
 import std.conv : to;

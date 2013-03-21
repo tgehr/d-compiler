@@ -1,6 +1,8 @@
-string toEngNum(uint i){
+int
+
+/+string toEngNum(uint i){
 	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%100?" "~toEngNum(i%1000):"");
-}
+}+
 /+import std.stdio;
 import std.string, std.algorithm;
 

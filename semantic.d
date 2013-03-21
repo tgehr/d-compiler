@@ -1,3 +1,4 @@
+// Written in the D programming language.
 
 import std.array, std.conv, std.algorithm, std.string;
 
@@ -188,7 +189,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 	Expression isLvalue(){return null;}
 
-	final bool checkMutate(Scope sc, const ref Location l){
+	final bool checkMutate(Scope sc, ref Location l){ // should be const ref location...
 		if(isLvalue()){
 			if(type.isMutable()) return true;
 			else sc.error(format("%s '%s' of type '%s' is read-only",kind,loc.rep,type),l);
@@ -212,9 +213,16 @@ mixin template Semantic(T) if(is(T==Expression)){
 		r.loc = loc;
 		return r;
 	}
-	bool typeEquals(Type rhs){
+	bool typeEquals(Type rhs)in{assert(sstate == SemState.completed);}body{
 		return type.equals(rhs);
 	}
+
+	bool convertsTo(Type rhs)in{assert(sstate == SemState.completed);}body{
+		if(type.convertsTo(rhs.getUnqual().getConst())) return true;
+		if(implicitlyConvertsTo(rhs.getUnqual().getConst())) return true;
+		return false;
+	}
+
 	final Expression convertTo(Type to)in{assert(type&&to);}body{
 		if(type is to) return this;
 		auto r = New!CastExp(STC.init,to,this);
@@ -267,8 +275,8 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 	override bool implicitlyConvertsTo(Type rhs){
 		if(super.implicitlyConvertsTo(rhs)) return true;
 		if(!isPolyString()) return false;
-		auto rhsu = rhs.getHeadUnqual();
-		return rhsu is Type.get!wstring()||rhsu is Type.get!dstring();
+		return Type.get!wstring().implicitlyConvertsTo(rhs)
+			|| Type.get!dstring().implicitlyConvertsTo(rhs);
 	}
 
 
@@ -620,7 +628,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		mixin(ErrEplg);
 	}
 
-	// TODO: constant addresses should be possible to take too
+	// TODO: constant addresses should be possible to be taken too
 	static if(S==Tok!"+"||S==Tok!"-"||S==Tok!"~"||S==Tok!"!")
 	override bool isConstant(){
 		return e.isConstant();
@@ -825,6 +833,21 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						}else if(auto ty = el1.refCombine(el2, 0)){
 							if(el1 !is el2) type = ty.getHeadUnqual();
 							else type = ty;
+						}else{ // TODO: there might be a better place/approach for this logic
+							auto l1 = e1.isLiteralExp(), l2 = e2.isLiteralExp();
+							Type elo;
+							if(l1 && l1.isPolyString()) elo = el2;
+							else if(l2 && l2.isPolyString()) elo = el1;
+							if(elo){
+								auto elou = elo.getHeadUnqual();
+								import std.typetuple;
+								foreach(T; TypeTuple!(char,wchar,dchar)){
+									if(elou is Type.get!T()){
+										type = type.get!(immutable(T)).refCombine(elo,0);
+										break;
+									}
+								}
+							}
 						}
 						break;
 					case 0b10: // array ~ element
@@ -852,7 +875,6 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					if(!f1) e1 = e1.implicitlyConvertTo(type);
 					if(!f2) e2 = e2.implicitlyConvertTo(type);
 					type = type.getDynArr();
-					// TODO: suitable conditionals
 					if(f1) e1 = e1.implicitlyConvertTo(type).semantic(sc);
 					if(f2) e2 = e2.implicitlyConvertTo(type).semantic(sc);
 					mixin(SemChld!q{e1,e2});
@@ -1134,12 +1156,12 @@ class Symbol: Expression{ // semantic node
 		}
 		return false;
 	}
-
+	/+ // DMD 2.058/2.059 behave approximately like this:
 	override bool typeEquals(Type rhs){
 		if(!(meaning.stc&STCenum)) return super.typeEquals(rhs);
 		if(auto vd = meaning.isVarDecl()) return vd.init.typeEquals(rhs);
 		return super.typeEquals(rhs);
-	}
+	}+/
 
 	// override Type isType(){...} // TODO.
 	override Expression isLvalue(){
@@ -1230,7 +1252,6 @@ private:
 // everything concerning error gagging is centralized here
 import error;
 class GaggingErrorHandler: ErrorHandler{
-	this(){super(null, null);}
 	override void error(lazy string, Location){ /* do nothing */ }
 	override void note(lazy string, Location){ /* do nothing */ }
 }
@@ -1268,7 +1289,10 @@ mixin template Semantic(T) if(is(T==CastExp)){
 			mixin(PropRetry!q{type});
 			mixin(PropErr!q{type});
 		}
-		mixin(SemEplg);
+		if(e.convertsTo(type)){mixin(SemEplg);}
+		sc.error(format("cannot cast expression '%s' of type '%s' to '%s'",e.loc.rep,e.type,type),e.loc); // TODO: replace toString with actual representation
+		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
+		mixin(ErrEplg);
 	}
 
 	override bool isConstant(){
@@ -1459,6 +1483,10 @@ mixin template Semantic(T) if(is(T==Type)){
 		return this is rhs;
 	}
 
+	override bool convertsTo(Type rhs){
+		return implicitlyConvertsTo(rhs.getUnqual().getConst());
+	}
+
 	override bool implicitlyConvertsTo(Type rhs){
 		return this.refConvertsTo(rhs.getHeadUnqual(),0);
 	}
@@ -1616,6 +1644,13 @@ mixin template Semantic(T) if(is(T==BasicType)){
 		return false;
 	}
 
+	override bool convertsTo(Type rhs){
+		if(super.convertsTo(rhs)) return true;
+		// all basic types can be interpreted in a boolean context
+		if(rhs.getUnqual() is Type.get!bool()) return true;
+		return false;
+	}
+
 	override Type combine(Type rhs){
 		if(this is rhs.getHeadUnqual()) return this;
 		if(auto bt=rhs.getHeadUnqual().isBasicType()){
@@ -1742,7 +1777,7 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		}else return mixin(`tt.get`~qual)();
 	}
 
-	invariant(){assert(sstate < SemState.started || ty);}
+	invariant(){assert(sstate < SemState.started || ty); mixin(_restOfInvariant);}
 	Type ty; // the 'T' in 'qualified(T)', the "qualifyee"
 	override Type semantic(Scope sc){
 		mixin(SemPrlg);
@@ -1755,7 +1790,7 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		else static if(is(T==SharedTy)) r=ty.getShared();
 		else static if(is(T==InoutTy)) r=ty.getInout();
 		else static assert(0);
-		sstate = SemState.completed;
+
 		return r.semantic(sc);
 	}
 
@@ -1769,6 +1804,16 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	   some of the code below relies on this order. it does not operate correctly on
 	   incorrectly ordered input.
 	 */
+	private enum _restOfInvariant=q{ // TODO: fix this as soon as muliple invariants allowed
+		import std.typetuple;
+		alias TypeTuple!("ImmutableTy","SharedTy","InoutTy","ConstTy") Order;
+		if(sstate == SemState.completed){
+			foreach(x; Order){
+				static if(!is(T==ImmutableTy)) if(x==T.stringof) break;
+				assert(!mixin(`(cast()ty).is`~x)(), to!string(cast()ty));
+			}
+		}
+	};
 
 	static if(is(T==InoutTy)){
 		override Type adaptTo(Type from, ref InoutRes res){
@@ -1822,6 +1867,10 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	override bool implicitlyConvertsTo(Type rhs){
 		// getHeadUnqual never returns a qualified type ==> no recursion
 		return getHeadUnqual().implicitlyConvertsTo(rhs.getHeadUnqual());
+	}
+
+	override bool convertsTo(Type rhs){
+		return getUnqual().convertsTo(rhs);
 	}
 
 	override bool refConvertsTo(Type rhs, int num){
@@ -2439,6 +2488,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				mixin(PropErr!q{init});
 				assert(init.sstate == SemState.completed, to!string(init));
 				init = init.interpret(sc);
+				mixin(PropRetry!q{init});
 				mixin(PropErr!q{init});
 			}
 			/+if(init.implicitlyConvertsTo(type)){
@@ -2499,6 +2549,12 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 		}
 		mixin(SemEplg);
 	}
+}
+
+mixin template Semantic(T) if(is(T==AliasDecl)){
+	//override AliasDecl semantic(Scope sc){
+	//	return this;
+	//}
 }
 
 
@@ -2589,6 +2645,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 		//TODO: the following line causes an ICE, reduce.
 		//auto bestMatches = matches.partition!(_=>_.context.match!=best)();
+		//auto numBest = bestMatches.length;
 		size_t numBest = 0;
 		for(size_t i=0;i<matches.length;i++){
 			if(matches[i].context.match==best)
@@ -2776,10 +2833,12 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					foreach(x; args[1..$]){mixin(PropRetry!q{x});}
 					mixin(PropErr!q{args[1..$]});
 					if(intprt) foreach(ref x; args[1..$]) x = x.interpret(sc);
+					foreach(x; args[1..$]){mixin(PropRetry!q{x});}
 					mixin(PropErr!q{args[1..$]});
 					import std.stdio;
-					foreach(x; args[1..$]) stderr.write(x.interpretV().get!string());
-
+					foreach(x; args[1..$])
+						if(!x.isType()) stderr.write(x.interpretV().get!string());
+						else stderr.write(x.toString());
 					stderr.writeln();
 					if(bdy) mixin(SemChld!q{bdy});
 					mixin(PropRetry!q{bdy});
@@ -2836,38 +2895,36 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		foreach(i,t; types) if(i+1==which) e = e.convertTo(t).semantic(sc);
 		assert(e.sstate == SemState.completed);
 		auto str = e.interpretV().get!string();
-		str~=(is(T==MixinStm)?";":"")~"\0\0\0\0";
-		auto handler = New!StringMixinErrorHandler(str[0..$-4]);
-		auto ohan = sc.handler;
-		sc.handler=handler;
+		//str~=(is(T==MixinStm)&&str[$-1]!=';'?";":"")~"\0\0\0\0";
+		str~="\0\0\0\0";
+		Source src = New!Source("<mixin>", str);
 		import parser;
-		static if(is(T==MixinExp)) auto r=parseExpression(str,handler).semantic(sc);
-		else static if(is(T==MixinStm)) auto r=New!BlockStm(parseStatements(str,handler)).semanticNoScope(sc); // TODO: use CompoundStm instead
-		else static if(is(T==MixinDecl)) auto r=New!BlockDecl(STC.init,parseDeclDefs(str,handler)).semantic(sc);
+		//auto handler = sc.handler;
+		auto handler = New!StringMixinErrorHandler();
+		auto ohan = sc.handler;
+		sc.handler = handler;
+		static if(is(T==MixinExp)) auto r=parseExpression(src,handler).semantic(sc);
+		else static if(is(T==MixinStm)) auto r=New!BlockStm(parseStatements(src,handler)).semanticNoScope(sc); // TODO: use CompoundStm instead
+		else static if(is(T==MixinDecl)) auto r=New!BlockDecl(STC.init,parseDeclDefs(src,handler)).semantic(sc);
 		//ohan.note("mixed in here", loc);
-		sc.handler = ohan;
 		// TODO: this is a kludge!
+		sc.handler = ohan;
 		if(handler.errors.length){
 			sc.error("mixed in code contained errors",loc);
-			import error;
-			ErrorHandler other;
-			if(auto hnd = cast(StringMixinErrorHandler)sc.handler) other = hnd;
-			else other = New!FormattingErrorHandler("<mixin>",str[0..$-4]); // TODO: remove dependency
-			foreach(x; handler.errors) other.playErrorRecord(x);
+			foreach(x; handler.errors) sc.handler.playErrorRecord(x);
+			mixin(ErrEplg);
 		}
 		return r;
 		//mixin(SemEplg);
 	}
 }
-
 // TODO: this is a kludge!
 class StringMixinErrorHandler: ErrorHandler{
 	ErrorRecord[] errors;
-	this(string code){super("<mixin>", code);}
 	override void error(lazy string err, Location loc){
-		errors~=ErrorRecord(err,loc,code);
+		errors~=ErrorRecord(err,loc);
 	}
 	override void note(lazy string err, Location loc){
-		errors~=ErrorRecord(err,loc,code,true);
+		errors~=ErrorRecord(err,loc,true);
 	}
 }

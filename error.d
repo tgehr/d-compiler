@@ -4,39 +4,30 @@ import std.string, std.range, std.array, std.uni;
 
 import lexer, util;
 
-struct ErrorRecord{string err; Location loc; string code; bool isNote; }
+struct ErrorRecord{string err; Location loc; bool isNote; }
 
 
 abstract class ErrorHandler{
-	string source;
-	string code;
+	//string source;
+	//string code;
 	int nerrors=0;
 	private int tabsize=8;
-	private string[] _lines=null;
-	@property string[] lines(){
-		if(_lines !is null) return _lines;
-		return _lines=code.splitLines(); // TODO: implement manually. (this can throw on invalid character sequences)
-	}
+
 
 	void error(lazy string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
 	void note(lazy string note, Location loc)in{assert(loc.rep);}body{};
 
 	final void playErrorRecord(ErrorRecord rec){
-		auto ocode = code, olines = _lines;
-		if(rec.code !is null) code = rec.code, _lines = null;
 		if(rec.isNote) note(rec.err, rec.loc);
 		else error(rec.err, rec.loc);
-		code = ocode, _lines = olines;
 	}
 
-	this(string s, string c){
+	this(){
 		tabsize=getTabSize();
-		source=s;
-		code=c;
 	}
 	protected int getColumn(Location loc){
 		int res=0;
-		auto l=lines[loc.line-1];
+		auto l=loc.source.getLineOf(loc.rep);
 		for(;!l.empty&&l[0]&&l.ptr<loc.rep.ptr; l.popFront()){
 			if(l.front=='\t') res=res-res%tabsize+tabsize;
 			else res++;
@@ -45,102 +36,75 @@ abstract class ErrorHandler{
 	}
 }
 class SimpleErrorHandler: ErrorHandler{
-	this(string source,string code){super(source,code);}
 	override void error(lazy string err, Location loc){
 		if(loc.line == 0){ // just here for robustness
 			stderr.writeln("(bug, location missing): "~err);
 			return;
 		}
 		nerrors++;
-		stderr.writeln(source,'(',loc.line,"): error: ",err);
+		stderr.writeln(loc.source.name,'(',loc.line,"): error: ",err);
 	}
 }
 
 // TODO: remove code duplication
 
 class VerboseErrorHandler: ErrorHandler{
-	this(string source, string code){super(source,code);}
 	override void error(lazy string err, Location loc){
-		if(loc.line == 0){ // just here for robustness
-			stderr.writeln("(bug, location missing): "~err);
-			return;
-		}
 		nerrors++;
-		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
-		auto column=getColumn(loc);
-		stderr.writeln(source,':',loc.line,":",column,": ","error: ",err);
-		if(lines[loc.line-1][0]){
-			stderr.writeln(lines[loc.line-1]);
-			foreach(i;0..column-1) stderr.write(" ");
-			stderr.write("^");
-			loc.rep.popFront();
-			foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");};
-			stderr.writeln();
-		}
+		impl(err, loc, false);
 	}
 	override void note(lazy string err, Location loc){
+		impl(err, loc, true);
+	}
+	private void impl(lazy string err, Location loc, bool isNote){
 		if(loc.line == 0){ // just here for robustness
 			stderr.writeln("(bug, location missing): "~err);
 			return;
 		}
-		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
+		auto src = loc.source;
+		auto source = src.name;
+		auto line = src.getLineOf(loc.rep);
+		if(loc.rep.ptr<line.ptr) loc.rep=loc.rep[line.ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
-		stderr.writeln(source,':',loc.line,":",column,": note: ",err);
-		if(lines[loc.line-1][0]){
-			stderr.writeln(lines[loc.line-1]);
-			foreach(i;0..column-1) stderr.write(" ");
-			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
-			stderr.write("^");
-			loc.rep.popFront();
-			foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");}
-			stderr.writeln();
-		}
+		write(source, loc.line, column, err, isNote);
+		if(line.length&&line[0]){
+			display(line);
+			highlight(column, loc.rep);
+		}		
+	}
+protected:
+	void write(string source, int line, int column, string error, bool isNote = false){
+		stderr.writeln(source,':',line,":",column,isNote?": note: ":": error: ",error);
+	}
+	void display(string line){
+		stderr.writeln(line);
+	}
+	void highlight(int column, string rep){
+		foreach(i;0..column-1) stderr.write(" ");
+		stderr.write("^");
+		rep.popFront();
+		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");};
+		stderr.writeln();		
 	}
 }
 
 import terminal;
 class FormattingErrorHandler: VerboseErrorHandler{
-	this(string source,string code){super(source,code);}
-	override void error(lazy string err, Location loc){
-		if(loc.line == 0){ // just here for robustness
-			stderr.writeln("(bug, location missing): "~err);
-			return;
-		}
+protected:
+	override void write(string source, int line, int column, string error, bool isNote = false){
 		if(isATTy(stderr)){
-			nerrors++;
-			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
-			auto column=getColumn(loc);
-			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",RED,"error:",RESET,BOLD," ",err,RESET);
-			if(lines[loc.line-1][0]){
-				stderr.writeln(lines[loc.line-1]);
-				foreach(i;0..column-1) stderr.write(" ");
-				//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
-				stderr.write(BOLD,GREEN,"^");
-				loc.rep.popFront();
-				foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");}
-				stderr.writeln(RESET);
-			}
-		}else VerboseErrorHandler.error(err,loc);
+			if(isNote) stderr.writeln(BOLD,source,':',line,":",column,": ",BLACK,"note:",RESET,BOLD," ",error,RESET);
+			else stderr.writeln(BOLD,source,':',line,":",column,": ",RED,"error:",RESET,BOLD," ",error,RESET);
+		}else super.write(source, line, column, error, isNote);
 	}
-	override void note(lazy string err, Location loc){
-		if(loc.line == 0){ // just here for robustness
-			stderr.writeln("(bug, location missing): "~err);
-			return;
-		}
+	override void highlight(int column, string rep){
 		if(isATTy(stderr)){
-			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
-			auto column=getColumn(loc);
-			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",BLACK,"note:",RESET,BOLD," ",err,RESET);
-			if(lines[loc.line-1][0]){
-				stderr.writeln(lines[loc.line-1]);
-				foreach(i;0..column-1) stderr.write(" ");
-				//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
-				stderr.write(BOLD,GREEN,"^");
-				loc.rep.popFront();
-				foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");}
-				stderr.writeln(RESET);
-			}
-		}else VerboseErrorHandler.note(err,loc);
+			foreach(i;0..column-1) stderr.write(" ");
+			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
+			stderr.write(BOLD,GREEN,"^");
+			rep.popFront();
+			foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");}
+			stderr.writeln(RESET);
+		}else super.highlight(column, rep);
 	}
-
 }

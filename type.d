@@ -1,3 +1,5 @@
+// Written in the D programming language.
+
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, util;

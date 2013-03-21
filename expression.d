@@ -1,3 +1,5 @@
+// Written in the D programming language.
+
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, declaration, statement, type;
@@ -18,6 +20,8 @@ abstract class Node{
 	);
 
 	mixin Visitors;
+	// Workaround for DMD forward reference bug, other part is in visitors.Visitors
+	mixin CTFEInterpret!Node; // TODO: minimize, report
 }
 
 abstract class Expression: Node{

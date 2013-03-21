@@ -1,7 +1,11 @@
+// Written in the D programming language.
 
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
+
+import variant;
+import interpret; // byteCompile
 
 abstract class Declaration: Statement{
 	STC stc;
@@ -120,6 +124,8 @@ class AliasDecl: Declaration{
 	Declaration decl;
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"alias "~decl.toString();}
+
+	mixin Visitors;
 }
 class TypedefDecl: Declaration{
 	Declaration decl;

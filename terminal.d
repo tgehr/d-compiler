@@ -1,3 +1,4 @@
+// Written in the D programming language.
 
 import std.stdio;
 import std.c.stdlib;
