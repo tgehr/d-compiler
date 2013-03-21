@@ -147,9 +147,6 @@ string TokCharsImpl(){
 	return r;
 }
 }
-string TokenTypeToString(TokenType type){
-	return tokens[cast(int)type][0];
-}
 
 struct Location{
 	string mod;
@@ -161,7 +158,28 @@ struct Location{
 }
 
 string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
-
+string escape(string i,bool isc=false){ // TODO: replace with std lib one as soon as available
+	string r;
+	foreach(dchar x;i){
+		switch(x){
+			case '"': if(isc) goto default; r~="\\\""; break;
+			case '\'': if(!isc) goto default; r~="\\'"; break;
+			case '\\': r~="\\\\"; break;
+			case '\a': r~="\\a"; break;
+			case '\b': r~="\\b"; break;
+			case '\f': r~="\\f"; break;
+			case '\n': r~="\\n"; break;
+			case '\r': r~="\\r"; break;
+			case '\t': r~="\\t"; break;
+			case '\v': r~="\\v"; break;
+			case '\0': r~="\\0"; break;
+			default:
+				if(isWhite(x)) r~=format("\\u%4.4X",cast(uint)x); // wtf? 
+				else r~=x; break;
+		}
+	}
+	return r;
+}
 struct Token{
 	TokenType type;
 	string toString() const{
@@ -201,7 +219,7 @@ struct Token{
 			case Tok!"Error":
 				return "error: "~str;
 			default:
-				return TokenTypeToString(type);
+				return tokens[cast(int)type][0];
 		}
 	}
 	union{

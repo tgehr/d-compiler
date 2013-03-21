@@ -1,9 +1,23 @@
-template TT(string s){enum TT=s;}
+`ḀḁḂ
+ḃ
+Ḅ
+ḅ
+Ḇ
+ḇ`
+"Ḉḉ"`
+Ḋ
+ḋ
+Ḍ/+/+/ +/ +/"`
+ḍ
+Ḏ
+ḏ+/
 
-void main(){
-	mixin({
-			string r;
-			foreach(i;0..12000) r~="{}{}{}{}{}{}{}{}";//q{{enum x=TT!"";};};
-			return r;
-		}());
-}
+__EOF__
+
+
+// Comment 1
+/* /* /* Comment 2  */
+/+ /+ /+ +/ /+ +/ +/ +/hey
+/+ Hallo +/
+
+Code
