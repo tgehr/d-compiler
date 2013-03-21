@@ -28,9 +28,9 @@ template Moo(){int Moo(int x){return x;}}
 //typeof(y) z;
 
 
-//int foo(int x){return x;}
-//double foo(double x){return x;}
-int foo(int* =null);
+int foo(int x){return x;}
+double foo(double x){return x;}
+// int foo(int* =null); // TODO: fix constant folding in this case!
 
 int moo(short param, short param2);
 
@@ -39,11 +39,14 @@ int mmo(int x, int y=2){return 1;}
 //enum x = param;
 void fuz(inout(int)*);
 
+static if(false&&foo||true){}
+
+mixin(`pragma(msg, ["hellooooooo"]~["foo"d]);`);
 
 void main(){
 	fuz(&kkk);
 	pragma(msg,mmo(1));
-	//foo(&kkk)+1="bar";
+	foo(&kkk)+1="bar";
 	//A!(a=>b);
 	int[] a; immutable int[] b;
 	const int[] c;
@@ -55,8 +58,9 @@ void main(){
 	moo(1,2000000);
 	float x;
 	foo(&x);
-	immutable char[] aa,bb=x"AA BB CC DD ";
-	pragma(msg, typeof(aa~bb));
+	// immutable dchar[] aa,bb=x"AA BB CC DD 32";
+	// pragma(msg, typeof(aa~bb)); // TODO: FIX
+	pragma(msg, bb);
 	//int*[] x;
 	//const(int)*[] y = x~x;
 
@@ -125,3 +129,4 @@ void main(){
 		//printf("%d%d",x,x);
 	}+/
 }
+//pragma(msg) // TODO: error message should be at right place!

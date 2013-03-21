@@ -214,4 +214,6 @@ class MixinStm: Statement{
 	Expression e;
 	this(Expression exp){e=exp;}
 	override string toString(){return "mixin("~e.toString()~");";}
+
+	mixin Visitors;
 }

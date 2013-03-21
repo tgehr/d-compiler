@@ -106,12 +106,15 @@ class StaticAssertDecl: Declaration{
 	Expression[] a;
 	this(STC stc,Expression[] args){a = args; super(stc,null);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"static assert("~join(map!(to!string)(a),",")~");";}
+
+	mixin Visitors;
 }
 
 class MixinDecl: Declaration{
 	Expression e;
 	this(STC stc, Expression exp){e=exp; super(stc,null);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"mixin("~e.toString()~");";}
+	mixin Visitors;
 }
 class AliasDecl: Declaration{
 	Declaration decl;
@@ -127,6 +130,8 @@ class BlockDecl: Declaration{
 	Declaration[] decls;
 	this(STC s,Declaration[] declarations){stc=s; decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(stc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
+
+	mixin Visitors;
 }
 class AttributeDecl: Declaration{
 	Declaration[] decls;

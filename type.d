@@ -121,6 +121,8 @@ class NullPtrTy: Type{ // typeof(null)
 class EmptyArrTy: Type{ // typeof([])
 	this(){sstate = SemState.completed;}
 	override string toString(){return "typeof([])";}
+
+	mixin Visitors;
 }
 
 

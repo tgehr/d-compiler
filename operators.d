@@ -6,9 +6,10 @@ import std.algorithm : canFind;
 
 enum unaryOps = ["&", "*", "-", "++", "--", "+", "!", "~"];
 enum postfixOps=[/*".",*/"++", "--","(","["];
+//alias canFind!("a==b",TokenType[],TokenType) _canFind;
 enum binaryOps=mixin({string r="[";
-        foreach(x;EnumMembers!TokenType)if(getLbp(x)!=-1&&!canFind([Tok!"++",Tok!"--",Tok!"(",Tok!"["],x)) r~=`"`~TokenTypeToString(x)~`",`;
-        return r~"]";
+		foreach(x;EnumMembers!TokenType)if(getLbp(x)!=-1&&!canFind([Tok!"++",Tok!"--",Tok!"(",Tok!"["],x)) r~=`"`~TokenTypeToString(x)~`",`;
+		return r~"]";
 	}());
 
 

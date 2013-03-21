@@ -30,6 +30,8 @@ abstract class Expression: Node{
 	mixin DownCastMethods!(
 		Identifier,
 		Type,
+		LiteralExp,
+		ArrayLiteralExp,
 	);
 
 	mixin Visitors;
@@ -44,43 +46,27 @@ class ErrorExp: Expression{
 
 class StubExp: Expression{
 	this(Type type)in{assert(type.sstate==SemState.completed);}body{this.type = type;}
+	Expression semantic(Scope sc){
+		mixin(SemEplg);
+	}
 }
 
-
 class LiteralExp: Expression{
-	private Token lit;
-	this(Token literal){ // TODO: suitable contract
-		lit=literal;
-		if(lit.type == Tok!"false") lit.int64=0;
-		else if(lit.type == Tok!"true") lit.int64=1;
+	// constructor is in interpret.d, because it contains non-trivial logic
+	private Token lit; // TODO: get rid of this field
+	//this(Token lit){
+	//	this.lit = lit;
+	//	if(lit.type==Tok!"true") lit.int64=1;
+	//	else if(lit.type==Tok!"false") lit.int64=0;
+	//}
+	//override string toString(){return _brk(lit.toString());}
+	override string toString(){
+		//if(loc.rep.length) return loc.rep;
+		return _brk(value.toString());
 	}
-
-	static LiteralExp create(alias New=New,T)(T val){//workaround for long standing bug
-		Token lit;
-
-		static if(is(T==bool)){
-			lit.type = val?Tok!"true":Tok!"false";
-			lit.int64 = val;
-		}else{
-			// TODO: this sometimes allocates.
-			foreach(x; ToTuple!literals){
-				static if(is(typeof(mixin(x))==T)){
-					lit.type = Tok!x;
-					alias typeof(mixin(`lit.`~getTokOccupied!T)) U;
-					static if(x=="``"w||x=="``"d)
-						mixin(`lit.`~getTokOccupied!T) = to!U(val);
-					else mixin(`lit.`~getTokOccupied!T) = cast(U)val;
-
-				}
-			}
-		}
-		return New!LiteralExp(lit).semantic(null);
-		//lit.type = Tok!"``";
-		//lit.str = str;
-	}
-
-	override string toString(){return _brk(lit.toString());}
 	override @property string kind(){return "constant";}
+
+	mixin DownCastMethod;
 
 	mixin Visitors;
 }
@@ -97,6 +83,7 @@ class ArrayLiteralExp: Expression{
 	this(Expression[] literal){lit=literal;}
 	override string toString(){return _brk("["~join(map!(to!string)(lit),",")~"]");}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -182,6 +169,8 @@ class MixinExp: Expression{
 	Expression e;
 	this(Expression exp){e=exp;}
 	override string toString(){return _brk("mixin("~e.toString()~")");}
+
+	mixin Visitors;
 }
 class ImportExp: Expression{
 	Expression e;

@@ -15,25 +15,63 @@ pragma(msg, typeof(x));
 const int x;
 //pragma(msg, typeof(x));
 
+
+string foo1(int x){
+	//if(x) return q{return "return ``;";};
+	return bar1();
+}
+string bar1(){
+	mixin(foo(1));
+}
+
 void main(){
+	enum a = "abc";
+	enum b = "def";
+
+	enum d = (cast(char[])"hello");
+	enum e = cast(char[])a;
+	
+	//enum d = "a">cast(immutable(char)[])['b'];
+	pragma(msg, d,e,d>e);
+	pragma(msg, a~b);
+	enum c = a~b;
+	pragma(msg, (b<a?b:a)[]);
+
+	//pragma(msg, ([[[[1]]]~[[[2]]]]~[[[[3]]]])[0][0][0][0]);
+
+	pragma(msg, [[1]]<=[[2]]);
+
+	pragma(msg, ("foo"d~"bar"d)[1..5]);
 	pragma(msg, typeof(0.0f&&{}()));
 	pragma(msg, !(is(T==int))^^2);
 	pragma(msg, (){}());
 	pragma(msg, !false);
 	pragma(__p, 1+2+3+4+5+6+true);
+	pragma(__p, [1,2,3][1]);
+	enum x = 2;
+	pragma(msg, [1,2,3][2..x&2]);
+	pragma(msg, [100][1+(x|1)]);
+	pragma(msg, 1 in [1:0,2:0]);
+	pragma(msg, [1,2,3] < [1,2,3]);
 	pragma(msg,1L<<63);
+
+	short s = [1,2,3][1+(x&1)];
+	
+	//pragma(__range, );
+
 	//pragma(msg, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff29293393939);
 	char ä='ä';
+	auto oo = "ä"[2+(x&1)];
+	pragma(msg,"ä"[2]);
 	immutable(int)[] a;
 	const(int)[] b;
 	immutable c = a~b;
 
 	int y;
-	y = 1;
+	y = 1+2+3;
 	pragma(__range,cast(byte)((y&252)^2)+1);
 	pragma(msg,typeof(cast(byte)((y&252)^2)+1));
 	ubyte[] x = [((y&252)^2)+1];
-
 	auto xxxx = y+-127;
 
 	//ubyte[] yx = [-127+(y&1)];

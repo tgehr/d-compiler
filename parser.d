@@ -358,14 +358,25 @@ private struct Parser{
 		else static if(is(ValueType==Expression)) alias AssignExp Value;
 		else alias ValueType Value;
 		auto e=appender!(Expression[])();
+		static if(is(Entry==ArrayAssocExp)) int isAssoc=0; // TODO: make this cleaner
 		static if(!nonempty) if(ttype==Tok!delim) return e.data;
 		do{
 			mixin(doParse!(Value,"e1"));
 			auto e2=cast(Key)e1;
 			if(ttype==Tok!":" && e2){
 				mixin(doParse!("_",Value,"e3"));
-				e.put(New!Entry(e2,e3));
-			}else e.put(e1);
+				auto ent = New!Entry(e2,e3);
+				ent.loc = e2.loc.to(e3.loc);
+				e.put(ent);
+				static if(is(Entry==ArrayAssocExp)) if(!isAssoc) isAssoc=1;
+			}else{
+				e.put(e1);
+				static if(is(Entry==ArrayAssocExp)){
+					if(isAssoc==0) isAssoc=2;
+					else if(isAssoc==1)
+						error("expected key:value in associative array literal");
+				}
+			}
 			if(ttype==Tok!",") nextToken();
 			else break;
 		}while(ttype!=Tok!delim && ttype!=Tok!"EOF");
@@ -1473,18 +1484,27 @@ private struct Parser{
 	}
 
 	BlockDecl parseBlockDecl(STC stc=STC.init){
+		auto loc = tok.loc;
 		expect(Tok!"{");
 		auto r=appender!(Declaration[])();
 		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			r.put(parseDeclDef());
 		}
 		expect(Tok!"}");
-		return New!BlockDecl(stc,r.data);
+		auto res = New!BlockDecl(stc,r.data);
+		res.loc = loc.to(tok.loc);
+		return res;
 	}
 
 	Declaration[] parseDeclDefs(){
 		auto x=appender!(Declaration[])();
 		while(ttype!=Tok!"}" && ttype!=Tok!"EOF") x.put(parseDeclDef());
+		return x.data;
+	}
+
+	Statement[] parseStatements(){
+		auto x=appender!(Statement[])();
+		while(ttype!=Tok!"}" && ttype!=Tok!"EOF") x.put(parseStatement());
 		return x.data;
 	}
 
@@ -1507,3 +1527,14 @@ Declaration[] parse(string code, ErrorHandler handler){
 	return Parser(lex(code),handler).parse();
 }
 
+Expression parseExpression(string code, ErrorHandler handler){
+	return Parser(lex(code),handler).parseExpression();
+}
+
+Statement[] parseStatements(string code, ErrorHandler handler){
+	return Parser(lex(code),handler).parseStatements();
+}
+
+Declaration[] parseDeclDefs(string code, ErrorHandler handler){
+	return Parser(lex(code),handler).parseDeclDefs();
+}

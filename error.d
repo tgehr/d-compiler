@@ -4,18 +4,31 @@ import std.string, std.range, std.array, std.uni;
 
 import lexer, util;
 
+struct ErrorRecord{string err; Location loc; string code; bool isNote; }
+
+
 abstract class ErrorHandler{
 	string source;
 	string code;
 	int nerrors=0;
-	int tabsize=8;
+	private int tabsize=8;
 	private string[] _lines=null;
 	@property string[] lines(){
 		if(_lines !is null) return _lines;
 		return _lines=code.splitLines(); // TODO: implement manually. (this can throw on invalid character sequences)
 	}
+
 	void error(lazy string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
 	void note(lazy string note, Location loc)in{assert(loc.rep);}body{};
+
+	final void playErrorRecord(ErrorRecord rec){
+		auto ocode = code, olines = _lines;
+		if(rec.code !is null) code = rec.code, _lines = null;
+		if(rec.isNote) note(rec.err, rec.loc);
+		else error(rec.err, rec.loc);
+		code = ocode, _lines = olines;
+	}
+
 	this(string s, string c){
 		tabsize=getTabSize();
 		source=s;
@@ -56,7 +69,7 @@ class VerboseErrorHandler: ErrorHandler{
 		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
 		stderr.writeln(source,':',loc.line,":",column,": ","error: ",err);
-		if(loc.rep[0]){
+		if(lines[loc.line-1][0]){
 			stderr.writeln(lines[loc.line-1]);
 			foreach(i;0..column-1) stderr.write(" ");
 			stderr.write("^");
@@ -73,7 +86,7 @@ class VerboseErrorHandler: ErrorHandler{
 		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 		auto column=getColumn(loc);
 		stderr.writeln(source,':',loc.line,":",column,": note: ",err);
-		if(loc.rep[0]){
+		if(lines[loc.line-1][0]){
 			stderr.writeln(lines[loc.line-1]);
 			foreach(i;0..column-1) stderr.write(" ");
 			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
@@ -98,7 +111,7 @@ class FormattingErrorHandler: VerboseErrorHandler{
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);
 			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",RED,"error:",RESET,BOLD," ",err,RESET);
-			if(loc.rep[0]){
+			if(lines[loc.line-1][0]){
 				stderr.writeln(lines[loc.line-1]);
 				foreach(i;0..column-1) stderr.write(" ");
 				//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
@@ -118,7 +131,7 @@ class FormattingErrorHandler: VerboseErrorHandler{
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);
 			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",BLACK,"note:",RESET,BOLD," ",err,RESET);
-			if(loc.rep[0]){
+			if(lines[loc.line-1][0]){
 				stderr.writeln(lines[loc.line-1]);
 				foreach(i;0..column-1) stderr.write(" ");
 				//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");

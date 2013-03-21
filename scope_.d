@@ -97,10 +97,11 @@ abstract class NestedScope: Scope{
 		super(parent.handler);
 		this.parent=parent;
 	}
-	alias Scope.lookup lookup;
-	override Declaration lookup(Identifier ident){
-		return lookup(ident, parent.lookup(ident));
+
+	override Declaration lookup(Identifier ident, lazy Declaration alt){
+		return symtab.get(ident.ptr, parent.lookup(ident, alt));
 	}
+
 
 	override FunctionDef getFunction(){return parent.getFunction();}
 
@@ -110,11 +111,7 @@ class FunctionScope: NestedScope{ // Forward references don't get resolved
 	this(Scope parent, FunctionDef fun){
 		super(parent);
 		this.fun=fun;
-	}
-	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, parent.lookup(ident, alt));
-	}
-	
+	}	
 	override FunctionDef getFunction(){return fun;}
 
 	alias Scope.lookup lookup; // overload lookup

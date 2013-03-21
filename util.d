@@ -19,8 +19,8 @@ template ToTuple(alias a){
 }
 
 // escape a string
-string escape(string i,bool isc=false){ // TODO: COW, replace with std lib one as soon as available
-	string r;
+S escape(S)(S i,bool isc=false)if(isSomeString!S){ // TODO: COW, replace with std lib one as soon as available
+	S r;
 	foreach(dchar x;i){
 		switch(x){
 			case '"': if(isc) goto default; r~="\\\""; break;
@@ -296,10 +296,14 @@ template XX(string x){
 	enum XX = mixin(Ximpl(x));
 }
 
-// Missing from Phobos due to wrong design principles:
+// Missing from Phobos:
 
 import std.range;
 bool any(alias a,R)(R range) if(is(typeof(a(R.init)): bool) && isInputRange!R){
-	foreach(ref x;range) if(a(x)) return true;
+	foreach(/+auto+/ref x;range) if(a(x)) return true;
 	return false;
+}
+bool all(alias a,R)(R range){// if(is(typeof(a(R.init)): bool) && isInputRange!R){
+	foreach(/+auto+/ref x;range) if(!a(x)) return false;
+	return true;
 }

@@ -28,13 +28,16 @@ void baz(immutable(int) x, double y){}+/
 //auto a(int){return a();}
 
 int foo(immutable(char)[] s){return 0;}
-//double foo(immutable(dchar)[] s){return 0;}
-//double foo(immutable(dchar)[] d){return 0;}
+double foo(immutable(wchar)[] d){return 0;}
+double foo(immutable(dchar)[] s){return 0;}
 
 
+immutable bar = "hello";
 void main(){
+	enum bar=bar;
 	pragma(msg, typeof("hello"));
-	pragma(msg, typeof(foo("hello")));
+	pragma(msg, typeof(foo("hello"d)));
+	pragma(msg, typeof(foo(bar))); // oO
 	/+qux(1);
 	qux2(2);
 

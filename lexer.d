@@ -167,6 +167,7 @@ struct Location{
 struct Token{
 	TokenType type;
 	string toString() const{
+		if(type == Tok!"EOF") return "EOF";
 		if(loc.rep.length) return loc.rep;
 		// TODO: remove boilerplate
 		// TODO: get better representations
@@ -348,7 +349,6 @@ private:
 	size_t lexTo(Token[] res)in{assert(res.length);}body{
 		alias mallocAppender appender;
 		if(!code.length) return 0;
-		
 		auto p=code.ptr;
 		auto s=p;    // used if the input has to be sliced
 		auto sl=line;// ditto
@@ -373,7 +373,7 @@ private:
 				case 0, 0x1A:
 					res[0].type = Tok!"EOF";
 					res[0].loc.rep=p[0..1];
-					res[0].loc.line = line;
+					res[0].loc.line = line; // TODO: Why is this necessary?
 					res=res[1..$];
 					num++;
 					break loop;
@@ -703,6 +703,7 @@ private:
 					readdqstring: for(;;){
 						s = p;
 						switch(*p){
+							mixin(caseNl);
 							case 0, 0x1A:
 								errors~=tokError("unterminated string literal",(start-1)[0..1]);
 								break readdqstring;
@@ -761,7 +762,7 @@ private:
 						continue;
 					}catch{} goto default;
 				default:
-					p--; invCharSeq();
+					p--; invCharSeq(); p++;
 					continue;
 			}
 			res[0].loc.rep=begin[0..p-begin];

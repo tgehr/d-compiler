@@ -30,7 +30,12 @@ class Module: Node{
 		do{
 			gRetryAgain = false; // TODO: fix this
 			//mixin(SemChld!q{decls});
-			foreach(ref x;decls) x = x.semantic(sc);
+			foreach(ref x;decls){
+				if(x.isVarDecl() || x.isFunctionDecl()){
+					x.stc|=STCstatic;
+				}
+				x = x.semantic(sc);
+			}
 			// import std.stdio;writeln("round complete!");
 		}while(gRetryAgain);
 		mixin(PropErr!q{decls});

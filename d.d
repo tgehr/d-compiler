@@ -46,7 +46,7 @@ int main(string[] args){
 	foreach(x; args){
 		// TODO: find the full paths by searching all import directories
 		if(!file.exists(x)){
-			stderr.writeln("no such file: ", x);
+			stderr.writeln("error: ",x,": no such file");
 			found = false;
 		}
 	}
