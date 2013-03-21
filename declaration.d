@@ -37,7 +37,6 @@ abstract class Declaration: Statement{
 		AggregateDecl,
 		ValueAggregateDecl,
 		ReferenceAggregateDecl,
-		MutableAliasRef,
 		ErrorDecl,
 	);
 
@@ -370,7 +369,7 @@ class FunctionDecl: OverloadableDecl{
 	override string toString(){
 		return signatureString();
 	}
-	override @property string kind(){return "function";}
+	override @property string kind(){return isMemberFunction()?"member function":"function";}
 	override FunctionDecl isFunctionDecl(){return this;}
 
 	mixin Visitors;

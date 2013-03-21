@@ -13,14 +13,14 @@ private template NotYetImplemented(T){
 		else enum NotYetImplemented = !is(T==Expression) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp);
 }
 
-enum IntFCEplg = q{needRetry = false; return this;};
+enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
 template IntFCChldNoEplg(string s){
 	enum IntFCChldNoEplg = {
 		string r;
 		auto ss=s.split(",");
 		foreach(t; ss){
 			r~=mixin(X!q{
-				@(t) = @(t)._interpretFunctionCalls(sc);
+				@(t)._interpretFunctionCalls(sc);
 				mixin(PropRetry!q{@(t)});
 			});
 		}
@@ -34,11 +34,11 @@ template IntFCChld(string s){
 // should never be interpreted:
 mixin template Interpret(T) if(is(T==MixinExp) || is(T==IsExp)){
 	override bool checkInterpret(Scope sc){assert(0);}
-	override Expression interpret(Scope sc){assert(0);}
-	protected override Expression _interpretFunctionCalls(Scope sc){assert(0);}
+	override void interpret(Scope sc){assert(0);}
+	protected override void _interpretFunctionCalls(Scope sc){assert(0);}
 }
 mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
-	override Expression interpret(Scope sc){
+	override void interpret(Scope sc){
 		assert(sc, "expression "~toString()~" was assumed to be interpretable");
 		sc.error(format("expression '%s' is not interpretable at compile time yet",toString()),loc);
 		mixin(ErrEplg);
@@ -67,25 +67,32 @@ mixin template Interpret(T) if(is(T==Expression)){
 		return false;
 	}
 	static int numint = 0;
-	Expression interpret(Scope sc)in{assert(sstate == SemState.completed);}body{
-		//assert(!numint);
-		if(isAConstant()) return this;
-		if(!checkInterpret(sc)) mixin(ErrEplg);
-		auto a=_interpretFunctionCalls(sc);
-		mixin(PropRetry!q{a}); // this throws away all progress. TODO: can this be improved?
-		if(a.sstate == SemState.error) return a;
-		auto r = a.interpretV().toExpr();
-		r.loc=a.loc;
-		r.type=a.type;
-		//pragma(msg, __traits(allMembers,ArrayLiteralExp)); // TODO: report bug
-		if(auto al = a.isArrayLiteralExp()){
-			auto rl = r.isArrayLiteralExp();
-			assert(rl);
-			copyLocations(rl,al);
+	void interpret(Scope sc)in{assert(sstate == SemState.completed);}body{
+
+		void fixupLocations(Expression r){
+			r.loc=loc;
+			r.type=type;
+			//pragma(msg, __traits(allMembers,ArrayLiteralExp)); // TODO: report bug
+			if(auto tl = isArrayLiteralExp()){
+				auto rl = r.isArrayLiteralExp();
+				assert(rl);
+				copyLocations(rl,tl);
+			}
 		}
+
+		//assert(!numint);
+		if(isAConstant()) return;
+		if(!checkInterpret(sc)) mixin(ErrEplg);
+		_interpretFunctionCalls(sc);
+		auto x = this;
+		mixin(Rewrite!q{x});
+		fixupLocations(x);
+		mixin(SemCheck);
+		auto r = x.interpretV().toExpr();
+		fixupLocations(r);
 		r.dontConstFold();
 		assert(!isConstant() || !needRetry); // TODO: file bug, so that this can be 'out'
-		return r; 
+		mixin(RewEplg!q{r});
 	}
 	Variant interpretV()in{assert(sstate == SemState.completed);}body{
 		//return Variant.error(format("expression '%s' is not interpretable at compile time"),loc.rep);
@@ -101,7 +108,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 
 protected:
 	// for interpret.d internal use only, protection system cannot express this.
-	Expression _interpretFunctionCalls(Scope sc){return this;}
+	void _interpretFunctionCalls(Scope sc){}
 }
 
 // TODO: investigate the void[][] = [[[2]]]; case some more
@@ -140,11 +147,11 @@ mixin template Interpret(T) if(is(T==CastExp)){
 		}else return e.interpretV().convertTo(type);
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
+	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
 }
 mixin template Interpret(T) if(is(T==Type)){
 	override bool checkInterpret(Scope sc){return true;}
-	override Expression interpret(Scope sc){return this;}
+	override void interpret(Scope sc){return this;}
 }mixin template Interpret(T) if(!is(T==Type) && is(T:Type)){}
 
 mixin template Interpret(T) if(is(T==Symbol)){
@@ -167,7 +174,7 @@ mixin template Interpret(T) if(is(T==Symbol)){
 		assert(0);
 	}
 
-	override Expression _interpretFunctionCalls(Scope sc){
+	override void _interpretFunctionCalls(Scope sc){
 		makeStrong();
 		return semantic(scope_);
 	}
@@ -209,12 +216,15 @@ mixin template Interpret(T) if(is(T==LiteralExp)){
 	this(Variant value){ this.value = value; }
 
 	static LiteralExp create(alias New=New,T)(T val){//workaround for long standing bug
-		return New!LiteralExp(Variant(val)).semantic(null);
+		auto le = New!LiteralExp(Variant(val));
+		le.semantic(null);
+		assert(!le.rewrite);
+		return le;
 	}
 
 
 	override bool checkInterpret(Scope sc){ return true; }
-	override LiteralExp interpret(Scope sc){ return this; }
+	override void interpret(Scope sc){ }
 	override Variant interpretV(){ return value; }
 }
 
@@ -231,9 +241,9 @@ mixin template Interpret(T) if(is(T==ArrayLiteralExp)){
 		return Variant(res);
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){
+	override void _interpretFunctionCalls(Scope sc){
 		foreach(ref x; lit){
-			x = x._interpretFunctionCalls(sc);
+			x._interpretFunctionCalls(sc);
 			mixin(PropRetry!q{x});
 		}
 		mixin(PropErr!q{lit});
@@ -250,22 +260,19 @@ mixin template Interpret(T) if(is(T==IndexExp)){
 	override Variant interpretV(){
 		if(a.length==0) return e.interpretV();
 		assert(a.length==1);
-		assert(e.isConstant());
 		auto lit = e.interpretV();
 		auto ind = a[0].interpretV();
 		if(lit.isEmpty() || ind.isEmpty()) return Variant.init;
 		return lit[ind];
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){
-		e=e._interpretFunctionCalls(sc);
-		mixin(PropRetry!q{e});
-		mixin(PropErr!q{e});
+	override void _interpretFunctionCalls(Scope sc){
+		e._interpretFunctionCalls(sc);
+		mixin(SemProp!q{e});
 		if(a.length>=1){
 			assert(a.length==1);
-			a[0] = a[0]._interpretFunctionCalls(sc);
-			mixin(PropRetry!q{a[0]});
-			mixin(PropErr!q{a[0]});
+			a[0]._interpretFunctionCalls(sc);
+			mixin(SemProp!q{e});
 		}
 		mixin(IntFCEplg);
 	}
@@ -279,7 +286,7 @@ mixin template Interpret(T) if(is(T==SliceExp)){
 		return e.interpretV()[l.interpretV()..r.interpretV()];
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e,l,r});}
+	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e,l,r});}
 }
 
 mixin template Interpret(T) if(is(T==AssertExp)){
@@ -288,11 +295,11 @@ mixin template Interpret(T) if(is(T==AssertExp)){
 	}
 	override Variant interpretV(){return Variant(toString());} // good enough
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){
-		a[0]=a[0]._interpretFunctionCalls(sc);
+	override void _interpretFunctionCalls(Scope sc){
+		a[0]._interpretFunctionCalls(sc);
 		mixin(PropRetry!q{a[0]});
 		if(a.length>1){
-			a[1]=a[1]._interpretFunctionCalls(sc);
+			a[1]._interpretFunctionCalls(sc);
 			mixin(PropRetry!q{a[1]});
 		}
 		mixin(PropErr!q{a});
@@ -319,7 +326,7 @@ mixin template Interpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return e.interpretV().opUnary!(TokChars!S)();
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
+	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
 }
 
 mixin template Interpret(T) if(is(T==ABinaryExp)||is(T==AssignExp)){}
@@ -371,7 +378,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 		}else return super.interpretV();
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){
+	override void _interpretFunctionCalls(Scope sc){
 		static if(S==Tok!"/"){
 			mixin(IntFCChldNoEplg!q{e1,e2});
 			if(type.isIntegral() && e2.interpretV() == Variant(0)){
@@ -390,7 +397,7 @@ protected:
 		}else static if(S==Tok!"&&"||S==Tok!"||"){
 			mixin(IntFCChldNoEplg!q{e1});
 			assert(e1.type is Type.get!bool());
-			if(cast(bool)e1.interpretV()^(S==Tok!"&&")) return e1;
+			if(cast(bool)e1.interpretV()^(S==Tok!"&&")){mixin(RewEplg!q{e1});}
 			mixin(IntFCChld!q{e2});
 		}else mixin(IntFCChld!q{e1,e2});
 
@@ -408,7 +415,7 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 	}
 
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2,e3});}
+	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2,e3});}
 }
 
 mixin template Interpret(T) if(is(T==CallExp)){
@@ -419,7 +426,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 		return true; // be optimistic
 	}
 protected:
-	override Expression _interpretFunctionCalls(Scope sc){
+	override void _interpretFunctionCalls(Scope sc){
 /+		if(auto sym = fun.isSymbol())
 			if(auto fn = cast(FunctionDef)sym.meaning){
 				sym.makeStrong();
@@ -437,6 +444,7 @@ protected:
 		mixin(SemChld!q{e});
 		Expression r;
 		try{
+
 			if(!ctfeCallWrapper){
 				//if(args.length == 0) ctfeCallWrapper = fn;
 				//else{
@@ -445,9 +453,12 @@ protected:
 					auto dg=New!FunctionDef(STCstatic,fty,New!Identifier(uniqueIdent("__ctfeCallWrapper")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, false);
 					dg.sstate = SemState.begin;
 					dg.scope_ = sc;
-					dg = dg.semantic(sc);
-					//assert(dg.sstate == SemState.completed);
-					while(dg.sstate!=SemState.completed) dg=dg.semantic(sc);
+					dg.semantic(sc);
+					mixin(Rewrite!q{dg});
+					while(dg.sstate!=SemState.completed){
+						dg.semantic(sc);
+						mixin(Rewrite!q{dg});
+					}
 					ctfeCallWrapper = dg;
 					//}
 			}
@@ -456,11 +467,10 @@ protected:
 			//if(!(fn.stc&STCstatic)) fn.resetByteCode();
 			r.type = type;
 			r.loc = this.loc;
-			return r;
+			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
-			static int ccc;
 			needRetry = e.needRetry;
-			return this;
+			return;
 		}catch(Exception){
 			sc.note("during evaluation requested here", loc);
 			mixin(ErrEplg);
@@ -1316,9 +1326,14 @@ Ltailcall:
 			case I.call:
 				auto nfargs = cast(size_t)byteCode[ip++];
 				Symbol sym = cast(Symbol)cast(void*)stack.pop();
-				sym.makeStrong();
+				sym.makeStrong(); // TODO: this is probably not right!
 				// TODO: allow detailed discovery of circular dependencies
-				sym = cast(Symbol)cast(void*)sym.semantic(sym.scope_);
+				sym.semantic(sym.scope_);
+				Expression e = sym;
+				mixin(Rewrite!q{e});
+				assert(!!cast(Symbol)e);
+				sym = cast(Symbol)cast(void*)e;
+
 				if(sym.needRetry){
 					// TODO: make as unlikely as possible
 					throw new CTFERetryException(sym.needRetry);
@@ -2955,7 +2970,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	   (loads a pointer for STCbyref, loads a delegate for STClazy)
 	 */
 	private void loadVariable(ref ByteCodeBuilder bld, VarDecl vd){
-		if(vd.stc&STCstatic && (!(vd.stc&(STCimmutable|STCconst))||!vd.init)){
+		if(vd.stc&STCstatic && (!(vd.stc&(STCimmutable|STCconst)||!vd.init))){
 			bld.error(format("cannot access variable '%s' at compile time", vd.name.toString()), loc);
 			return;
 		}if(vd.stc&STCenum){
@@ -2968,7 +2983,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			// import std.stdio; writeln(vd," ",off," ",len);
 
 			if(!~off || !len){
-				if(isConstant()){
+				if(vd.stc&(STCimmutable|STCconst)&&vd.init){
 					// TODO: this can be inefficient for non-enum variables
 					// and it destroys reference identity for them
 					vd.init.byteCompile(bld);
@@ -3039,7 +3054,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			}
 			size_t len, off = vd.getBCLoc(len);
 			if(!~off || !len){
-				if(isConstant()){
+				if(vd.stc&(STCimmutable|STCconst)&&vd.init){
 					// TODO: this can be inefficient for immutable variables
 					vd.init.byteCompile(bld);
 					emitMakeArray(bld,vd.type.getDynArr(),1);
@@ -3116,7 +3131,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			foreach(x;tupleContext.vds) x.byteCompile(bld);
 			return;
 		}
-
 		size_t off, len = getBCSizeof(type);
 		if(len!=-1){
 			if(inHeapContext){
@@ -3175,10 +3189,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			enum manualPropagate = true;
 			void perform(Symbol self){
 				if(!self.meaning) return;
-				//assert(!!self.meaning, self.toString());
-				if(auto vd = self.meaning.isVarDecl()){
+				if(auto vd = self.meaning.isVarDecl())
 					vd.inHeapContext = true;
-				}
 			}
 			void perform(UnaryExp!(Tok!"++") self){
 				runAnalysis!MarkHeapContext(self.e);

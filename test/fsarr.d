@@ -1,5 +1,6 @@
 int[""] saa;
 
+enum x=(()=>5)();
 int[(()=>5)()] sa;
 //pragma(msg, typeof(sa));
 static assert(is(typeof(sa)==int[5]));
@@ -20,8 +21,8 @@ pragma(msg, {
 		return r;
 	}());
 
-enum int[2] i2 = [1,2];
-enum int[4] i3 = [1,2,3,43];
+immutable int[2] i2 = [1,2];
+immutable int[4] i3 = [1,2,3,43];
 immutable int[5] i5 = i2~i3; // TODO: should be error
 
 pragma(msg, i5);

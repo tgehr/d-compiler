@@ -1,4 +1,4 @@
-/+bool isLvalue(ref int x){return true;}
+bool isLvalue(ref int x){return true;}
 bool isLvalue(int x){return false;}
 
 static assert(!isLvalue(1));
@@ -11,7 +11,7 @@ static assert(!testRefOv(1,1));
 static assert(!{int x;return testRefOv(x,1);}());
 static assert({int x;return testRefOv(x,1.0);}());
 static assert(!is(typeof({return testRefOv(1,1.0);})));
-+/
+
 
 int foo(typeof(foo(2,3)) x){return x;}
 int foo(int,int){return 2;}
@@ -20,8 +20,8 @@ int foo(int,int){return 2;}
 bool foo(undef){return 1;}
 bool foo(undef a,undef b){return e;}
 pragma(msg, foo("asdf","asdf"));
-/+
-/+void foo(int, int){}
+
+void foo(int, int){}
 void foo(double, int){}
 
 void bar(const int){}
@@ -34,7 +34,7 @@ void qux2(int){} // this one should be called
 void qux2(int,double=2.0){}
 
 void baz(int x, double y){}
-void baz(immutable(int) x, double y){}+/
+void baz(immutable(int) x, double y){}
 
 //auto lol(){return lol(1);}
 //int lol(typeof(lol()) x){return lol();}
@@ -80,4 +80,4 @@ void main(){
 	bar(1);
 +/
 	//baz(1,1);
-}+/
+}

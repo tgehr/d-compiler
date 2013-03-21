@@ -13,9 +13,10 @@ pragma(msg, foooo);
 
 alias int y;
 alias y[] x;
-alias x* z;
+alias y* z;
+alias x* w;
+pragma(msg, z," ",w);
 
-pragma(msg, z);
 
 static assert(!is(typeof({
 				int[] i;

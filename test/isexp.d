@@ -9,8 +9,11 @@ void main(){
 	pragma(msg, typeof(*(int x){return x;}));
 	pragma(msg, typeof(*fp));
 	pragma(msg, is(typeof(foo)));
+	pragma(msg, is(typeof(tmp!())));
+
+	static assert(is(typeof(foo)));
+	static assert(!is(typeof(tmp!())));
 }
-int foo(){
-	return 1=2;
-	return 0;
-}
+int foo(){return 1=2;}
+
+int tmp()(){return 1=2;}

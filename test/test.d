@@ -1,6 +1,13 @@
 
 
-//enum int a = b, b = a;
+int main(){
+	return 3;
+}
+pragma(msg, typeof(main));
+pragma(msg, main());
+
+
+/+//enum int a = b, b = a;
 
 enum x = "hallo";
 
@@ -15,4 +22,4 @@ void main(){
 	writeln(a," ",b);
 
 	writeln(min(1,2));
-}
+}+/

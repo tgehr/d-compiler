@@ -331,4 +331,6 @@ class AggregateTy: Type{
 
 	mixin DownCastMethod;
 	mixin Visitors;
+
+	mixin DeepDup!AggregateTy; // workaround for DMD bug. Should actually be in visitors.d
 }

@@ -8,7 +8,7 @@ alias goo foo;
 //static if(!is(typeof(ass(1)))) int ass(int){return 0;}
 
 
-/+enum E=2;
+enum E=2;
 struct RR{
 	//static if(is(typeof(S.S.S))) template B(){enum B = 1;}
 	enum S = E;
@@ -16,9 +16,9 @@ struct RR{
 
 //alias RR.S a;
 enum FG = RR.S;
-+/
 
-/+
+
+
 int foo(){return foo();}
 
 class Inaccessible{
@@ -127,15 +127,18 @@ struct S{
 
 
 static assert(!is(typeof({
-				const int a=2;
-				struct Funny{
-					// reference to a is ambiguous
-					static if(is(typeof({enum x=foo();}))){
-						float a;
-					}
-					static int foo(){return a;}
-				}
-			})));
+	const int a=2;
+	struct Funny{
+		// reference to a is ambiguous
+		static if(is(typeof({enum x=foo();}))){
+			float a;
+		}
+		static int foo(){return a;}
+	}
+})));
+
+
+int a;
 struct T{
 	static assert(is(typeof(a) == float));
 	pragma(msg, typeof(a));

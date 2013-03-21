@@ -93,7 +93,9 @@ private struct RTTypeID{
 		static if(is(T==typeof(null))){
 			r.occupies = Occupies.none;
 			r.toExpr = function(ref Variant self){
-				auto r = New!LiteralExp(token!"null").semantic(null);
+				auto r = New!LiteralExp(token!"null");
+				r.semantic(null);
+				assert(!r.rewrite);
 				r.dontConstFold();
 				return r;
 			};
@@ -184,9 +186,11 @@ private struct RTTypeID{
 				else static if(is(T==idouble)) alias double T;
 				else static if(is(T==ireal)) alias real T;
 
-				string rlsfx = ""; // TODO: remove if Phobos finally decides to fix this.
-				static if(is(T==float)||is(T==double)||is(T==real)) if(self.flt80%1==0) rlsfx=".0";
-				return left~to!string(mixin(`cast(T)self.`~to!string(occ)))~right~rlsfx~sfx;
+				string rlsfx = ""; // TODO: extract into its own function?
+				string res = to!string(mixin(`cast(T)self.`~to!string(occ)));
+				static if(is(T==float)||is(T==double)||is(T==real))
+					if(self.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
+				return left~res~right~rlsfx~sfx;
 			};
 			r.toBCSlice = function BCSlice(ref Variant self){
 				assert(0,"cannot turn basic type into void[]");
@@ -198,7 +202,9 @@ private struct RTTypeID{
 				Expression[] lit = new Expression[self.length];
 				foreach(i,ref x;lit) x = self.arr[i].id.toExpr(self.arr[i]);
 				// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
-				auto r=New!ArrayLiteralExp(lit).semantic(null); // TODO: ok?
+				auto r=New!ArrayLiteralExp(lit);
+				r.semantic(null); // TODO: ok?
+				assert(!r.rewrite);
 				r.dontConstFold();
 				return r;
 			};
@@ -357,7 +363,7 @@ struct Variant{
 		}
 		else static if(is(T==wstring)){assert(id.occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(id.occupies == Occupies.dstr); return dstr;}
-		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(id.occupies == Occupies.int64); return cast(T)int64;}
+		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(id.occupies == Occupies.int64,"occupies was "~to!string(id.occupies)~" instead of int64"); return cast(T)int64;}
 		else static if(is(T==float)||is(T==double)||is(T==real)
 			        || is(T==ifloat) || is(T==idouble)||is(T==ireal)){
 			assert(id.occupies == Occupies.flt80 || id.occupies == Occupies.fli80);

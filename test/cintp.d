@@ -141,7 +141,7 @@ int fops(int x){return x;}
 		n++;
 	return n;
 }
-static assert(bug6498(10_000_000)!=10_000_000);
+static assert(bug6498(10_000_000)!=10_000_000);+/
 
 
 immutable int immu=2;
@@ -329,7 +329,7 @@ int testnested2(){
 pragma(msg, "testnested2: ", testnested2());
 static assert(testnested2()==13);
 
-+/
+
 
 static assert({return rettrue();}());
 auto rettrue(){return {return {return true;}();}();}

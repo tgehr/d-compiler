@@ -1,10 +1,18 @@
 struct S{
-	int s;
-	static struct G{
+	template s(){
+		int s = 2;
+	}
+	struct G{
 		//pragma(msg, typeof(s));
 		void foo(){
-			typeof(s) x;
-			static assert(!is(typeof({cast(void)s;})));
+			pragma(msg, S.s!());// = 2;
+			s!();
 		}
 	}
+	static void foo(){
+		//typeof(s) y;
+	}
 }
+
+//alias S.G.foo a;
+//pragma(msg, typeof(a()));

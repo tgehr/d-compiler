@@ -20,7 +20,7 @@ abstract class Statement: Node{
 
 class EmptyStm: Statement{
 	override string toString(){return ";";}
-	override Statement semantic(Scope sc){return this;}
+	override void semantic(Scope sc){mixin(SemPrlg); mixin(SemEplg);}
 	
 	mixin Visitors;
 }

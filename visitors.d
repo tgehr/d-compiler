@@ -10,7 +10,7 @@ mixin template Visitors(){
 	static if(!is(typeof(this)==Node)){
 		static if(!is(typeof(this)==AggregateTy)) mixin Analyze; // wtf?
 		mixin CTFEInterpret!(typeof(this));
-		mixin DeepDup!(typeof(this));
+		static if(!is(typeof(this)==AggregateTy)) mixin DeepDup!(typeof(this));
 	}
 
 	//static if(is(typeof(this)==Node))

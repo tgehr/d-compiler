@@ -36,12 +36,13 @@ auto bar(){
 }
 
 template A(){
-	enum A=B!();
+	enum V=B!().V;
 }
 template B(){
-	enum B=A!();
+	enum V=A!().V;
 }
 enum x = A!();
+
 
 struct Str{
 	immutable a = b;
@@ -54,3 +55,4 @@ struct Str{
 	immutable int x=y;
 	immutable int y=TT!();
 }
+

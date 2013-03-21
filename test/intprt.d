@@ -17,13 +17,15 @@ int gun(int x){
 	return x<100?100:1000;
 }
 
+
+
 void main(){
 	enum ass = (assert(1,"foo"),2);
 	pragma(msg, ass);
 	*cast(int*)&x[0] = 2;
 	immutable int x=a;
 	//pragma(msg, x);
-	enum y = x;
+	enum y = x; // TODO: FIX!
 
 	int[] foo;
 	//foo[1]=2;
@@ -47,6 +49,7 @@ void main(){
 	static assert(u!<>=u);
 
 	static assert(!is(typeof(mixin(q{mixin(q{mixin(q{mixin})})}))));
+
 	//pragma(msg, fun(10)+10);
 
 	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d";
@@ -55,14 +58,14 @@ void main(){
 	enum cic = cast(dchar[][])["test"];
 	pragma(msg, cic);
 
-	//pragma(msg, []<[1]);
-	//enum zz2 = [zz];
-	//pragma(msg, (cast(dchar[])zz)[2]);
+	pragma(msg, []<[1]);
+	enum zz2 = [zz];
+	pragma(msg, (cast(dchar[])zz)[2]);
 
-	//pragma(msg, [zz,zz2[0]],"\n","hallo",zz2,cast(dchar[][])[q{2}]);
-	//pragma(msg, /*cast(int)*/[][y]);
-	//pragma(msg, [][y]);
+	pragma(msg, [zz,zz2[0]],"\n","hallo",zz2,cast(dchar[][])[q{2}]);
+	pragma(msg, /*cast(int)*/[][y]);
+	pragma(msg, [][y]);
 }
-//mixin("pragma(msg)");
+mixin("pragma(msg)");
 
 // +/

@@ -1,4 +1,15 @@
-/+template TT(int i){
+template TypeTuple(T...){ alias T TypeTuple;}
+
+
+void local(){
+	int x;
+	//alias x y;
+	alias TypeTuple!x y;
+	static void foo(){y[0]++;}
+}
+
+/+
+template TT(int i){
 	alias Rest V;
 	static if(i) alias TT!(0).V Rest;
 	static if(i) enum thisisone=true;
@@ -14,17 +25,30 @@ template SS(bool i){
 
 pragma(msg, SS!1.V);
 pragma(msg, SS!(0).A);
-+/
 
 alias QQ.x a;
 alias QQ.y b;
 
+double x,y;
+
+alias TypeTuple!(QQ.x, QQ.y) QQs;
+pragma(msg, QQs);
+
 struct QQ{
-	int x=2,y=3;
-	void foo(){
-		a = b;
+	//int x=2,y=3;
+	int x(); int y;
+	static void foo(){
+		a();
+		b=b;
 	}
 }
+
+
+struct G {G g; }
+struct F(T) { static int f(immutable ref T) {return 2;} }
+pragma(msg, F!G.f(G.g));
+
+
 
 struct WW{
 	void foo(){
@@ -35,8 +59,36 @@ struct WW{
 immutable foo = 2; 
 //pragma(msg, a);
 
-template TypeTuple(T...){ alias T TypeTuple;}
 
-alias TypeTuple!(QQ.x, QQ.y) QQs;
+struct Foo{
+	//static double foo(){}
+	static double foo(int){}
+	int foo(){}
+	static void goo(){
+		Foo f;
+		auto x=f.foo(2);
+		auto y=Foo.foo();
+		pragma(msg, "x: ",typeof(x)," y: ",typeof(y));
+	}
+}
 
-pragma(msg, QQs);
+struct Test{
+	static inout(int) foo(inout(int)){return 1;}
+	double foo(int){return 1.0;}
+	static void goo(){
+		//foo();
+		pragma(msg, typeof(Test.foo(cast(shared)1)));
+
+		Test.foo(2);
+	}
+}
+
+alias S.t st;
+struct S{
+	int t;
+	void foo(){
+		st=2;
+	}
+}
+
+// +/

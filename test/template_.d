@@ -1,20 +1,38 @@
-
 alias immutable(char)[] string;
+
+auto toString(int i){
+	immutable(char)[] s;
+	do s=(i%10+'0')~s, i/=10; while(i);
+	return s;
+}
 
 template fc(int x){
 	static if(x<=1) enum fc=1; // TODO: shouldn't be ambiguous
-	else enum fc = fc!(x-1);
+	else enum fc = x*fc!(x-1);
 }
-pragma(msg, fc!2);
+pragma(msg, fc!10);
 
+template tmpl(T){
+	static if(is(T==double)){
+		T[] tmpl(T arg){return [arg, 2*arg];}
+	}else{
+		T[] tmpl(T arg){return is(T==int)?[arg]:[arg,arg,2*arg];}
+	}
+	//alias int T;
+}
+pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
+
+
+
+
+
+/+
 template ttt(int x){
 	int ttt(){return 2;}
 	pragma(msg, typeof(ttt));
 }
 mixin ttt!2;
 
-
-/+
 
 template AA(string xx){
 	enum x = mixin(xx);
@@ -27,6 +45,7 @@ template AA(string xx){
 pragma(msg, AA!"0".BB!1);
 pragma(msg, AA!"0".BB!0);
 pragma(msg, AA!"3".BB!13~' '~AA!"3".BB!4);
+
 
 
 auto to(T,F)(F arg){
@@ -43,7 +62,7 @@ template Ov(uint x){pragma(msg, 2);}
 
 mixin Ov!2u; 
 +/
-
+/+
 template isInputRange(R){
 	enum isInputRange=is(typeof(delegate void(){
 		R r;
@@ -61,13 +80,23 @@ struct Range{
 	void popFront(){}
 	int front(){return 10;}
 }
-Range r;
-
 struct NonRange{
 	auto really(){return -10;}
 	bool nota(){return true;}
 	void range(){}
 }
+Range r;
+
+//pragma(msg, ElementType!Range);
+
+auto array(R)(R arg) if(isInputRange!R) {
+	ElementType!R[] res;
+	for(auto r = arg; !r.empty(); r.popFront()) res~=r.front();
+	return res;
+}
+//pragma(msg, typeof(array!Range(r)));
+//pragma(msg, typeof(array!NonRange(r)));
+
 
 struct PRange(alias a){
 	bool empty(){return false;}
@@ -85,17 +114,12 @@ pragma(msg, "! ",ElementType!(ElementType!(ElementType!(ElementType!(PRange!(ppr
 pragma(msg, ElementType!(PRange!ppr));
 pragma(msg, ElementType!(PRange!pr));
 
+pragma(msg, typeof(array!(PRange!pppr)(ppppr)));
+
 
 pragma(msg, typeof(PRange!pr.front()));
 
-
-
-
-auto array(R)(R arg) if(isInputRange!R) {
-	ElementType!R[] res;
-	for(auto r = arg; !r.empty(); r.popFront()) res~=r.front();
-	return res;
-}
+pragma(msg, "!!",typeof(PRange!(PRange!(r)).front()));
 
 struct L(T){
 	static if(is(typeof(T.t))) enum t = T.t*2;
@@ -111,21 +135,13 @@ pragma(msg, "L!L!L!...: ", L!(L!(L!(L!(L!(L!(L!(L!int))))))).t);
 pragma(msg, "Range*: ",ElementType!(Range*));
 
 
-pragma(msg, typeof(array!(PRange!pppr)(ppppr)));
 
-pragma(msg, "!!",typeof(PRange!(PRange!(r)).front()));
 
 
 pragma(msg, ElementType!Range);
 pragma(msg, ElementType!NonRange);
 pragma(msg, isInputRange!Range);
 pragma(msg, isInputRange!NonRange);
-
-
-
-
-pragma(msg, typeof(array!Range(r)));
-pragma(msg, typeof(array!NonRange(r)));
 
 
 template TT(int x) if(x>22){ immutable int TT = x; }
@@ -136,12 +152,6 @@ pragma(msg, TT!23);
 bool iloop(){return iloop();}
 template LoL(int x) if(x>22 && iloop()){ immutable int LoL=x; }
 pragma(msg, LoL!21);
-
-immutable int[] x;
-
-pragma(msg, typeof(x)[]);
-
-
 
 
 auto foo3(){
@@ -167,7 +177,9 @@ int testaliasparam(){
 static assert(testaliasparam()==3);
 pragma(msg, "testaliasparam: ",testaliasparam());
  });
-/+class S{
+
+
+class S{
 	int x;
 	template foo(){
 		int z;
@@ -181,8 +193,7 @@ pragma(msg, "testaliasparam: ",testaliasparam());
 	void bar(){
 		foo!().z=3;
 	}
-}+/
-
+}
 
 
 T foo(T)(T arg){
@@ -196,7 +207,7 @@ pragma(msg, foo!double(42.23));
 template test(){
 	void test(){
 		//enum test = 2;
-		pragma(msg, test!()());
+		//pragma(msg, test!());
 		pragma(msg, "inner!");
 		test!();
 	}
@@ -205,17 +216,29 @@ template test(){
 void main(){
 	test!();
 }
++/
 
-
-
-// TODO: currently, recursive templates are in Omega(N^2)
+// TODO: currently, recursive templates have high algorithmic complexity
 // TODO: FIX!
 
 template factorial(int n){
-	static if(n<=1) enum V = 1.0L;
-	else enum V = n*factorial!(n-1).V;
+	static if(n<=1) enum factorial = 1.0L;
+	else enum factorial = n*factorial!(n-1);
 }
-/+
+
+
+auto gen(){
+	immutable(char)[] r;
+	//for(int i=0;i<=130;i++) r~=`enum e`~toString(i)~`=factorial!`~toString(i)~".V;\n";
+	for(int i=0;i<=100;i++) r~=`pragma(msg,factorial!`~toString(i)~");\n";
+	return r;
+}
+
+//pragma(msg, gen());
+//mixin(gen());
+
+pragma(msg, factorial!100);
+
 template recu1(int n){
 	static if(n<=1) int V(){return 1;}
 	else int V(){return recu1!(n-1).V();}
@@ -224,26 +247,17 @@ template recu1(int n){
 pragma(msg, "recu1: ",recu1!20.V());
 
 template recu2(int n){
-	static if(n<=1) int V(){return 1;}
-	else auto V(){return recu2!(n-1).V();}
-}+/
+	static if(n<=1) int recu2(){return 1;}
+	else auto recu2(){return recu2!(n-1)()+1;}
+}
 
-pragma(msg, "recu2: ",recu2!20.V());
+pragma(msg, "recu2: ",recu2!20());
 
 
 //pragma(msg, factorial!130.V);
 
-auto gen(){
-	immutable(char)[] r;
-	//for(int i=0;i<=130;i++) r~=`enum e`~toString(i)~`=factorial!`~toString(i)~".V;\n";
-	for(int i=0;i<=100;i++) r~=`pragma(msg,factorial!`~toString(i)~".V);\n";
-	return r;
-}
 
-//pragma(msg, gen());
-mixin(gen());
 
-/+
 auto gun(alias a)(){
 	cast(void)a;
 	static if(is(typeof({cast(void)a;}): void delegate())) enum stc = null;
@@ -255,45 +269,24 @@ immutable int x=223;
 
 auto fun(){
 	int y;
-	static const(int[][]) z=[[2]];
+	immutable int[][] z=[[]];
 	pragma(msg, typeof(gun!x()));
 	pragma(msg, typeof(gun!y()));
 	pragma(msg, typeof(gun!(z)()));
 	pragma(msg, gun!z()());
+	gun!z()();
 	gun!y()()=gun!x()();
 	int delegate()ref x = gun!y();
 	x()+=2;
 	return y;
 }
 pragma(msg, fun());
-+/
-//T foo(T)(T arg)=>arg+arg;
-//pragma(msg, foo!double(32.2));
 
-/+struct Foo{
-	static int foo(){}
-	int foo(){}
-	void goo(){
-		Foo f;
-		f.foo();
+T foo(T)(T arg)=>arg+arg;
+pragma(msg, foo!double(32.2));
 
-	}
-}+/
 
-/+
-struct Test{
-	static inout(int) foo(inout(int)){return 1;}
-	double foo(int){return 1.0;}
-	static void goo(){
-		//foo();
-		pragma(msg, typeof(Test.foo(cast(shared)1)));
 
-		Test.foo(2);
-	}
-}
-
-+/
-/+
 void foo(){
 	D d;
 	d.test!().foo(2);
@@ -320,9 +313,9 @@ class D{
 void main(){
 	auto c = new D.C;
 	//c.goo();
-}+/
+}
 
-/+
+
 //enum b = is(typeof(a)), a = b;
 
 //pragma(msg, a);
@@ -336,15 +329,15 @@ pragma(msg, Foo!"enum Foo = \"Foo\";");
 
 
 template A(){
-	static if(!is(typeof(B!())==int)) enum A = 2;
+	static if(!is(typeof(B!())==int)) enum A2 = 2;
 	//enum A = 2;
-	enum A = B!();
+	enum A2 = B!().B2;
 }
 
 
 template B(){
-	static if(!is(typeof(A!())==int)) enum B = 2;
-	enum B = 2;
+	static if(!is(typeof(A!().A2)==int)) enum B2 = 2;
+	enum B2 = 2;
 }
 //alias B!() b;
 
@@ -353,17 +346,6 @@ pragma(msg, A!());
 pragma(msg, B!());
 
 //alias int T;
-template tmpl(T){
-	static if(is(T==double)){
-		T[] tmpl(T arg){return [arg, 2*arg];}
-	}else{
-		T[] tmpl(T arg){return is(T==int)?[arg]:[arg,arg,2*arg];}
-	}
-	//alias int T;
-}
-pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
-
-
 
 pragma(msg, mixin({return ['1'];}()));
 
@@ -396,7 +378,7 @@ static assert(!is(typeof(ttt!"-")));
 template tt2(long a : 2){enum tt2=a;}
 pragma(msg, tt2!(2));
 static assert(!is(typeof(tt2!(1))));
-+/
+
 
 /+struct S{
 	immutable foo = "222";
@@ -431,7 +413,7 @@ auto test3(){
 	auto bar(){return foo1();}
 	return foo!bar()+foo!foo1();
 }
-pragma(msg, test3());+/
+pragma(msg, test3());
 
 auto foo2(alias a, alias b)(){
 	b++;
@@ -450,7 +432,7 @@ auto foo2(alias a, alias b)(){
 	return foo2!(foo,x)();
 }+/
 
-auto get(alias a)(){return a;}
+//auto get(alias a)(){return a;}
 
 struct S{
 	immutable int x=TT!().SS!().TT;
@@ -468,10 +450,14 @@ struct S{
 	//pragma(msg, "foo: ", foo());
 	static int foo(int){
 		S s; // TODO: fix
-		return s.TT!().SS!().TT;
+		//return s.TT!().SS!().TT;
+		return 0;
 	}
 	pragma(msg, foo(2));
 }
+
+/+
+
 
 /+
 auto test4(){
@@ -530,11 +516,6 @@ void main(){
 
 // hallo timon heeeeeey <--- copyright (C) 2012 Josef Ziegler +/
 
-auto toString(int i){
-	immutable(char)[] s;
-	do s=(i%10+'0')~s, i/=10; while(i);
-	return s;
-}
-
-
+// +/
+// +/
 // +/

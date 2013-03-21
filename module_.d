@@ -18,7 +18,7 @@ class Module: Node{
 		foreach(r;f.byChunk(1024)){app.put(cast(char[])r);}
 		app.put("\0\0\0\0"); // insert 4 padding zero bytes
 		string code=cast(string)app.data;
-		sc=new Scope(new FormattingErrorHandler());
+		sc=new ModuleScope(new FormattingErrorHandler(), this);
 		//sc=new Scope(new SimpleErrorHandler(path, code));
 		//auto lexer = lex(code);
 		// int count=0; foreach(tk;lexer){count++;}writeln(count);
@@ -28,58 +28,50 @@ class Module: Node{
 		if(sc.handler.nerrors) sstate = SemState.error;
 	}
 
-	static Module current = null;
-
-	Module buildInterface(){
-		mixin(Configure!q{Module.current = this});
+	void buildInterface(){
 		mixin(Configure!q{Identifier.tryAgain = true});
 		mixin(Configure!q{Identifier.allowDelay = true});
 		if(sstate == SemState.pre) foreach(ref x;decls){
 			x.stc|=STCstatic;
-			x=x.presemantic(sc); // add all to symbol table
+			x.presemantic(sc); // add all to symbol table
 		}
 		while(Identifier.tryAgain){
 			while(Identifier.tryAgain){
 				while(Identifier.tryAgain){
 					Identifier.tryAgain = false;
-					foreach(ref x;decls) x = x.buildInterface();
-					foreach(x;templateDecls) x.updateInstances(_=>_.buildInterface());
+					foreach(ref x;decls){x.buildInterface();mixin(Rewrite!q{x});}
+					foreach(x;templateDecls) x.instancesBuildInterface();
 				}
 				Identifier.allowDelay = false;
-				foreach(ref x;decls) x = x.buildInterface();
-				foreach(x;templateDecls) x.updateInstances(_=>_.buildInterface());
+				foreach(ref x;decls){x.buildInterface(); mixin(Rewrite!q{x});}
+				foreach(x;templateDecls) x.instancesBuildInterface();
 				Identifier.allowDelay = true;
 			}
 		}
-		// import std.stdio; writeln("built interface!");
-		return this;
 	}
-	Module semantic(){
+	void semantic(){
 		mixin(SemPrlg);
-		mixin(Configure!q{Module.current = this});
 		mixin(Configure!q{Identifier.tryAgain = true});
 		mixin(Configure!q{Identifier.allowDelay = true});
-		auto me = buildInterface();
-		assert(me is this);
-		foreach(ref x;decls) x = x.semantic(sc);
-		foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+		buildInterface();
+		foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
+		foreach(x;templateDecls) x.instancesSemantic();
 		int num = 0;
 		while(Identifier.tryAgain){
-			// TODO: this is a hack to order declarations before references
 			buildInterface();
-			// TODO: replace by comprehensive ordering of non-existence decisions
 			while(Identifier.tryAgain){
 				Identifier.tryAgain = false;
-				foreach(ref x;decls) x = x.semantic(sc);
-				foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+				foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
+				foreach(x;templateDecls) x.instancesSemantic();
 			}
+
 			Identifier.allowDelay=false;
-			foreach(ref x;decls) x = x.semantic(sc);
-			foreach(x;templateDecls) x.updateInstances(_=>_.semantic(sc));
+			foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
+			foreach(x;templateDecls) x.instancesSemantic();
 			Identifier.allowDelay=true;
 		}
-		assert({foreach(x; decls) assert(!x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(PropErr!q{decls});
+		assert(sstate==SemState.error||{foreach(x; decls) assert(!x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(SemEplg);
 	}
 

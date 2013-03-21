@@ -56,6 +56,7 @@ auto runAnalysis(T,S...)(Node node,S args){
 	alias TypeTuple!(__traits(getOverloads,T,"perform")) overloads;
 	//static assert(overloads.length<7,"TODO: fix.");
 	void runIt(Node node){
+		// import util;dw("h ",node);
 		static if(!manualPropagate) node._doAnalyze(&runIt);
 		foreach(i, ov; overloads){
 			if(auto e = cast(ParameterTypeTuple!(ov)[0])node){

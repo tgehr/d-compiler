@@ -27,6 +27,8 @@ template ToTuple(alias a){
 	else alias TypeTuple!() ToTuple;
 }
 
+template Seq(T...) { alias T Seq; }
+
 // escape a string
 S escape(S)(S i,bool isc=false)if(isSomeString!S){ // TODO: COW, replace with std lib one as soon as available
 	S r;
@@ -287,12 +289,11 @@ private string Ximpl(string x){
 				if(x[i]=='(') nest++;
 				else if(x[i]==')') nest--;
 			}
-			i++;
-			r~=`"~`~x[start..i]~`~"`;
-			if(i==x.length) break;
+			r~=`"~`~x[start..i+1]~`~"`;
+		}else{
+			if(x[i]=='"'||x[i]=='\\') r~="\\";
+			r~=x[i];
 		}
-		if(x[i]=='"'||x[i]=='\\') r~="\\";
-		r~=x[i];
 	}
 	return r~`"`;
 }

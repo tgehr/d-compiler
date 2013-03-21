@@ -2,6 +2,7 @@
 
 import std.algorithm, std.array, std.string, std.conv;
 
+import module_;
 import lexer, parser, expression, declaration, semantic, util, error;
 
 
@@ -17,7 +18,7 @@ import lexer, parser, expression, declaration, semantic, util, error;
 		return sc.lookup(name, this);
 	}
 	override FwdRef isFwdRef(){return this;}
-}*/
+}
 
 class MutableAliasRef: Declaration{ // used if a declaration references another declaration, eg mixin Template;
 	Declaration other;
@@ -32,7 +33,7 @@ class MutableAliasRef: Declaration{ // used if a declaration references another 
 		sc.error(format("cannot shadow declaration '%s' which has already been used", other.name), newDecl.loc);
 	}
 	override MutableAliasRef isMutableAliasRef(){return this;}
-}
+}*/
 
 class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
@@ -53,7 +54,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				error(format("declaration of '%s' results in potential ambiguity", decl.name), decl.name.loc);
 				note("offending symbol lookup", d.name.loc);
-				d.name.sstate = SemState.error;
+				mixin(SetErr!q{d.name});
 				return false;
 		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
@@ -65,7 +66,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			}
 			error(format("redefinition of '%s'",decl.name), decl.name.loc);
 			note("previous definition was here",d.name.loc);	             
-			// d.sstate = SemState.error;
+			mixin(SetErr!q{d});
 			return false;
 		}
 
@@ -85,7 +86,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
 				error(format("declaration of '%s' results in potential ambiguity", d.name), d.name.loc);
 				note("offending symbol lookup", ident.loc);
-				ident.sstate = SemState.error;
+				mixin(SetErr!q{ident});
 				return false;
 			}
 		}else insert(New!DoesNotExistDecl(ident));
@@ -105,10 +106,10 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return symtab.get(ident.ptr, alt);
 	}
 
-	import std.stdio;
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
 	Declaration getDeclaration(){return null;}
+	Module getModule(){return null;}
 	// control flow structures:
 	BreakableStm getBreakableStm(){return null;}
 	LoopingStm getLoopingStm(){return null;}
@@ -137,6 +138,15 @@ protected:
 private:
 	Declaration[const(char)*] symtab;
 	//FwdRef[] FwdRefs; // TODO: maybe use more efficient datastructure
+}
+
+class ModuleScope: Scope{
+	Module module_;
+	this(ErrorHandler handler, Module module_){
+		super(handler);
+		this.module_=module_;
+	}
+	override Module getModule(){return module_;}
 }
 
 class NestedScope: Scope{
@@ -180,7 +190,7 @@ class NestedScope: Scope{
 	override FunctionDef getFunction(){return parent.getFunction();}
 	override AggregateDecl getAggregate(){return parent.getAggregate();}
 	override Declaration getDeclaration(){return parent.getDeclaration();}
-
+	override Module getModule(){return parent.getModule();}
 }
 
 class AggregateScope: NestedScope{

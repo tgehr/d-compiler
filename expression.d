@@ -9,7 +9,6 @@ import analyze;
 
 import variant;
 
-
 abstract class Node{
 	Location loc;
 
@@ -63,7 +62,7 @@ class StubExp: Expression{
 		sstate = SemState.completed;
 		this.type = type;
 	}
-	Expression semantic(Scope sc){mixin(SemEplg);}
+	override void semantic(Scope sc){mixin(SemPrlg);mixin(SemEplg);}
 }
 
 class LiteralExp: Expression{
@@ -270,6 +269,11 @@ abstract class FieldExp: Expression{
 	Expression e1;
 	Symbol e2;
 
+	override string toString(){
+		if(auto id=e2.isIdentifier()) return _brk(e1.toString()~"."~id.name);
+		else return _brk(e1.toString()~"."~e2.toString());
+	}
+
 	mixin DownCastMethod;
 	mixin Visitors;
 }
@@ -283,7 +287,9 @@ template BinaryExpGetParent(TokenType op){
 
 class BinaryExp(TokenType op): BinaryExpGetParent!op{
 	this(Expression left, typeof(e2) right){e1=left; e2=right;}
-	override string toString(){
+
+
+	static if(op!=Tok!".") override string toString(){
 		// (the cast is a workaround for a DMD bug)
 		static if(op==Tok!"in"||op==Tok!"is"||op==Tok!"!in"||op==Tok!"!is") return _brk(e1.toString() ~ " "~TokChars!op~" "~e2.toString());
 		else return _brk(e1.toString() ~ TokChars!op ~ (cast(Expression)e2).toString());
