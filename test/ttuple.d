@@ -1,27 +1,42 @@
 
-
-template Seq(T...){ alias T Seq; }
-
-template Alias(T){ alias T Alias; }
-
-alias Seq Seq;
-
-auto seqparm(A,B,C...)(Seq!(A,B,C) args){
-	return args[0]+args[1]+args[2]+args[$-1];
+int testZeroArgs(){
+	int x;
+	int foo(){ return x; }
+	return foo((x++,Seq!())); // TODO!
 }
-
-static assert(seqparm(1,2,3.0,4,5)==11.0);
-pragma(msg, "seqparm: ",seqparm(1,2,3.0,4,5));
+pragma(msg, testZeroArgs());
 
 
-
-/+ // TODO: make work
 auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
 
 auto seqtak(){auto x = seqret(1,2); return x[0];}
-pragma(msg, seqtak());
-pragma(msg, seqret(1,2));
+pragma(msg, "seqtak: ", seqtak());
+//pragma(msg, seqret(1,2)); // TODO!
 
+auto compose(alias a, alias b,T...)(T args){
+	return a(b(args)); // TODO!
+}
+
+auto seqid(T...)(T args){
+	return args;
+}
+auto add(int a, int b, int c)=>a+b+c;
+pragma(msg, "multiret: ", compose!(add,seqid)(1,2,3));
+
+int testmultirefret(){
+	int a, b;
+	ref Seq!(int, int) multirefret(){
+		return Seq!(a,b);
+	}
+	multirefret()=Seq!(1,2);
+	return a+b;
+}
+pragma(msg, "testmultirefret: ", testmultirefret());
+
+T seq(T...)(T args){ return args; }
+pragma(msg, (()=>[seq(1,2,3,4)])()); // TODO: make work without lambda
+
+/+
 
 struct Tpl{
 	Seq!(int, double) foo;
@@ -32,12 +47,21 @@ struct Tpl{
 void checkTpl(){
 	void fun(int, double){ }
 	Tpl t;
-	fun(t.c);
-	t.c[0]=2;
-	t.foo[0]=2;
-}+/
+	fun(t.c);   // TODO!
+	t.c[0]=2;   // TODO!
+	t.foo[0]=2; // TODO!
+}
 
-// template Seq(T...){ alias T Seq; } // TODO: ambiguity error
+/+
+/+
+alias Seq Seq;
+
+auto seqparm(A,B,C...)(Seq!(A,B,C) args){
+	return args[0]+args[1]+args[2]+args[$-1];
+}
+
+static assert(seqparm(1,2,3.0,4,5)==11.0);
+pragma(msg, "seqparm: ",seqparm(1,2,3.0,4,5));
 
 
 pragma(msg, Seq!(1,2,3,4)[1..3]);
@@ -81,7 +105,6 @@ auto refe(ref Seq!(int,int,int,int) arg){
 	return ++arg[0]+ ++arg[1]+ --arg[2]+ --arg[3];
 }
 
-
 auto testt(ref int a, ref int b, ref int c, ref int d){
 	a++; b++; c++; d++;
 }
@@ -107,7 +130,6 @@ auto testAliasTuple(){
 }
 static assert(testAliasTuple()==[2,3,4,5,3,4,5,6,18,4,5,4,5]);
 pragma(msg, testAliasTuple());
-
 
 pragma(msg, Seq!(1,2,3));
 pragma(msg, typeof(Seq!(1,2,3)));
@@ -274,3 +296,9 @@ pragma(msg, StaticIota!(1,12)," ", Primes!12);
 //pragma(msg, _a_field_0.mangleof);
 
 // +/
+// +/
+// +/
+
+template Seq(T...){ alias T Seq; }
+
+template Alias(T){ alias T Alias; }

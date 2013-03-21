@@ -103,7 +103,7 @@ template PropRetryNoRew(string s) if(!s.canFind(",")){
 			assert(_nR!=2 || sstate != SemState.error,"error in cdep");
 			if(sstate != SemState.error){
 				needRetry = _nR;
-				if(_nR==2) @(sp[1]).needRetry=false;
+				if(_nR==2){mixin(SetErr!q{@(sp[1])});}
 				// dw("propagated retry ",_nR," from ",@(sp[1])," to ",toString()," ",__LINE__);
 				Scheduler().await(this, @(sp[1]), @(sp[0]));
 			}
@@ -161,6 +161,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 					static if(is(typeof(@(t)): Expression[])){
 						pragma(msg, typeof(this)," @(t)");
 						@(t)=Tuple.expand(@(t));
+						//foreach(ref x;@(t)) mixin(PropRetry!q{x});
 						mixin(PropErr!q{@(t)});
 					}
 				}
@@ -1345,7 +1346,8 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				// overloaded declaration
 
 				FunctionDecl fd;
-				if(auto s=e.isSymbol()){
+				auto fe = e.isFieldExp();
+				if(auto s=fe?fe.e2:e.isSymbol()){
 					if(auto ov=s.meaning.isOverloadSet()){
 						if(ov.decls.length==1)
 						if(auto fdo=ov.decls[0].isFunctionDecl()) fd = fdo;
@@ -1415,6 +1417,16 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
 		return e.matchCallHelper(sc, loc, this_, args, context);
 	}
+
+	// this is necessary to make template delegate literals work correctly
+	// the scope of the symbol must be adjusted
+	override Expression clone(Scope sc, const ref Location loc){
+		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,loc));
+		r.loc = loc;
+		r.semantic(sc);
+		return r;
+	}
+
 
 	final bool isUndeducedFunctionLiteral(){
 		auto r=type is Type.get!void();
@@ -1592,6 +1604,7 @@ class TemplateInstanceDecl: Declaration{
 		assert(finishedInstantiation());
 	}body{
 		return parent.iftiDecl()?bdy.decls[0].isFunctionDecl():null;
+
 	}
 
 	override void buildInterface(){
@@ -1606,26 +1619,31 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		Scope instanceScope = parent.scope_;
 
-		if(parent.stc&STCstatic){ // TODO: fix!
-			size_t maxn = 0;
-			foreach(i,x;args){
-				if(i>=parent.tuplepos
-				|| parent.params[i].which == WhichTemplateParameter.alias_){
-					if(auto sym = x.isSymbol()){
-						assert(!!sym.meaning && sym.meaning.scope_,sym.to!string);
-						if(sym.meaning.stc & STCstatic
-						||!sym.meaning.scope_.getDeclaration())
-							continue;
-						// TODO: consider the context scope instead
-						auto n = sym.meaning.scope_.getNesting();
-						if(n>=maxn){
-							maxn=n;
-							assert(n>maxn||instanceScope==scope_
-							     ||instanceScope==sym.meaning.scope_);
-							instanceScope = sym.meaning.scope_;
-						}
+		size_t maxn = 0;
+		foreach(i,x;args){
+			if(i>=parent.tuplepos
+			   || parent.params[i].which == WhichTemplateParameter.alias_){
+				if(auto sym = x.isSymbol()){
+					assert(!!sym.meaning && sym.meaning.scope_,sym.to!string);
+					if(sym.meaning.stc & STCstatic
+					   ||!sym.meaning.scope_.getDeclaration())
+						continue;
+					auto n = sym.meaning.scope_.getFrameNesting();
+					if(n>=maxn){
+						assert(n>maxn||instanceScope==scope_
+						       ||instanceScope==sym.meaning.scope_);
+						maxn=n;
+						instanceScope = sym.meaning.scope_;
 					}
 				}
+			}
+		}
+		if(!(parent.stc&STCstatic)){ // TODO: fix!
+			for(auto d=instanceScope.getDeclaration();;){
+				if(!d){instanceScope = parent.scope_; break;}
+				if(d.scope_ !is parent.scope_) break;
+				if(d.stc&STCstatic){instanceScope = parent.scope_; break;}
+				d = d.scope_.getDeclaration();
 			}
 		}
 		paramScope.iparent = instanceScope;
@@ -1768,11 +1786,9 @@ class TemplateInstanceDecl: Declaration{
 
 		foreach(ref x;iftiArgs) mixin(SemChld!q{x});
 
-		if(iftiArgs.length > iftiEponymousParameters.length && parent.tuplepos == iftiEponymousParameters.length) mixin(ErrEplg);
-
 		bool resolvedSome = false;
 
-		foreach(i,ref a;iftiArgs)
+		foreach(i,ref a;iftiArgs[0..min($,iftiEponymousParameters.length)])
 		if(auto ae = a.isAddressExp())
 		if(ae.isUndeducedFunctionLiteral()){
 			if(!iftiEponymousParameters[i].type) continue;
@@ -1885,6 +1901,7 @@ class TemplateInstanceDecl: Declaration{
 		bdy = bdy.ddup();
 
 		auto instanceScope = paramScope.iparent;
+		bdy.stc|=parent.stc;
 		if(instanceScope !is parent.scope_) bdy.stc&=~STCstatic;
 		bdy.presemantic(bdyscope);
 		assert(bdy.scope_ is bdyscope);
@@ -2138,6 +2155,11 @@ class ExpTuple: Expression, Tuple{
 	 */
 	AccessCheck accessCheck = AccessCheck.all;
 
+	protected this(){
+		alias util.all all;
+		assert(all!(_=>_.sstate==SemState.completed)(exprs));
+	}
+
 	this(Scope sc, Expression[] exprs)in{
 		alias util.all all;
 		assert(all!(_=>_.sstate==SemState.completed)(exprs));
@@ -2156,7 +2178,6 @@ class ExpTuple: Expression, Tuple{
 		exprs = new Expression[cast(size_t)len];
 		foreach(ref x; exprs) x=exp.clone(sc,loc);
 	}
-
 
 	override Tuple isTuple(){return this;}
 
@@ -2221,6 +2242,8 @@ class ExpTuple: Expression, Tuple{
 		auto r = ddup();
 		foreach(ref x; r.exprs) x = x.clone(sc,loc);
 		r.loc = loc;
+		r.sstate = SemState.begin;
+		r.semantic(sc);
 		return r;
 	}
 
@@ -2236,6 +2259,8 @@ class ExpTuple: Expression, Tuple{
 		alias util.all all;
 		return all!(_=>_.isConstFoldable())(exprs);
 	}
+
+	mixin TupleImplConvTo!exprs;
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -2259,6 +2284,79 @@ class ExpTuple: Expression, Tuple{
 private:
 	Expression[] exprs;
 }
+
+// TODO: inherit from comma expression as soon as tuple expansion works with it
+class MultiReturnValueExp: Expression{
+	CallExp call;
+	Expression exp;
+	this(CallExp call, Expression exp)in{
+		assert(call.tmpVarDecl && call.tmpVarDecl.sstate == SemState.completed);
+		assert(call.tmpVarDecl.tupleContext);
+		alias util.all all;
+		assert(all!(a=>a.sstate == SemState.completed)(call.tmpVarDecl.tupleContext.syms));
+	}body{
+		this.call = call;
+		this.exp = exp;
+		type = exp.type;
+		sstate = SemState.completed;
+	}
+
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		assert(0);
+	}
+
+	override MultiReturnValueExp clone(Scope sc, const ref Location loc){
+		auto r=New!MultiReturnValueExp(call, exp.clone(sc,loc));
+		r.loc = loc;
+		r.semantic(sc);
+		return r;
+	}
+
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==MultiReturnValueExp)){}
+ExpTuple makeMultiReturn(CallExp call)in{
+	assert(call.sstate == SemState.completed);
+	assert(call.tmpVarDecl && call.tmpVarDecl.sstate == SemState.completed);
+	assert(call.tmpVarDecl.tupleContext);
+	alias util.all all;
+	assert(all!(a=>a.sstate == SemState.completed)(call.tmpVarDecl.tupleContext.syms));
+}body{
+	Expression r;
+	if(call.tmpVarDecl.tupleContext.syms.length){
+		r=call.tmpVarDecl.tupleContext.vds[0].init=
+			New!MultiReturnValueExp(call, call.tmpVarDecl.tupleContext.syms[0]);
+		return New!ExpTuple(call.tmpVarDecl.scope_, r~call.tmpVarDecl.tupleContext.syms[1..$]);
+		// TODO: aliasing would be ok here
+	}
+	assert(0,"TODO: zero return values");
+}
+
+mixin template TupleImplConvTo(alias exprs){
+	override Dependent!bool implicitlyConvertsTo(Type rhs){
+		auto tt = rhs.isTypeTuple();
+		if(!tt||tt.length!=length) return false.independent;
+		Node[] dep;
+		Scope idk = null;
+		import std.range;
+		foreach(x; zip(exprs, tt.types)){
+			auto iconvd = x[0].implicitlyConvertsTo(x[1]);
+			if(iconvd.dependee){
+				assert(!idk || iconvd.dependee.scope_ is idk);
+				idk = iconvd.dependee.scope_;
+				dep ~= iconvd.dependee.node; // TODO: this is inefficient
+				continue;
+			}
+			if(!iconvd.value) return false.independent;
+		}
+		if(idk) return multidep(dep, idk).dependent!bool;
+		assert(!dep.length);
+		return true.independent;
+	}
+}
+
 
 class TypeTuple: Type, Tuple{
 	this(Type[] types)in{
@@ -2309,6 +2407,8 @@ class TypeTuple: Type, Tuple{
 		}
 		return false;
 	}
+	
+	mixin TupleImplConvTo!types;
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -2405,7 +2505,8 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 	// TODO: how to deal with overloading?
 	FunctionDecl iftiDecl(){
-		if(!eponymousDecl||bdy.decls.length!=1) return null;
+		//if(!eponymousDecl||bdy.decls.length!=1) return null;
+		if(!eponymousDecl) return null;
 		return eponymousDecl.isFunctionDecl();
 	}
 
@@ -2413,6 +2514,12 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		assert(sstate == SemState.completed && sstate == rhs.sstate);
 	}body{
 		Dependee dependee;
+		if(tuplepos != params.length){
+			if(rhs.tuplepos == rhs.params.length)
+				return false.independent; // no tuple param is more specialized
+		}
+		// TODO: there should be more rules
+		
 		foreach(i,p; params[0..min($, rhs.params.length)]){
 			auto rp = rhs.params[i];
 			with(WhichTemplateParameter)
@@ -2427,7 +2534,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 				if(auto d=ptorpd.dependee){dependee = d; continue;}
 				if(rptopd.value&&!ptorpd.value)
 					return false.independent;
-		}
+			}
 		}
 		return Dependent!bool(dependee, true);
 	}
@@ -2778,6 +2885,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			auto r = New!MatchCallWhenReady(cast(Expression)cast(void*)rewrite, loc, iftiArgs);
 			rewrite = null;
 			r.semantic(sc);
+			if(rewrite) return; // TODO: ok?
 			mixin(RewEplg!q{r});
 		}
 		rewrite = tmp.value;
@@ -2819,9 +2927,8 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					auto vd = Type.get!void();
 					if(e2.type.getHeadUnqual() is vd){
 						type = vd;
-						mixin(ConvertTo!q{e2,bl});
 					}else{
-						mixin(SemChldExp!q{e2});
+						mixin(ConvertTo!q{e2,bl});
 						type = bl;
 					}
 					mixin(ConstFold!q{e2});
@@ -3530,6 +3637,7 @@ class Symbol: Expression{ // semantic node
 		if(!scope_) scope_=sc;
 		assert(meaning && scope_);
 		if(needRetry) sstate = SemState.begin;
+		needRetry = false; // be reentrant
 
 		if(sstate >= SemState.started){
 			// template instances may depend circularly upon each other
@@ -3553,7 +3661,6 @@ class Symbol: Expression{ // semantic node
 		// resolve alias
 		if(auto al=meaning.isAliasDecl()){
 			mixin(MeaningSemantic);
-			needRetry = false; // TODO: why needed?
 			mixin(CircErrMsg);
 			mixin(SemCheck);
 			mixin(SemProp!q{sc=meaning.scope_;meaning});
@@ -3615,7 +3722,6 @@ class Symbol: Expression{ // semantic node
 			if(vd.stc&STCenum){
 				if(vd.init){
 					assert(vd.init.isConstFoldable());
-					needRetry=false;
 					auto r=vd.init.cloneConstant();
 					r.loc = loc;
 					mixin(RewEplg!q{r});
@@ -3625,6 +3731,7 @@ class Symbol: Expression{ // semantic node
 			if(!needParamDeduction){
 				//if(fd.type.hasAutoReturn()){ // DMD 2.059 does this...
 				if(fd.type.hasUnresolvedReturn()){
+					needRetry = false;
 					mixin(MeaningSemantic);
 					mixin(CircErrMsg);
 					mixin(SemProp!q{sc=meaning.scope_;meaning});
@@ -3639,6 +3746,7 @@ class Symbol: Expression{ // semantic node
 				auto s = New!Symbol(meaning);
 				auto r = New!TemplateInstanceExp(s, (Expression[]).init);
 				s.loc = r.loc = this.loc;
+				s.accessCheck = accessCheck;
 				r.willCall();
 				r.semantic(sc);
 				mixin(RewEplg!q{r});
@@ -3752,6 +3860,7 @@ class Symbol: Expression{ // semantic node
 			if(auto tmps=cast(TemplateScope)nsts.parent)
 				tmpl=tmps.tmpl;
 		}
+		if(!meaning.name) return "(symbol)";
 		if(tmpl && meaning.name.name==tmpl.name.name)
 			return meaning.name.name~"!("~join(map!(to!string)(tmpl.args),",")~")";
 		return meaning.name.toString();
@@ -3790,7 +3899,7 @@ class Symbol: Expression{ // semantic node
 	}
 
 	override AccessCheck deferredAccessCheck(){
-		if(!meaning.needsAccessCheck(accessCheck)) return accessCheck;
+		if(!meaning.needsAccessCheck(accessCheck)) return AccessCheck.none;
 		return super.deferredAccessCheck();
 	}
 
@@ -3931,10 +4040,6 @@ struct MatchContext{
 
 // aware of circular dependencies
 mixin template Semantic(T) if(is(T==CallExp)){
-	override void initOfVar(VarDecl decl){
-		initOf = decl;
-	}
-	private VarDecl initOf;
 
 	override void semantic(Scope sc){ // TODO: type checking
 		// parameter passing
@@ -3944,14 +4049,14 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		mixin(SemChldPar!q{e});
 		mixin(SemChldExp!q{args});
 		mixin(PropErr!q{e});
-
+		//dw(sstate," ",map!(a=>a.needRetry)(args),args);
 		if(auto ty=e.isType())
 		if(auto aggrty=ty.getUnqual().isAggregateTy())
 		if(auto strd=aggrty.decl.isStructDecl()){
 			// TODO: could re-use the callexp as the consCall field
 			auto r = New!StructConsExp(ty, args);
 			r.loc = loc;
-			if(initOf) r.initOfVar(initOf);
+			if(tmpVarDecl) r.initOfVar(tmpVarDecl);
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
 		}
@@ -4006,6 +4111,25 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		mixin(SemChld!q{args});
 		mixin(ConstFold!q{e});
 		foreach(ref x; args) mixin(ConstFold!q{x});
+
+		// call expressions may create temporary variables
+		if(!(tt.stc&STCbyref))
+		if(auto aggrty=type.getHeadUnqual().isAggregateTy())
+		if(aggrty.decl.isValueAggregateDecl()){
+			needRetry = false;
+			analyzeTemporary(sc, STC.init);
+			mixin(SemCheck);
+		}
+		if(type.getHeadUnqual().isTypeTuple()){
+			needRetry = false;
+			analyzeTemporary(sc, tt.stc&STCbyref);
+			mixin(SemCheck);
+			if(tmpVarDecl.sstate == SemState.completed){
+				auto r = makeMultiReturn(this);
+				r.loc = loc;
+				mixin(RewEplg!q{r});
+			}// else VarDecl will do the honors
+		}
 
 		mixin(SemEplg);
 	}
@@ -4341,10 +4465,19 @@ class ImplicitCastExp: CastExp{ // semantic node
 }
 
 class TmpVarDecl: VarDecl{
+	override void presemantic(Scope sc){
+		if(sstate != SemState.pre) return;
+		scope_ = sc;
+		sstate = SemState.begin;
+	}
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){
 		super(stc, rtype, name, initializer);
 	}
 	
+	override TmpVarDecl newVarDecl(STC stc, Expression rtype, Identifier name, Expression init){
+		return New!TmpVarDecl(stc,rtype,name,init);
+	}
+
 	mixin Visitors;
 }
 mixin template Semantic(T) if(is(T==TmpVarDecl)){ }
@@ -4363,20 +4496,43 @@ mixin template Semantic(T) if(is(T==TmpVarDecl)){ }
 	override string toString(){ return tempVarDecl.init.toString(); }
 }+/
 
-class StructConsExp: Expression{
-	Expression[] args;
-
-	Identifier constructor;
-	CallExp consCall;
-
+class TemporaryExp: Expression{
 	VarDecl tmpVarDecl;
+	protected bool builtTmpVarDecl = false;
 
 	override void initOfVar(VarDecl decl){
 		assert(!tmpVarDecl||tmpVarDecl is decl);
 		tmpVarDecl = decl;
 	}
 
-	invariant(){ assert(cast(AggregateTy)type&&cast(StructDecl)(cast(AggregateTy)(cast()type).getUnqual()).decl);}
+	final protected void analyzeTemporary(Scope sc, STC stc){
+		if(!tmpVarDecl){
+			tmpVarDecl = New!TmpVarDecl(stc,type,null,this);
+			tmpVarDecl.loc = loc;
+			tmpVarDecl.presemantic(sc);
+			builtTmpVarDecl = true;
+		}
+		if(builtTmpVarDecl){
+			sstate = SemState.completed;
+			scope(success) sstate = tmpVarDecl.sstate;
+			mixin(SemChld!q{tmpVarDecl});
+		}
+	}
+
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==TemporaryExp)){}
+
+class StructConsExp: TemporaryExp{
+	Expression[] args;
+
+	Identifier constructor;
+	CallExp consCall;
+
+	bool contextIsNull = false;
+
+	invariant(){ assert(cast(AggregateTy)(cast()type).getUnqual()&&cast(StructDecl)(cast(AggregateTy)(cast()type).getUnqual()).decl);}
 	private @property StructDecl strd(){
 		return cast(StructDecl)cast(void*)(cast(AggregateTy)cast(void*)type.getUnqual()).decl;
 	}
@@ -4393,21 +4549,11 @@ class StructConsExp: Expression{
 		// TODO: static opCall
 		mixin(ResolveConstructor);
 		sstate = SemState.completed;
-		
-		if(!tmpVarDecl){
-			tmpVarDecl = New!TmpVarDecl(STC.init,type,null,this);
-			tmpVarDecl.loc = loc;
-			builtTmpVarDecl = true;
-		}
-		if(builtTmpVarDecl){
-			sstate = SemState.completed;
-			scope(success) sstate = tmpVarDecl.sstate;
-			mixin(SemChld!q{tmpVarDecl});
-		}
+		needRetry = false;
+		analyzeTemporary(sc, STC.init);
+		mixin(SemCheck);
 		mixin(SemEplg);
 	}
-	private bool builtTmpVarDecl = false;
-
 	
 	override @property string kind(){ return "struct literal"; }
 	override string toString(){ return strd.name.toString()~"("~join(map!(to!string)(args),",")~")"; }
@@ -4428,16 +4574,22 @@ enum ResolveConstructor = q{
 		mixin(IsDeclAccessible!q{bool b; decl, caggr});
 
 		if(!b){
+			// TODO: these errors must be delayed for struct fields
 			auto parent=caggr.scope_.getDeclaration();
 			assert(parent.isFunctionDecl()||
 			       parent.isReferenceAggregateDecl()&&caggr.isClassDecl());
-			if(parent.isFunctionDecl()){
-				sc.error(format("cannot construct local %s '%s' outside of its frame", caggr.kind, caggr.name), loc);
-			}else static if(is(typeof(this)==NewExp)){
-				sc.error(format("need 'this' pointer of type '%s' to construct nested class '%s'",parent.name, caggr.name), loc);
-			}else assert(0);
-					
-			mixin(ErrEplg);
+			static if(is(typeof(this)==NewExp)){
+				if(parent.isFunctionDecl()){
+					sc.error(format("cannot construct local %s '%s' outside of its frame", caggr.kind, caggr.name), loc);
+				}else{
+					sc.error(format("need 'this' pointer of type '%s' to construct nested class '%s'",parent.name, caggr.name), loc);
+				}
+				mixin(ErrEplg);
+			}else{
+				static assert(is(typeof(this)==StructConsExp));
+				// TODO: new expression should do this as well
+				contextIsNull = true;
+			}
 		}
 	}
 	if(!caggr.isStructDecl()||args.length){ // implicit default constructor
@@ -4484,9 +4636,11 @@ enum ResolveConstructor = q{
 mixin template Semantic(T) if(is(T==NewExp)){
 	Identifier constructor;
 	CallExp consCall;
+	Scope scope_;
 	
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		scope_ = sc;
 		if(a1.length){
 			sc.error("custom allocators are unsupported", a1[0].loc.to(a1[$-1].loc));
 			mixin(ErrEplg);
@@ -4712,8 +4866,10 @@ mixin template Semantic(T) if(is(T==ModuleIdentifier)){
 
 abstract class CurrentExp: Expression{
 	auto accessCheck = AccessCheck.all;
+	Scope scope_;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		scope_ = sc;
 		auto aggr=sc.getAggregate();
 		if(!aggr){
 			sc.error(format("invalid use of '%s' outside of an aggregate declaration", toString()), loc);
@@ -4732,10 +4888,18 @@ abstract class CurrentExp: Expression{
 		type = type.applyScopeSTC(sc);
 		mixin(SemEplg);
 	}
+
+	override bool isLvalue(){
+		assert(cast(AggregateTy)type.getHeadUnqual());
+		return !!(cast(AggregateTy)type.getHeadUnqual()).decl.isValueAggregateDecl();
+	}
+
 	abstract Dependent!Type determineType(Scope sc, AggregateDecl d);
 	override @property string kind(){ return "current object"; }
-}
 
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==CurrentExp)){}
 mixin template Semantic(T) if(is(T==ThisExp)){
 	protected override Dependent!Type determineType(Scope sc, AggregateDecl d){
 		return d.getType().independent!Type;
@@ -4899,11 +5063,20 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	private void thisCheck(Scope sc,Expression this_, Type thisType){
 		auto ttu = thisType.getUnqual();
 		if(!this_){
+			// statically bound calls to virtual member functions
+			if(auto fd=sc.getFunction())
 			if(auto decl=sc.getAggregate())
+			if(fd.scope_.getDeclaration() is decl)
 			if(auto raggr=decl.isReferenceAggregateDecl()){
 				auto etu = cast(Type)raggr.getType(); // cast is workaround for DMD bug
 				mixin(RefConvertsTo!q{bool conv; etu, ttu, 0});
 				if(conv) goto Lok;
+			}
+			// member function templates
+			if(auto sym=e1.isSymbol())
+			if(sym.meaning.isTemplateInstanceDecl()){
+				mixin(IsDeclAccessible!q{bool acc; sc.getDeclaration(), sym.meaning});
+				if(acc) goto Lok;
 			}
 			// error message duplicated in Symbol.semantic
 			sc.error(format("need 'this' to access %s '%s'",
@@ -6613,7 +6786,7 @@ mixin template Semantic(T) if(is(T==TypeofExp)){
 			mixin(RewEplg!q{r});
 		}+/
 
-		assert(!!e.type && e.type.sstate == SemState.completed,to!string(e)~" : "~to!string(e.type));
+		assert(!!f.type && f.type.sstate == SemState.completed,to!string(e)~" : "~to!string(f.type));
 
 		auto r=f.type;
 		mixin(RewEplg!q{r});
@@ -7106,6 +7279,7 @@ mixin template Semantic(T) if(is(T==Declaration)){
 			if(this is enc) return (!isAggregateDecl()).independent;
 			if(dl.stc & STCstatic) return false.independent;
 			if(auto fn=dl.isFunctionDef()) fn.canBeStatic = false;
+			// TODO: infer whether a template instantiation needs to be local or not
 		}
 		return true.independent;
 	}
@@ -7235,15 +7409,19 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			auto len = tp.length;
 			if(!tc) tc = New!TupleContext();
 			ExpTuple et = null;
+			TypeTuple tt = null;
 			if(init){
 				et=init.isExpTuple();
-				if(et){
-					if(len!=et.length){
+				if(!et) tt=init.type.isTypeTuple();
+				if(et||tt){
+					if(len!=(et?et.length:tt.length)){
 						sc.error(format("tuple of %d elements cannot be assigned to tuple of %d elements",et.length,len),loc);
 						mixin(ErrEplg);
 					}
 				}else{
-					init = et = New!ExpTuple(sc, len, init);
+					et = New!ExpTuple(sc, len, init);
+					et.loc = init.loc;
+					init = et;
 					mixin(SemChldPar!q{init});
 				}
 				// better error message for type mismatch:
@@ -7253,13 +7431,13 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				}
 				///
 			}
-			if(init) assert(et && et.length==len && init.sstate == SemState.completed);
+			if(init) assert(tt || et && et.length==len && init.sstate == SemState.completed);
 			// TODO: gc allocations
 			if(!tc.vds){
 				tc.vds = new VarDecl[cast(size_t)len];
 				foreach(i, ref x;tc.vds){
 					auto id  = name?New!Identifier("__tuple_"~name.name~"_"~to!string(i)):null;
-					auto ini = init?et.index(sc,init.loc,i):null;
+					auto ini = init&&et?et.index(sc,init.loc,i):null;
 					x = newVarDecl(stc, tp.index(sc,loc,i), id, ini);
 					x.sstate = SemState.begin;
 					x.loc = loc;
@@ -7287,6 +7465,11 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				tc.tupleAlias.scope_=scope_;
 			}
 			mixin(SemChld!q{tc.tupleAlias});
+			assert(!tt||cast(CallExp)init);
+			if(tt){
+				sstate = SemState.completed;
+				init = makeMultiReturn(cast(CallExp)cast(void*)init);
+			}
 			mixin(SemEplg); // Symbol will rewrite the meaning
 		}
 
@@ -7558,6 +7741,11 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 	}body{
 		auto r=aliasee.clone(sc, loc);
 		if(auto et=r.isExpTuple()) et.accessCheck=check;
+		// templated delegate literal expressions
+		if(auto add=r.isAddressExp()){
+			if(auto sym=add.e.isSymbol())
+				sym.accessCheck = check;
+		}
 		return r;
 	}
 
@@ -7673,23 +7861,22 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 	}
 	Vtbl vtbl;
-	private Dependent!void addToVtbl(FunctionDecl decl){
-		// inherit vtbl (need to wait until parent is finished with semantic)
+	private Dependent!ClassDecl inheritVtbl(){
 		ClassDecl parent;
 		if(isClassDecl()){
 			if(parents.length) findFirstNParents(1);
 			if(parents.length){
 				if(parents[0].needRetry||parents[0].sstate==SemState.error)
-					return Dependee(parents[0], scope_).dependent!void;
+					return Dependee(parents[0], scope_).dependent!ClassDecl;
 				if(rparents[0].sstate == SemState.error)
-					return Dependee(rparents[0], scope_).dependent!void;
+					return Dependee(rparents[0], scope_).dependent!ClassDecl;
 				assert(parents[0].sstate==SemState.completed);
 				assert(cast(AggregateTy)parents[0]&&cast(ReferenceAggregateDecl)(cast(AggregateTy)parents[0]).decl);
 				auto parentc = cast(ReferenceAggregateDecl)cast(void*)(cast(AggregateTy)cast(void*)parents[0]).decl;
 				if(auto cdecl=parentc.isClassDecl()){
 					parent = cdecl;
 					if(parent.needRetry||parent.sstate==SemState.error)
-						return Dependee(parent, parent.scope_).dependent!void;
+						return Dependee(parent, parent.scope_).dependent!ClassDecl;
 					if(!vtbl.length){
 						vtbl=parent.vtbl.dup;
 						vtbl.setInherited();
@@ -7697,13 +7884,25 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				}
 			}
 		}
+		return parent.independent;
+	}
 
+	final ClassDecl parentClass(){
+		if(!parents.length||!parents[0]||parents[0].sstate!=SemState.completed) return null;
+		assert(!!cast(AggregateTy)parents[0]);
+		return (cast(AggregateTy)cast(void*)parents[0]).decl.isClassDecl();
+	}
+
+	private mixin CreateBinderForDependent!("InheritVtbl","inheritVtbl");
+	private Dependent!void addToVtbl(FunctionDecl decl){
+		// inherit vtbl (need to wait until parent is finished with semantic)
+		mixin(InheritVtbl!q{ClassDecl parent; this});
 		OverloadSet set;
 		if(!parent) goto Lfresh;
 		auto ovscd = parent.asc.lookupHere(decl.name, null);
 		assert(!ovscd.dependee);
 		auto ovsc = ovscd.value;
-		if(!ovsc) goto Lfresh;
+		if(!ovsc||typeid(ovsc) is typeid(DoesNotExistDecl)) goto Lfresh;
 
 		set = ovsc.isOverloadSet();
 		if(!set) goto Lfresh;
@@ -7761,15 +7960,16 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		if(n<=knownParents) return;
 		alias scope_ sc;
 		if(!rparents) rparents = parents.map!(a=>a.ddup).array; // uncontrolled gc allocation
-		foreach(ref x; parents[knownParents..n]){
+		foreach(i,ref x; parents[knownParents..n]){
 			auto ty=x.typeSemantic(sc);
 			mixin(Rewrite!q{x});
-			if(x.sstate == SemState.error||x.sstate == SemState.completed) continue;
+			if(x.sstate == SemState.error) continue;
 			if(ty){
 				void check(Type ty){
 					auto agg = ty.isAggregateTy();
 					if(!agg||!agg.decl.isReferenceAggregateDecl()){
-						sc.error("base specifier must name a class or interface", x.loc);
+						sc.error("base specifier must name a class or interface",
+						         rparents[knownParents+i].loc);
 						mixin(SetErr!q{x});
 					}
 				}
@@ -7808,6 +8008,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	final override void finishInheritance(){
 		mixin CreateBinderForDependent!("CheckCircularInheritance", "checkCircularInheritance");
 		mixin(CheckCircularInheritance!q{_;this});
+		mixin(InheritVtbl!q{ClassDecl _; this});
 		if(!parents.length) goto Lvtbl;
 		assert(parents[0].sstate==SemState.error||!!cast(AggregateTy)parents[0]);
 		bool hasExplicitBaseClass = false;
@@ -7842,8 +8043,10 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 		foreach(x; vtbl.vtbl){
 			if(x.state == VtblState.needsOverride){
-				mixin(Lookup!q{auto ovsc; asc, x.fun.name, null});
-				assert(!!ovsc);
+				auto ovscd = asc.lookupHere(x.fun.name, null);
+				assert(!ovscd.dependee);
+				auto ovsc = ovscd.value;
+				assert(!!ovsc && typeid(ovsc) !is typeid(DoesNotExistDecl));
 				auto ovs = ovsc.isOverloadSet();
 				assert(!!ovs);
 				FunctionDecl fun;
@@ -7892,12 +8095,22 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		stack.insert(this); scope(exit) stack.remove(this);
 		findParents();
 		foreach(i,ref x;parents){
-			if(x.sstate != SemState.completed || rparents[i].sstate == SemState.error) continue;
-			assert(!!cast(AggregateTy)x&&cast(ReferenceAggregateDecl)(cast(AggregateTy)x).decl,text(typeid(x)," ",x.sstate));
-			auto rad =
-				cast(ReferenceAggregateDecl)cast(void*)
-				(cast(AggregateTy)cast(void*)x)
-				.decl;
+			if(rparents[i].sstate == SemState.error) continue;
+			ReferenceAggregateDecl rad;
+			if(x.sstate == SemState.completed){
+				assert(!!cast(AggregateTy)x&&cast(ReferenceAggregateDecl)(cast(AggregateTy)x).decl,text(typeid(x)," ",x.sstate));
+				rad =
+					cast(ReferenceAggregateDecl)cast(void*)
+					(cast(AggregateTy)cast(void*)x)
+					.decl;
+			}else if(auto fe=x.isFieldExp()){
+				//hack: peek into ongoing template instantiations
+				if(fe.e2.meaning)
+				if(auto rd = fe.e2.meaning.isReferenceAggregateDecl())
+					rad = rd;
+				if(!rad) continue;
+			}else continue;
+			assert(!!rad);
 			auto t=rad.isSubtypeOfImpl(rhs,stack,failed).prop;
 			if(failed){
 				scope_.error("circular inheritance",rparents[i].loc);
@@ -7908,7 +8121,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			}
 			if(t) return t;
 		}
-		// TODO: return a dummy that wakes up when ANY parent finishes analysis
+		// TODO: template instances should wake up their dependees when meanings become clear
 		if(auto x=unresolvedParent()) return multidep(cast(Node[])parents, scope_).dependent!bool;
 		return false.independent;
 	}
@@ -8069,6 +8282,7 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 	 */
 
 	void layoutChanged(){
+		updateVersion();
 		layoutKnown = false;
 	}
 
@@ -8078,7 +8292,7 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 
 private:
 	AggregateTy type;
-	bool layoutKnown = true;
+	bool layoutKnown = false;
 }
 
 mixin template Semantic(T) if(is(T==Declarators)){
@@ -8092,6 +8306,11 @@ mixin template Semantic(T) if(is(T==Declarators)){
 		mixin(SemPrlg);
 		mixin(SemChld!q{decls});
 		mixin(SemEplg);
+	}
+
+	override int traverseInOrder(scope int delegate(Declaration) dg){
+		foreach(x; decls) if(auto r=x.traverseInOrder(dg)) return r;
+		return 0;
 	}
 }
 
@@ -8181,6 +8400,7 @@ class OverloadSet: Declaration{ // purely semantic node
 				if(rconv) swap(decl, decls[num++]);
 			}
 		}
+
 		//dw((cast(FunctionDecl)decls[0]).type.params.map!(a=>a.type)[0].equals(fun.type.params.map!(a=>a.type)[0]));
 		if(!num){
 			// this error message is duplicated in OverloadSet.determineOverride
@@ -8612,6 +8832,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 					if(!eponymous.length) eponymous = new Expression[](iftis.length);
 					// this creates identifiers without location, as we don't want those
 					// to show up in circular dependency traces
+					// TODO: accessCheck?
 					eponymous[i]=New!(BinaryExp!(Tok!"."))(New!Symbol(x), New!Identifier(x.name.name));
 					continue;
 				}
@@ -8923,7 +9144,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 					auto hstcstr=hstc?"qualified '"~STCtoString(hstc)~"'":"unqualified";
 					auto fstcstr=fstc?"'"~STCtoString(fstc)~"'":"unqualified";
 
-					sc.error(format("incompatible 'this' pointer is %s, but %s is required",hstcstr, fstcstr), loc);
+					sc.error(format("'this' reference is %s, but %s is required", hstcstr, fstcstr), loc);
 				}
 					
 			}
@@ -8999,6 +9220,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 
 		auto uexp   = New!(UnaryExp!(Tok!"&"))(New!Identifier(name.name));
 		uexp.brackets++;
+
 		auto alias_ = New!AliasDecl(STC.init, New!VarDecl(STC.init,uexp,New!Identifier(tmplname),Expression.init));
 
 		static class FunclitTemplateDecl: TemplateDecl{

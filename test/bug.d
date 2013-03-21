@@ -1,4 +1,10 @@
 
+
+/+
+/+auto intarrlen = int[].length;+/
+
+/+
+
 /+// TODO: this must work! (need notion of potential indirections to support this)
 pragma(msg, {
 	string x = "123";
@@ -80,6 +86,141 @@ auto testcallCC(){
 }+/
 
 // ok now
+
+struct TestInheritIsExp{
+	class A{ static assert(is(E: A)); }
+	class D(): A{}
+	class E: D!(){}
+	pragma(msg, is(E:A));	
+}
+
+
+void testMemberFunctionTemplate(){
+	struct S{
+		int x;
+		bool g()(){
+			return !!x;
+		}
+		bool f(){return g!()();}
+	}
+	static assert({S s; s.x=1; return s.f();}());
+}
+
+enum x = (cast(ulong)0x10009 >> 1) == 0x8004;
+
+
+void testOverrideSkip(){
+	class P{ int foo(){ return 2; }}
+	class C6: P{}
+	class C7: C6{ override int foo(){ return 3; }}
+}
+
+static assert(!is(typeof({
+auto recc2(R)(R foo)=>recc2!R(foo);
+pragma(msg, recc2!int);
+})));
+
+
+static assert(!is(typeof({
+auto recc(R)(R foo)=>recc(foo);
+pragma(msg, recc!int);
+})));
+
+struct TupleExpand{
+	template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+	
+	auto callCC(T...)(T args){
+		Cont!(int,int) delegate(Cont!(int,int) delegate(int),int) f;
+		return (int delegate(int) k)=>f(a=>_=>k(a), args)(k);
+	}
+	
+	auto testcallCC(){
+		assert(callCC(1)(x=>x)==1);
+	}
+}
+
+
+
+static assert(!is(typeof({
+int testStructMemberAliasParam(){
+	int x;
+	struct S{
+		void bar(int x){ foo((a)=>a=x); }
+		void foo(alias a)(){ a(x); }
+	}
+}})));
+
+
+template filter(alias a){
+	auto filter(){
+		auto r = Filter();
+		assert(r.x==2);
+		r.range = dynRange();
+		assert(r.x==2);
+		r.popFront();
+		return r;
+	}
+	static struct Filter{
+		int x=2;
+		DynRange!int range;
+		void popFront(){
+			range.popFront2();
+		}
+	}
+}
+
+
+struct DynRange(T){
+	DynRange!T delegate() popFrontImpl;
+	void popFront2(){
+		auto u = popFrontImpl();
+	}
+}
+
+DynRange!int dynRange(){
+	DynRange!int result;
+	auto retres()=>result;
+	result.popFrontImpl = &retres;
+	return result;
+}
+
+auto crash(){
+	auto foo(int a){ return a; }
+	auto r=filter!foo();
+	return 0;
+}
+pragma(msg, "crash: ", crash());
+
+
+int dontTouchThis(alias a)(){
+
+	static struct S{
+		int foo(){
+			pragma(msg, typeof(a(2))); // TODO: this should work
+			static assert(!is(typeof({return a(2);})));
+			return 2;
+		}
+	}
+	S s;
+	return s.foo();
+}
+
+int nanana(){
+	int x=3;
+	auto goo(T)(T a)=>a+x;
+	return dontTouchThis!(a=>a+x)();
+}
+pragma(msg, "nanana: ", nanana());
+
+
+auto ttex(){
+	int start=2;
+	auto exec(alias a)(){return a(2); }
+	return exec!(a=>a%start)();
+}
+static assert(ttex()==0);
+pragma(msg, "ttex: ",ttex());
+
 
 template Seq(T...){alias T Seq;}
 template StaticFilter(alias F, a...){
@@ -277,6 +418,7 @@ typeof(y) z;
 
 static assert(is(typeof({int delegate(int) dg = x=>2;})));
 
+// +/
 // +/
 
 alias immutable(char)[] string;

@@ -115,12 +115,17 @@ abstract class Expression: Node{
 		Symbol,
 		Identifier,
 		FieldExp,
+		SuperExp,
+		TemplateInstanceExp,
 		IndexExp,
 		LiteralExp,
 		ArrayLiteralExp,
 		FunctionLiteralExp,
 		VoidInitializerExp,
+		TemporaryExp,
 		StructConsExp,
+		CallExp,
+		MultiReturnValueExp,
 		TernaryExp,
 		CastExp,
 		Type,
@@ -240,6 +245,8 @@ class ThisExp: CurrentExp{
 }
 class SuperExp: CurrentExp{
 	override string toString(){ return "super"; }
+
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 // special symbols that are used like identifiers in some contexts
@@ -357,7 +364,7 @@ class SliceExp: Expression, DollarProvider{//e[l..r]
 
 	mixin Visitors;
 }
-class CallExp: Expression{
+class CallExp: TemporaryExp{
 	Expression e;
 	Expression[] args;
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
@@ -365,6 +372,7 @@ class CallExp: Expression{
 
 	override @property string kind(){return "function call result";} // TODO: 'struct literal'
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class TemplateInstanceExp: Expression{

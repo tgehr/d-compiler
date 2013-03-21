@@ -1491,7 +1491,7 @@ private struct Parser{
 	}
 	Expression parseDebugCondition(){return parseVersionCondition(false);}
 	Statement parseCondDeclBody(int flags){ // getParseProc fills in an argument called 'flags'
-		if(flags&allowstm) return parseStatement();
+		if(flags&allowstm) return ttype==Tok!"{"?parseCompoundStm():parseStatement();
 		else return parseDeclDef(allowcompound);
 	}
 	enum{tryonly=1, allowcompound=2, allowstm=4}

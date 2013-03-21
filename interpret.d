@@ -10,7 +10,7 @@ private template NotYetImplemented(T){
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp);
 }
 
 enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
@@ -521,6 +521,14 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e1,e2,e3});}
 }
 
+mixin template Interpret(T) if(is(T==TemporaryExp)){}
+
+mixin template Interpret(T) if(is(T==StructConsExp)){
+	override void interpret(Scope sc){
+		return; // TODO!
+	}
+}
+
 mixin template Interpret(T) if(is(T==CallExp)){
 	private Variant val;
 	override bool checkInterpret(Scope sc){
@@ -573,8 +581,10 @@ mixin template Interpret(T) if(is(T==CallExp)){
 			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
 			mixin(PropRetry!q{e.node});
-		}catch(Exception){
+		}catch(UnwindException){
 			sc.note("during evaluation requested here", loc);
+			mixin(ErrEplg);
+		}catch(SilentUnwindException){
 			mixin(ErrEplg);
 		}
 	}
@@ -585,6 +595,8 @@ private:
 }
 
 class CTFERetryException: Exception{Node node;this(Node n){super("");node = n;}}
+class UnwindException: Exception{this(){super("");}}
+class SilentUnwindException: Exception{this(){super("");}}
 
 // bytecode interpreter for functions
 import expression, declaration, statement;
@@ -774,6 +786,9 @@ enum Instruction : uint{
 	storef,                    // args: off, len, pop data and pointer and store to field
 	storefkr,
 	storefkv,
+	ptrf,
+	// virtual methods
+	fetchvtbl,
 	// error handling table
 	errtbl,
 }
@@ -829,7 +844,9 @@ size_t numArgs(Instruction inst){
 		 I.loadap: 1, I.ptrtoa: 0, I.addp: 1,
 		 I.cmpep: 0, I.cmpbp: 0, I.cmpbep: 0, I. cmpnep: 0, I.cmpap: 0, I.cmpaep: 0,
 		 // field operations
-		 I.loadf: 2, I.loadfkr, I.storef: 2, I.storefkr: 2, I.storefkv: 2,
+		 I.loadf: 2, I.loadfkr: 2, I.storef: 2, I.storefkr: 2, I.storefkv: 2, I.ptrf: 2,
+		 // virtual methods
+		 I.fetchvtbl: 1,
 		 // error handling table
 		 I.errtbl: 0,
 		 ];
@@ -842,6 +859,10 @@ bool isUnsafe(Instruction inst){
 	static bool[] fail =
 		[// flow control
 		 I.hlt: 1, I.hltstr:1, I.call: 1,
+		 // stack control
+		 I.pushcn: 1, I.popcn: 1, I.popckvn: 1, I.popckrn: 1,
+		 I.pushccn: 1, I.popccn: 1, I.popcckvn: 1, I.popcckrn: 1,
+		 I.ptrfc: 1, I.ptrfcc: 1, I.pushcontext: 1,
 		 // arithmetics
 		 I.divi: 1, I.divsi: 1, I.modi: 1, I.modsi: 1,
 		 I.shl32: 1, I.shr32: 1, I.sar32: 1, I.shl64: 1, I.shr64: 1, I.sar64: 1,
@@ -850,6 +871,8 @@ bool isUnsafe(Instruction inst){
 		 I.loadaa: 1, I.loadaak: 1, I.storeaa: 1, I.storeaakr: 1, I.storeaakv: 1,
 		 // pointer operations
 		 I.loadap: 1, I.ptrtoa: 1,
+		 // field operations
+		 I.loadf: 1, I.loadfkr: 1, I.storef: 1, I.storefkr: 1, I.storefkv: 1, I.ptrf: 1,
 		 I.max: 0
 		 ];
 	return fail[inst];
@@ -903,7 +926,10 @@ struct Stack{
 	void pushRaw(void[] c){
 		auto sz = (ulong.sizeof-1+c.length)/ulong.sizeof;
 		foreach(i;0..sz) pushl(0);
-		(cast(void[])stack[stp+1-sz..stp+1])[0..c.length]=c[];
+		//(cast(void[])stack[stp+1-sz..stp+1])[0..c.length]=c[];
+		// we want to allow overlapping copies here
+		import core.stdc.string;
+		memmove(stack.ptr+stp+1-sz, c.ptr, (cast(void[])c).length);
 	}
 	void[] popRawSliceStack(size_t size){
 		auto sz = (ulong.sizeof-1+size)/ulong.sizeof;
@@ -1004,7 +1030,7 @@ struct ByteCodeBuilder{
 		emitUnsafe(Instruction.hlt, erri);
 	}
 
-	void emit(Instruction inst)in{assert(!isUnsafe(inst));}body{
+	void emit(Instruction inst)in{assert(!isUnsafe(inst), to!string(inst)~" is unsafe");}body{
 		assert(byteCode.length<ulong.max); // TODO: add this restriction explicitly
 		iloc = byteCode.length;
 		byteCode~=inst;
@@ -1175,93 +1201,100 @@ abstract class LValueStrategy{
 
 	abstract void emitPointer(ref ByteCodeBuilder);
 
-	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len){
+	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, ErrorInfo info){
 		emitPointer(bld);
-		static class FieldLV: LValueStrategy{
-			size_t off, len;
-			LValueStrategy outer;
-			override void emitStore(ref ByteCodeBuilder bld){
-				bld.emit(Instruction.storef);
-				bld.emitConstant(off);
-				bld.emitConstant(len);		
-			}
-			override void emitStoreKR(ref ByteCodeBuilder bld){
-				bld.emit(Instruction.storefkr);
-				bld.emitConstant(off);
-				bld.emitConstant(len);				
-			}
-			override void emitStoreKV(ref ByteCodeBuilder bld){
-				bld.emit(Instruction.storefkv);
-				bld.emitConstant(off);
-				bld.emitConstant(len);				
-			}
-			override void emitLoad(ref ByteCodeBuilder bld){
-				bld.emit(Instruction.loadf);
-				bld.emitConstant(off);
-				bld.emitConstant(len);
-			}
-			override void emitLoadKR(ref ByteCodeBuilder bld){
-				bld.emit(Instruction.loadfkr);
-				bld.emitConstant(off);
-				bld.emitConstant(len);
-			}
-			override void emitPointer(ref ByteCodeBuilder bld){
-				outer.emitPointer(bld);
-				bld.emit(Instruction.push);
-				bld.emitConstant(off);
-				bld.emit(Instruction.addp);
-				bld.emitConstant(ulong.sizeof);
-			}
-		}
-		auto r = new FieldLV();
-		r.off=off; r.len=len; r.outer=this;
+		auto r = LVfield(off, len, info);
 		return r;
 	}
 }
+static class LVfield: LValueStrategy{
+	size_t off, len;
+	ErrorInfo info;
+	static opCall(size_t off, size_t len, ErrorInfo info){
+		return new LVfield(off, len, info);
+	}
+	private this(size_t off, size_t len, ErrorInfo info){
+		this.off=off;
+		this.len=len;
+		this.info=info;
+	}
+	override void emitStore(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.storef, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+	override void emitStoreKR(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.storefkr, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+	override void emitStoreKV(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.storefkv, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+	override void emitLoad(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.loadf, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+	override void emitLoadKR(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.loadfkr, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+	override void emitPointer(ref ByteCodeBuilder bld){
+		bld.emitUnsafe(Instruction.ptrf, info);
+		bld.emitConstant(off);
+		bld.emitConstant(len);
+	}
+}
 
-auto LVpopcc(Type elty){
-	return new LVpopc(getBCSizeof(elty), getCTSizeof(elty), true);
+auto LVpopcc(Type elty, ErrorInfo info){
+	return new LVpopc(getBCSizeof(elty), getCTSizeof(elty), info, true);
 }
 
 class LVpopc: LValueStrategy{
 	ulong n;
 	size_t ctsiz;
+	ErrorInfo info;
 	bool iscc;
-	static opCall(Type elty){
-		return new LVpopc(getBCSizeof(elty), getCTSizeof(elty), false);
+	static opCall(Type elty, ErrorInfo info){
+		return new LVpopc(getBCSizeof(elty), getCTSizeof(elty), info, false);
 	}
 
-	private this(ulong nn,size_t ct, bool iscc){
+	private this(ulong nn,size_t ct, ErrorInfo inf, bool iscc){
 		n = nn;
 		ctsiz=ct;
+		info = inf;
 		this.iscc=iscc;
 	}
 
 	override void emitStore(ref ByteCodeBuilder bld){
-		bld.emit(iscc?Instruction.popccn:Instruction.popcn);
+		bld.emitUnsafe(iscc?Instruction.popccn:Instruction.popcn, info);
 		bld.emitConstant(n);
 	}
 	override void emitStoreKR(ref ByteCodeBuilder bld){
-		bld.emit(iscc?Instruction.popcckrn:Instruction.popckrn);
+		bld.emitUnsafe(iscc?Instruction.popcckrn:Instruction.popckrn, info);
 		bld.emitConstant(n);
 	}
 	override void emitStoreKV(ref ByteCodeBuilder bld){
-		bld.emit(iscc?Instruction.popcckvn:Instruction.popckvn);
+		bld.emitUnsafe(iscc?Instruction.popcckvn:Instruction.popckvn, info);
 		bld.emitConstant(n);
 	}
 
 	override void emitLoad(ref ByteCodeBuilder bld){
-		bld.emit(iscc?Instruction.pushccn:Instruction.pushcn);
+		bld.emitUnsafe(iscc?Instruction.pushccn:Instruction.pushcn, info);
 		bld.emitConstant(n);
 	}
 	override void emitLoadKR(ref ByteCodeBuilder bld){
 		bld.emitDup(iscc?2:1); // duplicate address
-		bld.emit(iscc?Instruction.pushccn:Instruction.pushcn);
+		bld.emitUnsafe(iscc?Instruction.pushccn:Instruction.pushcn, info);
 		bld.emitConstant(n);
 	}
 
 	override void emitPointer(ref ByteCodeBuilder bld){
-		bld.emit(iscc?Instruction.ptrfcc:Instruction.ptrfc);
+		bld.emitUnsafe(iscc?Instruction.ptrfcc:Instruction.ptrfc, info);
 		bld.emitConstant(ctsiz);
 	}
 }
@@ -1283,7 +1316,7 @@ class LVpopr: LValueStrategy{
 		else{
 			bld.emit(Instruction.poprn);
 			bld.emitConstant(n);
-		}		
+		}
 	}
 	override void emitStoreKR(ref ByteCodeBuilder bld){
 		if(n==1) bld.emit(Instruction.poprkr);
@@ -1301,7 +1334,7 @@ class LVpopr: LValueStrategy{
 			bld.emitConstant(n);
 		}
 	}
-	
+
 	override void emitLoad(ref ByteCodeBuilder bld){
 		if(n==1) bld.emit(Instruction.pushr);
 		else if(n==2) bld.emit(Instruction.pushr2);
@@ -1324,7 +1357,7 @@ class LVpopr: LValueStrategy{
 		assert(0, "cannot create stack references");
 	}
 
-	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len){
+	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, ErrorInfo){
 		assert(off+len<=n);
 		static class FieldLV: LVpopr{
 			size_t off;
@@ -1367,7 +1400,7 @@ class LVpopr: LValueStrategy{
 	}
 }
 
-LVstorea LVpointer(Type elty, ErrorInfo info){ // TODO: allow manipulating ptrs directly
+LVstorea LVpointer(Type elty, ErrorInfo info){ // TODO: use loadf and storef
 	return new LVstorea(elty, info, true);
 }
 class LVstorea: LValueStrategy{
@@ -1521,7 +1554,7 @@ class LVlength: LValueStrategy{
 		bld.emit(Instruction.lengtha);
 		bld.emitConstant(els);
 	}
-	
+
 	override void emitPointer(ref ByteCodeBuilder bld){
 		assert(0, "cannot take the address of an array length");
 	}
@@ -1552,6 +1585,24 @@ bool _displayByteCode = false;
 bool _displayByteCodeIntp = false;
 
 import error;
+
+template CheckPointer(string s) if(s.split(",").length==3){
+	enum ss = s.split(",");
+	enum ptr = ss[0];
+	enum off = ss[1];
+	enum len = ss[2];
+	enum CheckPointer = mixin(X!q{
+		{ alias @(ptr) r;
+		if(r.ptr<r.container.ptr || cast(ulong*)r.ptr+@(off)+@(len)>cast(ulong*)(r.container.ptr+r.container.length)){
+			tmp[0] = r.ptr is null;
+			tmp[1] = r.container.length&&r.ptr == r.container.ptr+r.container.length; // off by one at the end
+			tmp[2] = cast(ulong)r.ptr;
+			tmp[3] = cast(ulong)r.container.ptr; // for checking of off by one at the beg.
+			goto Linvalidpointer;
+		}}
+	});
+}
+
 void doInterpret(ByteCode byteCode, ref Stack stack, ErrorHandler handler)in{
 	assert(stack.stack.length>0);
 }body{
@@ -1601,19 +1652,20 @@ Ltailcall:
 				Symbol sym = cast(Symbol)cast(void*)stack.pop();
 
 				if(!sym) goto Lnullfunction;
-				
-				sym.makeStrong();
-				// TODO: allow detailed discovery of circular dependencies
-				sym.semantic(sym.scope_);
-				Expression e = sym;
-				mixin(Rewrite!q{e});
-				assert(!!cast(Symbol)e);
-				sym = cast(Symbol)cast(void*)e;
-
-				if(sym.needRetry){
-					// TODO: make as unlikely as possible
-					throw new CTFERetryException(sym);
+				if(sym.meaning.sstate != SemState.completed){
+					sym.makeStrong();
+					// TODO: allow detailed discovery of circular dependencies
+					sym.semantic(sym.scope_);
+					Expression e = sym;
+					mixin(Rewrite!q{e});
+					assert(!!cast(Symbol)e);
+					sym = cast(Symbol)cast(void*)e;
+					if(sym.needRetry){
+						// TODO: make as unlikely as possible
+						throw new CTFERetryException(sym);
+					}
 				}
+
 				if(sym.sstate == SemState.error) goto Linvfunction;
 				assert(cast(FunctionDef)sym.meaning);
 				FunctionDef def = cast(FunctionDef)cast(void*)sym.meaning;
@@ -1687,9 +1739,12 @@ Ltailcall:
 				break;
 
 			case I.pushcn:
-				auto ctx = cast(ulong*)stack.stack[nargs-1];
+				auto bcctx = *cast(BCPointer*)&stack.stack[nargs-bcPointerBCSize];
+				auto ctx = cast(ulong*)bcctx.ptr;
+				auto ctxc = cast(ulong[])bcctx.container;
 				auto n = cast(size_t)byteCode[ip++];
 				auto loc = cast(size_t)stack.pop();
+				mixin(CheckPointer!q{bcctx, loc, n});
 				foreach(i;0..n) stack.push(ctx[loc++]);
 				break;
 			case I.popckvn:
@@ -1697,9 +1752,12 @@ Ltailcall:
 			case I.popckrn:
 				keepr = true; goto case I.popcn;
 			case I.popcn:
-				auto ctx = cast(ulong*)stack.stack[nargs-1];
+				auto bcctx = *cast(BCPointer*)&stack.stack[nargs-bcPointerBCSize];
+				auto ctx = cast(ulong*)bcctx.ptr;
 				auto n = cast(size_t)byteCode[ip++];
-				auto loc = cast(size_t)stack.stack[stack.stp-n]+n;
+				auto loc = cast(size_t)stack.stack[stack.stp-n];
+				mixin(CheckPointer!q{bcctx, loc, n});
+				loc+=n;
 				foreach(i;0..n) ctx[--loc]=stack.pop();
 				if(keepr) keepr = false;
 				else stack.pop(); // throw away loc
@@ -1709,26 +1767,35 @@ Ltailcall:
 				}
 				break;
 			case I.pushccn:
-				auto ctx = cast(ulong*)stack.stack[0];
+				auto ctx = *cast(BCPointer*)&stack.stack[0];
 				auto n = cast(size_t)byteCode[ip++];
 				auto numc = cast(size_t)stack.pop();
 				assert(numc>0);
 				auto loc = cast(size_t)stack.pop();
-				foreach(i;1..numc) ctx = cast(ulong*)*ctx;
-				foreach(i;0..n) stack.push(ctx[loc++]);
+				foreach(i;1..numc){
+					mixin(CheckPointer!q{ctx, 0, bcPointerBCSize});
+					ctx = *cast(BCPointer*)ctx.ptr;
+				}
+				mixin(CheckPointer!q{ctx, loc, n});
+				foreach(i;0..n) stack.push((cast(ulong*)ctx.ptr)[loc++]);
 				break;
 			case I.popcckvn:
 				keepv = true; goto case I.popccn;
 			case I.popcckrn:
 				keepr = true; goto case I.popccn;
 			case I.popccn:
-				auto ctx = cast(ulong*)stack.stack[0];
+				auto ctx = *cast(BCPointer*)&stack.stack[0];
 				auto n = cast(size_t)byteCode[ip++];
 				auto numc = cast(size_t)stack.stack[stack.stp-n];
 				assert(numc>0);
-				auto loc = cast(size_t)stack.stack[stack.stp-n-1]+n;
-				foreach(i;1..numc) ctx = cast(ulong*)*ctx;
-				foreach(i;0..n) ctx[--loc]=stack.pop();
+				auto loc = cast(size_t)stack.stack[stack.stp-n-1];
+				foreach(i;1..numc){
+					mixin(CheckPointer!q{ctx, 0, bcPointerBCSize});
+					ctx = *cast(BCPointer*)ctx.ptr;
+				}
+				mixin(CheckPointer!q{ctx, loc, n});
+				loc+=n;
+				foreach(i;0..n) (cast(ulong*)ctx.ptr)[--loc]=stack.pop();
 				if(keepr) keepr = false;
 				else{
 					stack.pop();
@@ -1736,34 +1803,40 @@ Ltailcall:
 				}
 				if(keepv){
 					keepv = false;
-					foreach(i;0..n) stack.push(ctx[loc++]);
+					foreach(i;0..n) stack.push((cast(ulong*)ctx.ptr)[loc++]);
 				}
 				break;
 			case I.ptrfc:
-				auto ctx = cast(void*)stack.stack[nargs-1];
+				auto ctx = *cast(BCPointer*)&stack.stack[nargs-bcPointerBCSize];
 				auto siz = cast(size_t)byteCode[ip++];
 				auto loc = cast(size_t)stack.pop();
-				void[] r = (ctx+loc*ulong.sizeof)[0..siz];
+				mixin(CheckPointer!q{ctx, loc, (siz+ulong.sizeof-1)/ulong.sizeof});
+				void[] r = (ctx.ptr+loc*ulong.sizeof)[0..siz];
 				stack.push(BCPointer(r, r.ptr));
 				break;
 			case I.ptrfcc:
-				auto ctx = cast(void*)stack.stack[0];
+				auto ctx = *cast(BCPointer*)&stack.stack[0];
 				auto siz = cast(size_t)byteCode[ip++];
 				auto numc = cast(size_t)stack.pop();
 				assert(numc>0);
 				auto loc = cast(size_t)stack.pop();
-				foreach(i;1..numc) ctx = *cast(void**)ctx;
-				void[] r = (ctx+loc*ulong.sizeof)[0..siz];
+				foreach(i;1..numc){
+					mixin(CheckPointer!q{ctx, 0, bcPointerBCSize});
+					ctx = *cast(BCPointer*)ctx.ptr;
+				}
+				void[] r = (ctx.ptr+loc*ulong.sizeof)[0..siz];
 				stack.push(BCPointer(r, r.ptr));
 				break;
 			case I.pushcontext:
 				auto numc = cast(size_t)byteCode[ip++];
-				if(!numc) stack.push(stack.stack[nargs-1]);
+				if(!numc) stack.push(*cast(BCPointer*)&stack.stack[nargs-bcPointerBCSize]);
 				else{
-					auto ctx = cast(ulong*)stack.stack[0];
-					foreach(i;1..numc) ctx = cast(ulong*)*ctx;
-					static assert((ulong*).sizeof<=ulong.sizeof);
-					stack.push(cast(ulong)ctx);
+					auto ctx = *cast(BCPointer*)&stack.stack[0];
+					foreach(i;1..numc){
+						mixin(CheckPointer!q{ctx, 0, bcPointerBCSize});
+						ctx = *cast(BCPointer*)ctx.ptr;
+					}
+					stack.push(ctx);
 				}
 				break;
 			case I.pushr:
@@ -1908,10 +1981,9 @@ Ltailcall:
 				break;
 			case I.allocc: // heap allocation of context
 				auto amt = cast(size_t)byteCode[ip++];
-				auto ctx = cast(ulong[])(new void[amt*ulong.sizeof]);
-				static assert((ulong*).sizeof<=ulong.sizeof);
-				stack.push(cast(ulong)ctx.ptr);
-				nargs++;
+				auto ctx = new void[amt*ulong.sizeof];
+				stack.push(BCPointer(ctx, ctx.ptr));
+				nargs+=bcPointerBCSize;
 				break;
 			// temporaries
 			case I.tmppush:
@@ -2329,14 +2401,13 @@ Ltailcall:
 				auto off = cast(size_t)byteCode[ip++];
 				auto len = cast(size_t)byteCode[ip++];
 				auto bptr = stack.pop!BCPointer();
-				assert(cast(ulong*)bptr.ptr+off+len <=
-				       cast(ulong*)(bptr.container.ptr+bptr.container.length));
 				auto ptr = cast(ulong*)bptr.ptr;
-				foreach(i;off..off+len) stack.push(ptr[i]);
 				if(keepr){
 					stack.push(bptr);
 					keepr = false;
 				}
+				mixin(CheckPointer!q{bptr, off, len});
+				foreach(i;off..off+len) stack.push(ptr[i]);
 				break;
 			case I.storefkr:
 				keepr = true; goto case I.storef;
@@ -2348,18 +2419,32 @@ Ltailcall:
 				auto data = stack.stack[stack.stp+1-len..stack.stp+1];
 				stack.stp -= len;
 				auto bptr = stack.pop!BCPointer();
-				assert(cast(ulong*)bptr.ptr+off+len <=
-				       cast(ulong*)(bptr.container.ptr+bptr.container.length));
 				auto ptr = cast(ulong*)bptr.ptr;
-				foreach(i,x;data) ptr[i]=x;
 				if(keepr){
 					stack.push(bptr);
 					keepr=false;
 				}
+				mixin(CheckPointer!q{bptr, off, len});
+				foreach(i,x;data) ptr[off+i]=x;
 				if(keepv){
 					stack.pushRaw(data);
 					keepv=false;
 				}
+				break;
+			case I.ptrf:
+				auto off = cast(size_t)byteCode[ip++];
+				auto len = cast(size_t)byteCode[ip++];
+				auto ptr = stack.pop!BCPointer();
+				import std.algorithm: min;
+				stack.push(BCPointer((cast(ulong[])ptr.container)[min(off,$)..min(off+len,$)],
+				                     cast(ulong*)ptr.ptr+off));
+				break;
+			// virtual methods
+			case I.fetchvtbl:
+				auto index = cast(size_t)byteCode[ip++];
+				auto aggr = cast(ReferenceAggregateDecl)cast(void*)stack.pop();
+				static assert(Symbol.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
+				stack.push(cast(ulong)cast(void*)aggr.bcFetchVTBL(index));
 				break;
 			case I.errtbl:
 				assert(0);
@@ -2401,6 +2486,7 @@ Linvalidpointer:
 	bool offby1=cast(bool)tmp[1];
 	if(!offby1){
 		auto exp=cast(Expression)info3;
+		if(!exp.type.isFunctionTy())// TODO: this should not even be reached
 		if(exp && tmp[2]+getCTSizeof(exp.type)==tmp[3]) offby1 = true;
 	}
 	handler.error(format("%s pointer dereference%s",tmp[0]?"null":"invalid",offby1?" (off by one)":""), info3.loc);
@@ -2437,11 +2523,11 @@ Lhltstr:
 	string err = cast(string)stack.pop!BCSlice().slice;
 	handler.error(err, hltsinfo.loc);
 Lfail:
-	throw new Exception("");
+	throw new UnwindException();
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==AggregateTy)&&!is(T==StructConsExp)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2474,7 +2560,6 @@ mixin template CTFEInterpret(T) if(is(T==ExpTuple)){
 		foreach(x; exprs) x.byteCompile(bld);
 	}
 }
-
 
 mixin template CTFEInterpret(T) if(is(T==EmptyStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){ /+ ; +/ }
@@ -2523,8 +2608,7 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 		static void emitAddressOf(ref ByteCodeBuilder bld, Expression e){
 			auto tu = e.type.getHeadUnqual();
 			if(tu.isFunctionTy()){
-				assert(!!cast(Symbol)e);
-				auto s = (cast(Symbol)cast(void*)e);
+				assert(cast(Symbol)e||cast(FieldExp)e);
 				e.byteCompile(bld);
 			}else{
 				auto strat = e.byteCompileLV(bld);
@@ -2989,13 +3073,13 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			void removeReinterpretCast(ref Expression exp, Expression other){
 				if(exp.type is other.type.getElementType()) return;
 				if(auto ce=exp.isCastExp()){
-					if(ce.type.getUnqual() is ce.e.type.getUnqual()) 
-						exp = ce.e;	
+					if(ce.type.getUnqual() is ce.e.type.getUnqual())
+						exp = ce.e;
 				}
 			}
 			removeReinterpretCast(exp1, exp2);
 			removeReinterpretCast(exp2, exp1);
-				
+
 			exp1.byteCompile(bld);
 			if(e1.type is e2.type.getElementType())
 				emitMakeArray(bld,e2.type,1);
@@ -3088,7 +3172,6 @@ mixin template CTFEInterpret(T) if(is(T==ExpressionStm)){
 		auto l = getBCSizeof(e.type);
 		if(~l) bld.ignoreResult(l);
 		else bld.emitUnsafe(Instruction.hlt, e); // TODO: probably redundant
-
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==IfStm)){
@@ -3360,11 +3443,11 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		//if(t1.isPointerTy() && t2.isPointerTy()) return;
 		bld.error(format("cannot interpret cast from '%s' to '%s' at compile time", e.type,type),loc);
 	}
-	
+
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		assert({
 			auto rcd1=e.type.refConvertsTo(type,1);   // ref params
-			auto rcd2= type.refConvertsTo(type,1); // out params	
+			auto rcd2= type.refConvertsTo(type,1); // out params
 			assert(!rcd1.dependee&&!rcd2.dependee);
 			return rcd1.value || rcd2.value;
 		}());
@@ -3374,17 +3457,24 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 
 mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		assert(scope_.getFunctionNesting() >=
-		       meaning.scope_.getFunctionNesting());
+		assert(scope_.getFrameNesting() >=
+		       meaning.scope_.getFrameNesting()
+		       ||cast(FunctionDecl)meaning&&(cast(FunctionDecl)meaning).isConstructor());
 
 		if(auto vd = meaning.isVarDecl()) return vd.byteCompileSymbol(bld, this, scope_);
-		else if(meaning.isFunctionDef()){
-			auto diff = scope_.getFunctionNesting() -
-				meaning.scope_.getFunctionNesting();
+		else if(auto fd=meaning.isFunctionDef()){
 			static assert(this.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
-			if(!(meaning.stc&STCstatic)){
-				bld.emit(Instruction.pushcontext);
+			if(!(meaning.stc&STCstatic) && !fd.isConstructor()){
+				auto diff = scope_.getFrameNesting() - meaning.scope_.getFrameNesting();
+				//dw(this," ",loc," ",scope_.getFrameNesting()," ",meaning.scope_.getFrameNesting());
+				bld.emitUnsafe(Instruction.pushcontext, this);
 				bld.emitConstant(diff);
+			}
+			if(!(fd.stc&STCnonvirtual))
+			if(auto decl=fd.scope_.getDeclaration())
+			if(auto raggr=decl.isReferenceAggregateDecl()){
+				FieldExp.byteCompileVirtualCall(bld, raggr, fd, this);
+				return;
 			}
 			bld.emit(Instruction.push);
 			bld.emitConstant(cast(ulong)cast(void*)this);
@@ -3397,8 +3487,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		if(auto vd = meaning.isVarDecl()) return vd.byteCompileSymbolLV(bld, this, scope_);
 		bld.error(format("cannot interpret symbol '%s' at compile time", toString()), loc);
-		return LVpopc(Type.get!void()); // dummy
-
+		return LVpopc(Type.get!void(), this); // dummy
 	}
 }
 
@@ -3420,45 +3509,100 @@ mixin template CTFEInterpret(T) if(is(T==DollarExp)){
 
 
 mixin template CTFEInterpret(T) if(is(T==FieldExp)){
+	// TODO: validate the 'this' pointer!
 	override void byteCompile(ref ByteCodeBuilder bld){
 		assert(e2.meaning);
 		if(e2.meaning.stc&STCstatic){
 			if(auto this_=e1.extractThis()) ExpressionStm.byteCompileIgnoreResult(bld, this_);
 			return e2.byteCompile(bld);
 		}
+		auto this_=e1.extractThis();
+		bool nonvirtual = false;
+		if(!this_){
+			this_ = New!ThisExp(); // TODO: would prefer not having this
+			this_.loc = loc;
+			do this_.semantic(e2.scope_);
+			while(this_.sstate != SemState.completed);
+			nonvirtual = true;
+		}
+		assert(!this_ || cast(AggregateTy)this_.type.getHeadUnqual());
+		auto aggrt = cast(AggregateTy)cast(void*)this_.type.getHeadUnqual();
+
 		if(auto vd=e2.meaning.isVarDecl()){
-			auto this_=e1.extractThis();
-			assert(!!this_ && cast(AggregateTy)this_.type);
-			auto aggrt = cast(AggregateTy)cast(void*)this_.type;
-			
+			size_t len, off = aggrt.getBCLocOf(vd, len);
 			if(aggrt.decl.isValueAggregateDecl()){
-				auto lv=this_.byteCompileLV(bld); // TODO: also deal with rvalues!
-				size_t len, off = aggrt.getBCLocOf(vd, len);
-				lv.emitFieldLV(bld, off, len).emitLoad(bld);
+				auto lv=this_.byteCompileLV(bld);
+				lv.emitFieldLV(bld, off, len, this).emitLoad(bld);
+			}else{
+				this_.byteCompile(bld);
+				LVfield(off, len, this).emitLoad(bld);
+			}
+			return;
+			// TODO!
+			bld.error("member access not supported during CTFE yet",loc);
+			return;
+		}
+		auto fun = e2.meaning.isFunctionDecl();
+		if(this_.isSuperExp()) nonvirtual = true;
+		assert(!!fun);
+		if(auto raggr=aggrt.decl.isReferenceAggregateDecl()){
+			// TODO: interfaces!
+			this_.byteCompile(bld);
+			if(fun.stc&STCnonvirtual) nonvirtual = true;
+			if(!nonvirtual){
+				byteCompileVirtualCall(bld, raggr, fun, this);
+				return;
+			}
+		}else{
+			auto lv=this_.byteCompileLV(bld);
+			lv.emitPointer(bld);
+		}
+		bld.emit(Instruction.push);
+		static assert(e2.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
+		bld.emitConstant(cast(ulong)cast(void*)e2);
+	}
+
+	static void byteCompileVirtualCall(ref ByteCodeBuilder bld, ReferenceAggregateDecl raggr, FunctionDecl fun, Expression loader){
+		// TODO: this is not permissive enough
+		// ideally, virtual method calls would work like non-virtual ones
+		if(!raggr.vtbl.has(fun)){
+			raggr.semantic(raggr.scope_);
+			if(raggr.needRetry) throw new CTFERetryException(raggr);
+			if(raggr.sstate == SemState.error){
+				bld.error(format("cannot perform a virtual method call on an object of invalid type '%s'", raggr.name),loader.loc);
 				return;
 			}
 		}
-		bld.error("member access not supported during CTFE yet",loc);
+
+		bld.emitDup(bcPointerBCSize); // copy the class reference
+		bld.emitUnsafe(Instruction.loadf, loader);
+		bld.emitConstant(ReferenceAggregateDecl.bcTypeidOffset);
+		bld.emitConstant(ReferenceAggregateDecl.bcTypeidSize);
+
+		bld.emit(Instruction.fetchvtbl);
+		bld.emitConstant(raggr.vtbl.vtblIndex[fun]);
 	}
+
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		assert(e2.meaning);
 		if(e2.meaning.stc&STCstatic){
 			if(auto this_=e1.extractThis()) ExpressionStm.byteCompileIgnoreResult(bld, this_);
 			return e2.byteCompileLV(bld);
 		}
-		if(auto vd=e2.meaning.isVarDecl()){
-			auto this_=e1.extractThis();
-			assert(!!this_ && cast(AggregateTy)this_.type);
-			auto aggrt = cast(AggregateTy)cast(void*)this_.type;
-			
-			if(aggrt.decl.isValueAggregateDecl()){
-				auto lv=this_.byteCompileLV(bld); // TODO: also deal with rvalues!
-				size_t len, off = aggrt.getBCLocOf(vd, len);
-				return lv.emitFieldLV(bld, off, len);
-			}
+		auto this_=e1.extractThis();
+		assert(!!this_ && cast(AggregateTy)this_.type.getHeadUnqual());
+		auto aggrt = cast(AggregateTy)cast(void*)this_.type.getHeadUnqual();
+
+		auto vd=e2.meaning.isVarDecl();
+		assert(!!vd);
+		size_t len, off = aggrt.getBCLocOf(vd, len);
+		if(aggrt.decl.isValueAggregateDecl()){
+			auto lv=this_.byteCompileLV(bld);
+			return lv.emitFieldLV(bld, off, len, this);
+		}else{
+			this_.byteCompile(bld);
+			return LVfield(off, len, this);
 		}
-		bld.error("member access not supported during CTFE yet",loc);
-		return LVpopr(0); // dummy
 	}
 }
 
@@ -3489,8 +3633,16 @@ mixin template CTFEInterpret(T) if(is(T==ConditionDeclExp)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
+	enum bcTypeidOffset = bcPointerBCSize;
+	enum bcTypeidSize = 1;
+
+	protected size_t initialOffset(){
+		// nested aggregates have a context pointer
+		return stc&STCstatic ? 0 : bcPointerBCSize;
+	}
+
 	void updateLayout()in{assert(!isLayoutKnown());}body{
-		size_t off=!(stc&STCstatic); // nested structs have a context pointer
+		size_t off=initialOffset();
 		// TODO: unions, anonymous structs/unions etc.
 		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
@@ -3506,27 +3658,41 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		if(!isLayoutKnown()) updateLayout();
 		return bcSize;
 	}
-private:
-	size_t bcSize;
-}
-
-mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
-	size_t getBCLocOf(VarDecl vd, out size_t len){
-		if(!decl.isLayoutKnown()) decl.updateLayout();
-		return vd.getBCLoc(len);
+	static ulong getVersion(){
+		return vers;
 	}
-}
-
-mixin template CTFEInterpret(T) if(is(T==StructConsExp)){
-
-	void beginByteCompile(ref ByteCodeBuilder bld){
-		if(consCall) tmpVarDecl.inHeapContext = true; // conservative, anticipating that the constructor might escape 'this'
+	private void updateVersion(){
+		if(vers == ulong.max) assert(0);
+		vers++;
 	}
 
-	override void byteCompile(ref ByteCodeBuilder bld){
-		// if(consCall) consCall.byteCompile(bld);
-		if(!strd.isLayoutKnown()) strd.updateLayout();
-		foreach(d;&strd.bdy.traverseInOrder){
+	void byteCompileInit(ref ByteCodeBuilder bld, Scope sc){
+		void emitNullPtr(){
+			foreach(i;0..bcPointerBCSize){
+				bld.emit(Instruction.push);
+				bld.emitConstant(0);
+			}
+		}
+		if(!(stc&STCstatic)){
+			if(sc is null) emitNullPtr();
+			else{
+				auto diff = sc.getFrameNesting() - scope_.getFrameNesting();
+				bld.emitUnsafe(Instruction.pushcontext, this);
+				bld.emitConstant(diff);
+			}
+		}
+		if(auto raggr=isReferenceAggregateDecl()){
+			if(stc&STCstatic) emitNullPtr();
+			bld.emit(Instruction.push);
+			static assert(ReferenceAggregateDecl.sizeof<=(void*).sizeof &&
+			              (void*).sizeof<=ulong.sizeof);
+			bld.emitConstant(cast(ulong)cast(void*)this);
+		}
+		byteCompileFields(bld);
+	}
+
+	protected void byteCompileFields(ref ByteCodeBuilder bld){
+		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
 				size_t len, off = vd.getBCLoc(len);
 				if(len!=-1){
@@ -3537,14 +3703,145 @@ mixin template CTFEInterpret(T) if(is(T==StructConsExp)){
 				}
 			}
 		}
+	}
+
+private:
+	size_t bcSize;
+	static ulong vers;
+}
+
+mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
+	private Symbol[] symbols;
+	final Symbol bcFetchVTBL(size_t index){
+		if(!symbols.length) symbols = new Symbol[vtbl.length];
+		if(!symbols[index]){
+			symbols[index] = New!Symbol(vtbl.vtbl[index].fun);
+			symbols[index].scope_ = scope_;
+			symbols[index].accessCheck = AccessCheck.none;
+		}
+		return symbols[index];
+	}
+
+	override bool isLayoutKnown(){
+		if(auto p = parentClass()) if(parentVers != getVersion()) return false;
+		return super.isLayoutKnown();
+	}
+	override void updateLayout(){
+		super.updateLayout();
+		if(auto p = parentClass()) parentVers = getVersion();
+	}
+
+	override protected size_t initialOffset(){
+		if(auto p = parentClass()) return p.getBCSize();
+		// static classes have a null context pointer so that virtual method calls
+		// can rely on a consistent layout
+		return bcPointerBCSize+1; // space for type information
+	}
+
+	override void byteCompileFields(ref ByteCodeBuilder bld){
+		if(auto p = parentClass()) p.byteCompileFields(bld);
+		super.byteCompileFields(bld);
+	}
+private:
+	ulong parentVers = 0;
+}
+
+mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
+	size_t getBCLocOf(VarDecl vd, out size_t len){
+		if(!decl.isLayoutKnown()) decl.updateLayout();
+		return vd.getBCLoc(len);
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==TemporaryExp)){
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert(tmpVarDecl);
+		tmpVarDecl.inHeapContext = true;
+		tmpVarDecl.byteCompile(bld);
+		return tmpVarDecl.byteCompileSymbolLV(bld, this, tmpVarDecl.scope_);
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==StructConsExp)){
+
+	void beginByteCompile(ref ByteCodeBuilder bld){
+		if(consCall) tmpVarDecl.inHeapContext = true; // conservative, anticipating that the constructor might escape 'this'
+	}
+
+	override void byteCompile(ref ByteCodeBuilder bld){
+		if(!strd.isLayoutKnown()) strd.updateLayout();
+		strd.byteCompileInit(bld, contextIsNull ? null : tmpVarDecl.scope_);
 		// TODO: finish temporary variables (destructors etc)
 	}
 	void finishByteCompile(ref ByteCodeBuilder bld){
-		if(consCall) consCall.byteCompile(bld);
+		if(consCall){
+			tmpVarDecl.byteCompileSymbolLV(bld, this, tmpVarDecl.scope_).emitPointer(bld);
+			consCall.byteCompile(bld);
+		}
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==NewExp)){
+	void byteCompileInit(ref ByteCodeBuilder bld, Type type){
+	}
+	void byteCompileForType(ref ByteCodeBuilder bld, Type type){
+		auto tu = type.getHeadUnqual();
+		if(auto da=tu.isDynArrTy()){
+			bld.error("type "~type.toString()~" not yet supported in CTFE", loc);
+			return;
+		}
+		if(auto aggrty=tu.isAggregateTy()){
+			bld.emit(Instruction.push); bld.emitConstant(1);
+			bld.emit(Instruction.newarray);
+			auto els=aggrty.decl.getBCSize();
+			bld.emitConstant(els*ulong.sizeof);
+			bld.emit(Instruction.ptra);
+			bld.emitDup(bcPointerBCSize); // duplicate the reference
+			aggrty.decl.byteCompileInit(bld, scope_); // TODO: context is null
+			bld.emitUnsafe(Instruction.storef, this); // perfectly safe in this case
+			bld.emitConstant(0);
+			bld.emitConstant(els);
+
+			if(consCall){
+				bld.emitDup(bcPointerBCSize); // duplicate the reference
+				consCall.byteCompile(bld);
+			}
+		}
+	}
+	override void byteCompile(ref ByteCodeBuilder bld){
+		assert(!!cast(Type)rty);
+		byteCompileForType(bld, cast(Type)cast(void*)rty);
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==CurrentExp)){
+	private void pushContext(ref ByteCodeBuilder bld){
+		auto diff = scope_.getAggregate().scope_.getFrameNesting()+3-scope_.getFrameNesting();
+		bld.emitUnsafe(Instruction.pushcontext, this);
+		bld.emitConstant(diff);
+	}
+	override void byteCompile(ref ByteCodeBuilder bld){
+		assert(cast(AggregateTy)type.getHeadUnqual()&&scope_.getAggregate());
+		if((cast(AggregateTy)cast(void*)type.getHeadUnqual()).decl.isReferenceAggregateDecl()){
+			return pushContext(bld);
+		}
+		auto diff = scope_.getAggregate().scope_.getFrameNesting()+3 - scope_.getFrameNesting();
+
+		bld.emit(Instruction.push); bld.emitConstant(0);
+		if(diff){bld.emit(Instruction.push); bld.emitConstant(diff);}
+		auto lv=diff?LVpopcc(type, this):LVpopc(type, this);
+		lv.emitLoad(bld);
+	}
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert((cast(AggregateTy)type.getHeadUnqual())&&cast(ValueAggregateDecl)(cast(AggregateTy)type.getHeadUnqual()).decl);
+		pushContext(bld);
+		return LVpointer(type, this);
 	}
 }
 
 // get size in ulongs on the bc stack
+enum bcPointerBCSize = (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
+enum bcFunPointerBCSiz = 1;
 size_t getBCSizeof(Type type){
 	type = type.getHeadUnqual();
 	if(auto bt = type.isBasicType()){
@@ -3554,11 +3851,11 @@ size_t getBCSizeof(Type type){
 	if(type.isDynArrTy() || type is Type.get!EmptyArray())
 		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
-		if(ptr.ty.isFunctionTy()) return 1;
-	ptr: return (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
+		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSiz;
+	ptr: return bcPointerBCSize;
 	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
-	if(type.isDelegateTy()) return 2;
+	if(type.isDelegateTy()) return bcPointerBCSize+bcFunPointerBCSiz;
 	if(auto aggrty = type.isAggregateTy()){
 		if(aggrty.decl.isValueAggregateDecl()){
 			return aggrty.decl.getBCSize();
@@ -3571,71 +3868,74 @@ size_t getBCSizeof(Type type){
 }
 // get compile time size of a type in bytes
 size_t getCTSizeof(Type type){
-	if(type.getHeadUnqual().isDynArrTy()) return BCSlice.sizeof;
-	if(type.getHeadUnqual().isPointerTy()){
+	type = type.getHeadUnqual();
+	if(type.isDynArrTy()) return BCSlice.sizeof;
+	if(type.isPointerTy()){
 		if(type.getFunctionTy()) return Symbol.sizeof;
 		else return BCPointer.sizeof;
 	}
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
-	if(type.getHeadUnqual().isDelegateTy()) return 2*ulong.sizeof;
+	if(type.isDelegateTy()) return getBCSizeof(type)*ulong.sizeof;
 	if(type is Type.get!real()) return real.sizeof;
 	if(type.isAggregateTy()) return getBCSizeof(type)*ulong.sizeof;
 	return cast(size_t)type.getSizeof();
 }
-mixin template CTFEInterpret(T) if(is(T==Declarators)){
-	override void byteCompile(ref ByteCodeBuilder bld){
-		foreach(x; decls) x.byteCompile(bld);
-	}
-}
+
 mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		if(auto tp=type.isTypeTuple()){
 			assert(tupleContext && tupleContext.vds.length == tp.length);
-			foreach(x;tupleContext.vds) x.byteCompile(bld);
+			foreach(x;tupleContext.vds){
+				size_t len;
+				if(x.getBCLoc(len)!=-1) continue; // MultiReturnValueExp!
+				x.byteCompile(bld);
+			}
 			return;
 		}
 		size_t off, len = getBCSizeof(type);
 		// dw(len," ",type);
-		if(len!=-1){
-			if(auto ini=init?init.isStructConsExp():null){
-				assert(ini.tmpVarDecl is this);
-				ini.beginByteCompile(bld);
-			}
-
-			if(inHeapContext){
-				off = bld.getContextOffset();
-				bld.emit(Instruction.push);
-				bld.emitConstant(off);
-			}
-
-			if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
-			else foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
-
-			if(inHeapContext){
-				bld.emit(Instruction.popcn);
-				bld.emitConstant(len);
-				setBCLoc(off, len);
-				bld.addContextOffset(len);
-			}else{
-				off = bld.getStackOffset();
-				if(len){
-					bld.emitPopp(len);
-					bld.emitConstant(off);
-					setBCLoc(off, len);
-					bld.addStackOffset(len);
-				}
-				// dw(this," ",off," ",len);
-			}
-
-			if(auto ini=init?init.isStructConsExp():null){
-				assert(ini.tmpVarDecl is this);
-				ini.finishByteCompile(bld);
-			}
-
-			return;
+		if(len==-1) return emitUnsupportedError(bld);
+		if(auto ini=init?init.isStructConsExp():null){
+			assert(ini.tmpVarDecl is this);
+			ini.beginByteCompile(bld);
 		}
 
-		bld.error(format("cannot interpret local variable of type '%s' at compile time yet.",type.toString()),loc);
+		if(inHeapContext){
+			off = bld.getContextOffset();
+			bld.emit(Instruction.push);
+			bld.emitConstant(off);
+		}
+
+		if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
+		else foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
+
+		// dw(this," ",off," ",len);
+
+		if(inHeapContext){
+			bld.emitUnsafe(Instruction.popcn, this);
+			bld.emitConstant(len);
+			setBCLoc(off, len);
+			bld.addContextOffset(len);
+		}else{
+			off = bld.getStackOffset();
+			if(len){
+				bld.emitPopp(len);
+				bld.emitConstant(off);
+				bld.addStackOffset(len);
+			}
+			setBCLoc(off, len);
+		}
+
+		if(auto ini=init?init.isStructConsExp():null){
+			assert(ini.tmpVarDecl is this);
+			ini.finishByteCompile(bld);
+		}
+
+
+	}
+
+	final void emitUnsupportedError(ref ByteCodeBuilder bld){
+		bld.error(format("cannot interpret local variable of type '%s' at compile time yet.",type.toString()),loc);		
 	}
 
 	/* loads a variable, without taking into account any special storage classes
@@ -3644,7 +3944,10 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 
 	private void load(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
 		void accessError(){
-			bld.error(format("cannot access variable '%s' at compile time", name.toString()), loader.loc);
+			if(name)
+				bld.error(format("cannot access variable '%s' at compile time", name.toString()), loader.loc);
+			else
+				bld.error("cannot access variable at compile time", loader.loc);
 		}
 		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init))){
 			accessError();
@@ -3658,7 +3961,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			size_t len, off = getBCLoc(len);
 			// import std.stdio; writeln(vd," ",off," ",len);
 
-			if(!~off || !len){
+			if(!~off){
 				if(stc&(STCimmutable|STCconst)&&init){
 					// TODO: this can be inefficient for non-enum variables
 					// and it destroys reference identity for them
@@ -3666,8 +3969,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 					return;
 				}
 				accessError();
-
-				// dw("nope ",this," ",off," ",len," ",cast(void*)this);
 
 				return;
 			}
@@ -3678,20 +3979,19 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 				}
 				return;
 			}else{
-				auto diff = loadersc.getFunctionNesting() -
-					scope_.getFunctionNesting();
+				auto diff = loadersc.getFrameNesting() - scope_.getFrameNesting();
 
 				if(!diff){
 					bld.emit(Instruction.push);
 					bld.emitConstant(off);
-					bld.emit(Instruction.pushcn);
+					bld.emitUnsafe(Instruction.pushcn, loader);
 					bld.emitConstant(len);
 				}else{
 					bld.emit(Instruction.push);
 					bld.emitConstant(off);
 					bld.emit(Instruction.push);
 					bld.emitConstant(diff);
-					bld.emit(Instruction.pushccn);
+					bld.emitUnsafe(Instruction.pushccn, loader);
 					bld.emitConstant(len);
 				}
 				return;
@@ -3708,19 +4008,16 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		}else if(stc&STClazy){
 			// call the delegate
 			bld.emitUnsafe(Instruction.call, loader);
-			bld.emitConstant(1);
+			bld.emitConstant(bcPointerBCSize);
 		}
 		assert(!(stc&STCbyref)||!(stc&STClazy));
 	}
 
-	final LValueStrategy byteCompileSymbolLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
-		if(stc & STCbyref){
-			load(bld, loader, loadersc);
-			return LVpointer(type, this);
-		}
+	// emit code and get the LValueStrategy to access the raw variable memory
+	final LValueStrategy byteCompileInitLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
 		size_t len, off = getBCLoc(len);
 		// dw(this," ",len," ",off);
-		if(!~off || !len){
+		if(!~off){
 			if(stc&(STCimmutable|STCconst)&&init){
 				// TODO: this can be inefficient for immutable variables
 				init.byteCompile(bld);
@@ -3729,14 +4026,21 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 				return LVpointer(type, this);
 			}
 			bld.error(format("cannot access variable '%s' at compile time", name.toString()),loader.loc);
-			return LVpopc(Type.get!void()); // dummy
+			return LVpopc(Type.get!void(), loader); // dummy
 		}
 		bld.emit(Instruction.push);
 		bld.emitConstant(off);
-		auto diff = loadersc.getFunctionNesting() -
-			scope_.getFunctionNesting();
+		auto diff = loadersc.getFrameNesting() - scope_.getFrameNesting();
 		if(diff){bld.emit(Instruction.push); bld.emitConstant(diff);}
-		return inHeapContext?diff?LVpopcc(type):LVpopc(type):LVpopr(len);
+		return inHeapContext?diff?LVpopcc(type, loader):LVpopc(type, loader):LVpopr(len);
+	}
+
+	final LValueStrategy byteCompileSymbolLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
+		if(stc & STCbyref){
+			load(bld, loader, loadersc);
+			return LVpointer(type, this);
+		}
+		return byteCompileInitLV(bld, loader, loadersc);
 	}
 
 
@@ -3757,6 +4061,12 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 private:
 	size_t byteCodeStackOffset = -1;
 	size_t byteCodeStackLength = 0;
+}
+
+mixin template CTFEInterpret(T) if(is(T==Declarators)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		foreach(x; decls) x.byteCompile(bld);
+	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
@@ -3813,8 +4123,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 			void perform(Symbol self){
 				if(self.sstate!=SemState.completed) return;
-				if(self.scope_.getFunctionNesting()       >
-				   self.meaning.scope_.getFunctionNesting()){
+				if(self.scope_.getFrameNesting()       >
+				   self.meaning.scope_.getFrameNesting()){
 					runAnalysis!MarkHeapContext(self);
 				}
 			}
@@ -3826,14 +4136,18 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 					if(tt.params[i].stc&STCbyref)
 						runAnalysis!MarkHeapContext(x);
 				}
+			}
+			void perform(FieldExp self){
 				// the implicit this pointer is passed by reference
 				// for value types
-				if(auto fe = self.fun.isFieldExp())
-				if(auto this_=fe.e1.extractThis())
+				if(self.type) // alias declarations can contain such expressions (TODO: should they?)
+				if(self.type.getFunctionTy())
+				if(auto this_=self.e1.extractThis())
 				if(auto aggrty=this_.type.isAggregateTy())
 				if(aggrty.decl.isValueAggregateDecl()){
 					runAnalysis!MarkHeapContext(this_);
 				}
+
 			}
 			void perform(ReturnStm self){
 				if(self.isRefReturn) runAnalysis!MarkHeapContext(self.e);
@@ -3854,6 +4168,16 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 
 	void resetByteCode(){
 		_byteCode = null;
+	}
+
+	private{
+		ulong vers=0;
+		bool mayBeOutdated(){
+			return vers!=AggregateDecl.getVersion();
+		}
+		void rememberVersion(){
+			vers = AggregateDecl.getVersion();
+		}
 	}
 
 	private bool needsReset(){
@@ -3878,15 +4202,15 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 	}
 
 	@property ByteCode byteCode(){
-		if(needsReset()) resetByteCode();
+		if(mayBeOutdated() && needsReset()) resetByteCode();
 		if(_byteCode is null){
 			ByteCodeBuilder bld;
 			if(bcnumargs==-1) bcpreanalyze();
 			size_t loc = 0, len = 0;
-			if(!(stc&STCstatic)) loc++; // context pointer
+			if(!(stc&STCstatic)) loc+=bcPointerBCSize; // context pointer
 			foreach(i,x; type.params){
 				if(x.stc&STCbyref) len = getBCSizeof(x.type.getPointer());
-				else if(x.stc&STClazy) len = 2; // TODO: ok?
+				else if(x.stc&STClazy) len = bcPointerBCSize+bcFunPointerBCSiz; // TODO: ok?
 				else len = getBCSizeof(x.type);
 				x.setBCLoc(loc, len);
 				loc+=len;
@@ -3903,13 +4227,13 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				// copy parent context pointer to own context
 				// TODO: this does not have to be in the context if never requested
 				if(!(stc&STCstatic)){
-					bld.addContextOffset(1);
+					bld.addContextOffset(bcPointerBCSize);
 					bld.emit(I.push);
 					bld.emitConstant(0);
-					bld.emitPushp(1);
+					bld.emitPushp(bcPointerBCSize);
 					bld.emitConstant(0);
-					bld.emit(I.popcn);
-					bld.emitConstant(1);
+					bld.emitUnsafe(I.popcn, this);
+					bld.emitConstant(bcPointerBCSize);
 				}
 				foreach(i,x; type.params){
 					if(!x.inHeapContext) continue;
@@ -3922,7 +4246,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 						bld.emitConstant(coff);
 						bld.emitPushp(slen);
 						bld.emitConstant(soff);
-						bld.emit(I.popcn);
+						bld.emitUnsafe(I.popcn, x);
 						bld.emitConstant(slen);
 					}
 				}
@@ -3938,6 +4262,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			if(_displayByteCode){
 				import std.stdio; writeln("byteCode for ",name,":\n",_byteCode.toString());
 			}
+
+			rememberVersion();
 		}
 		return _byteCode;
 	}
@@ -3970,7 +4296,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		else if(ret is Type.get!(typeof(null))) return Variant(null);
 		// assert(0,"unsupported return type "~type.ret.toString());
 		handler.error(format("return type '%s' not yet supported", type.ret.toString()),loc);
-		throw new Exception("");
+		throw new UnwindException();
 	}
 }
 
@@ -3978,6 +4304,8 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 	private void emitCall(ref ByteCodeBuilder bld){
 		bool ctx = false;
 		if(auto s = fun.isSymbol())if(auto m = s.meaning)
+			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
+		if(auto f = fun.isFieldExp())if(auto m = f.e2.meaning)
 			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
 		if(!ctx && fun.type.isDelegateTy()) ctx = true;
 
@@ -3992,7 +4320,7 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 		}
 
 		fun.byteCompile(bld);
-		ulong numargs = ctx;
+		ulong numargs = ctx ? bcPointerBCSize : 0;
 		if(args.length){
 			bld.emit(Instruction.tmppush);
 			foreach(i,x;args){
@@ -4019,11 +4347,61 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 		if(fun.type.getFunctionTy().stc&STCref) LVpointer(type, this).emitLoad(bld);
 	}
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
-		assert(fun.type.getFunctionTy().stc&STCref);
+		// TODO: struct return values!!!
+		if(!(fun.type.getFunctionTy().stc&STCref)) return super.byteCompileLV(bld);
 		emitCall(bld);
 		return LVpointer(type, this);
 	}
 }
+
+mixin template CTFEInterpret(T) if(is(T==MultiReturnValueExp)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		byteCompileHelper(bld, true);
+	}
+	final void byteCompileIgnoreResult(ref ByteCodeBuilder bld){
+		byteCompileHelper(bld, false);
+	}
+	private void byteCompileHelper(ref ByteCodeBuilder bld, bool keepv){
+		auto oinit = call.tmpVarDecl.tupleContext.vds[0].init;
+		//assert(call.tmpVarDecl.tupleContext.vds[0].init is this);
+		if(call.tmpVarDecl.tupleContext.vds.length){
+			call.tmpVarDecl.tupleContext.vds[0].init=null;
+			foreach(x;call.tmpVarDecl.tupleContext.vds){
+				x.byteCompile(bld);
+			}
+			call.tmpVarDecl.tupleContext.vds[0].init=oinit;
+		}
+
+		call.byteCompile(bld);
+		assert(cast(TypeTuple)call.type);
+		auto tt = cast(TypeTuple)cast(void*)call.type;
+		size_t size=0, i=0;
+		foreach(Type x;tt){
+			auto bcs=getBCSizeof(x);
+			if(bcs == -1){
+				call.tmpVarDecl.tupleContext.vds[i].emitUnsupportedError(bld);
+				return;
+			}
+			size+=bcs;
+			i++;
+		}
+		bld.emitTmppush(size);
+		size_t off = 0;
+		foreach(x;call.tmpVarDecl.tupleContext.vds){
+			auto lv=x.byteCompileInitLV(bld, this, call.tmpVarDecl.scope_);
+			size_t len; x.getBCLoc(len);
+			bld.emitTmppop(len);
+			lv.emitStore(bld);
+			off+=len;
+		}
+		assert(size==off);
+		if(keepv&&call.tmpVarDecl.tupleContext.vds.length){
+			call.tmpVarDecl.tupleContext.vds[0].byteCompileSymbol(bld, this, call.tmpVarDecl.scope_);
+		}
+	}
+	// TODO: lvalues (ref return of mrv function call)
+}
+
 
 mixin template CTFEInterpret(T) if(is(T==TemplateDecl)){
 	override void byteCompile(ref ByteCodeBuilder bld){

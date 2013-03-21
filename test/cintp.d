@@ -1,4 +1,155 @@
 
+int testClassConstructor(){
+	class C{
+		int x;
+		this(int a, int b){
+			x = a + b;
+		}
+	}
+	auto d = new C(2,4);
+	assert(d.x == 6);
+	return new C(2,3).x;
+}
+static assert(testClassConstructor()==5);
+pragma(msg, "testClassConstructor: ", testClassConstructor());
+
+int testParentFieldAccess(){
+	class P{ int x = 2; int foo(){ return x; }}
+	class C1: P{ }
+	class C2: P{ override int foo(){ return ++x; }}
+	
+	class C3: P{
+		int y;
+		this(int x, int y){
+			this.x=x;
+			this.y=y;
+		}
+		override int foo(){ return x+y; }
+	}
+
+	assert(new C3(2,3).foo()==5);
+
+	P x = new C1, y = new C2;
+	return x.foo()+y.foo();
+}
+static assert(testParentFieldAccess()==5);
+pragma(msg, "testParentFieldAccess: ", testParentFieldAccess());
+/+
+int[] testQualifiedNonVirtual(){
+	class P{ int foo(){ return 1; }}
+	class C1: P{ override int foo(){ return P.foo(); }}
+	class C2: C1{ override int foo(){ return C1.foo()+P.foo(); }}
+	class C3: C2{ override int foo(){ return C2.foo()+C1.foo(); }}
+	class C4: C3{ override int foo(){ return C3.foo()+C2.foo(); }}
+	class C5: C4{ override int foo(){ return C4.foo()+C3.foo(); }}
+
+	P x = new C1, y = new C2, z = new C3, w = new C4, q = new C5;
+	return [x.foo(), y.foo(), z.foo(), w.foo(), q.foo()];
+}
+static assert(testQualifiedNonVirtual()==[1,2,3,5,8]);
+pragma(msg, "testQualifiedNonVirtual: ", testQualifiedNonVirtual());
+
+
+int testVirtual(){
+	class P{ int foo(){ return 2; }}
+	class C1: P{ override int foo(){ return 1; }}
+	class C2: P{ override int foo(){ return 2; }}
+	class C3: P{ }
+	class C4: P{ int bar(){ return foo(); } }
+	class C5: C4{ override int foo(){ return 3; }}
+	P x = new C1, y = new C2, z = new C3;
+	auto w = new C4(), q = new C5();
+	assert(w.foo()==2 && w.bar()==2);
+	assert(q.foo()==3 && q.bar()==3);
+
+	class C6: P{ int bar(){ return super.foo(); }}
+	class C7: C6{ override int foo(){ return 3; }}
+	auto dd = new C7();
+	assert(dd.bar()==2 && dd.foo()==3);
+
+	class C8: P{ int bar(){ return C8.foo(); }}
+	class C9: C8{ override int foo(){ return 3; }}
+	auto ee = new C9();
+	assert(ee.bar()==2 && ee.foo()==3);
+
+
+	return x.foo()+y.foo()+z.foo();
+}
+static assert(testVirtual()==5);
+pragma(msg, "testVirtual: ", testVirtual());
+
+/+
+int testNew(){
+	struct S{ int x; }
+	class C{ int x; }
+	auto s = new S, c = new C;
+	s.x = 2; c.x = 3;
+	return s.x+c.x;
+}
+static assert(testNew()==5);
+pragma(msg, "testNew: ", testNew());
+
+int testInvalidContext(){
+	auto s(){ int x=2; struct S{ int foo(){ return x; }} return S(); } // error
+	typeof(s()) ss;
+	return ss.foo();
+}
+pragma(msg, testInvalidContext());
+
+int testThis(){
+	struct S{
+		int x;
+		this(int u){
+			x = u;
+		}
+		S foo(){ return this; }
+		ref S goo(){ return this; }
+		void repl(S other){ this = other; }
+	}
+	S s = S(4);
+	S g = s.foo();
+	S moo;
+	moo.repl(g.foo());
+	moo.goo().x++;
+	return moo.foo().goo().goo().foo().x;
+}
+static assert(testThis()==5);
+pragma(msg, "testThis: ", testThis());
+
+int testConstructor(){
+	struct S{
+		int x;
+		this(int x){
+			this.x=x;
+		}
+		this(int a, int b){
+			x = a+b;
+		}
+	}
+	auto g=S(2);
+	return S(1,2).x+g.x;
+}
+static assert(testConstructor()==5);
+pragma(msg, "testConstructor: ", testConstructor());
+
+
+int testStructMemberAliasParam(){
+	int x;
+	struct S{
+		int y;
+		void bar(int x){ foo!((ref a)=>a=x)(); }
+		void foo(alias a)(){ a(x); }
+		void baz(alias a)(){ a(y); }
+	}
+	S s;
+	s.bar(2);
+	s.baz!((ref a)=>a=3)();
+	return x+s.y;
+}
+static assert(testStructMemberAliasParam()==5);
+pragma(msg, "testStructMemberAliasParam: ", testStructMemberAliasParam());
+
+
 int testMutate3(){
 	static struct Cell{
 		int x=1335;
@@ -9,7 +160,7 @@ int testMutate3(){
 	auto c=Cell(), d=Cell();
 	c.foo(2), d.foo(3);
 	assert(c.x==2 && d.x==3);
-	c.x=3;
+	c.foo(3);
 	return c.x;
 }
 static assert(testMutate3()==3);
@@ -147,6 +298,7 @@ pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
 pragma(msg,typeof(memoizer([], (int delegate(int) recur, int n) => n*recur(n-1)))); //TODO
 
 
+
 // Haskell-Like CPS //
 template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
@@ -211,6 +363,7 @@ auto testcallCC2(){
 	//return callCC(&f, 4);
 	//return callCC(&g, callCC(&f, 2));
 }
+static assert(testcallCC2()(x=>x)==1338);
 pragma(msg, "testcallCC2: ", testcallCC2()(x=>x));
 
 auto testcps(){
@@ -834,7 +987,7 @@ ref int testrefret2(){
 	return x(y(z(i)));
 }
 static assert(testrefret2()==4);
-pragma(msg, testrefret2());
+pragma(msg, "testrefret: ", testrefret2());
 
 int testrefoutlazy(){
 	int x=1;

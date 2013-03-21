@@ -101,6 +101,7 @@ class Scheduler{
 				push(n);
 				
 				foreach(x;awaited.get(n,[])){
+					// if(x !in asleep) continue; // TODO: why can this happen?
 					if(x !in info){
 						tarjan(x);
 						info[n].lowlink = min(info[n].lowlink, info[x].lowlink);
@@ -112,6 +113,7 @@ class Scheduler{
 					Node x;
 					do{
 						x = pop();
+						assert(info[x].component == -1);
 						info[x].component = component;
 					}while(x !is n);
 					component++;
@@ -119,8 +121,8 @@ class Scheduler{
 			}
 
 			foreach(n,_; asleep) if(n !in info) tarjan(n);
-			auto nodes = asleep.keys;
-			/+foreach(i;0..component){
+			/+auto nodes = asleep.keys;
+			foreach(i;0..component){
 				write("component ",i,": [");
 				foreach(x;nodes)
 					if(info[x].component==i) write(x,",");
@@ -131,6 +133,7 @@ class Scheduler{
 			
 			foreach(dependee,_; asleep){
 				foreach(dependent; awaited.get(dependee,[])){
+					// if(dependent !in asleep) continue; // TODO: why can this happen?
 					if(info[dependee].component == info[dependent].component) continue;
 					bad[info[dependent].component] = true;
 				}

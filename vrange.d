@@ -251,7 +251,7 @@ struct ValueRange(int size) if(size==32||size==64){
 	R opBinary(string op:"<<")(R rhs){ // do not care about signedness of rhs!
 		if(!signed){
 			T diff = min^max;
-			if(rhs.max>size-1) return full(false);
+			if(rhs.min>size-1 || rhs.max>size-1) return full(false);
 			if(rhs.min&&~((cast(T)1<<size-1>>rhs.min-1)-1)&diff){
 				return R(0, ~cast(T)0<<rhs.min, false);
 			}
@@ -284,19 +284,21 @@ struct ValueRange(int size) if(size==32||size==64){
 		}
 		return R(nmin, nmax, true);
 	}
-	R opBinary(string op:">>")(R rhs)in{assert(signed==rhs.signed);}body{
+	R opBinary(string op:">>")(R rhs){
 		if(!signed){
-			if(rhs.max>size-1) return full(false);
+			if(rhs.min>size-1 || rhs.max>size-1) return full(false);
 			return R(min>>rhs.max,max>>rhs.min,false);
-		}else if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
+		}
+		if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
 		if(cast(S)max>0) return R(cast(S)min>>rhs.max,cast(S)max>>rhs.min,true);
-		else return R(cast(S)max>>rhs.min,cast(S)min>>rhs.max,true);
+		return R(cast(S)max>>rhs.min,cast(S)min>>rhs.max,true);
 	}
-	R opBinary(string op:">>>")(R rhs)in{assert(signed==rhs.signed);}body{
+	R opBinary(string op:">>>")(R rhs){
 		if(!signed){
-			if(rhs.max>size-1) return full(false);
+			if(rhs.min>size-1 || rhs.max>size-1) return full(false);
 			return R(min>>rhs.max,max>>rhs.min,false);
-		}else if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
+		}
+		if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
 		if(cast(S)(min^max)<0)
 			return R(rhs.min?0:min,rhs.max?cast(T)-1>>rhs.max:max,true);
 		return R(min>>>rhs.max,max>>>rhs.min,true);

@@ -6,9 +6,6 @@ auto f(A function() dg){return dg();}
 
 //pragma(msg, f(()=>cast(B)null));
 
-
-alias immutable(char)[] string;
-
 auto testcontextded(){
 	auto a = [x=>x+1, y=>2*y, (long z)=>z/2];
 	static assert(is(typeof(a[0]): long function(long)));
@@ -84,8 +81,6 @@ pragma(msg,shared(typeof(cast()x)));
 
 //const(const(int)*****) y;
 //pragma(msg, typeof(y));
-
-
 
 
 struct AccessibleImmutable{
@@ -164,10 +159,14 @@ void main(){
 	static assert(!is(void function() : void function()pure nothrow @safe));
 }
 
+
+// +/
+
 auto toString(int i){
 	immutable(char)[] s;
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
 }
 
-// +/
+alias immutable(char)[] string;
+

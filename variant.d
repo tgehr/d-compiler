@@ -1,4 +1,4 @@
-// Writtenf in the D programming language.
+// Written in the D programming language.
 
 import lexer, operators, expression, type, util;
 

@@ -163,8 +163,7 @@ abstract class Scope{ // SCOPE
 	int unresolvedLabels(scope int delegate(GotoStm) dg){return 0;}
 
 	// functionality handy for closures:
-	size_t getFunctionNesting(){ return 0; }
-	size_t getNesting(){ return 0; }
+	size_t getFrameNesting(){ return 0; }
 
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
@@ -235,8 +234,7 @@ class NestedScope: Scope{
 		return parent.unresolvedLabels(dg);
 	}
 
-	override size_t getFunctionNesting(){ return parent.getFunctionNesting(); }
-	override size_t getNesting(){ return parent.getNesting()+1; }
+	override size_t getFrameNesting(){ return parent.getFrameNesting(); }
 
 	override VarDecl getDollar(){return parent.getDollar();}
 	override FunctionDef getFunction(){return parent.getFunction();}
@@ -274,6 +272,8 @@ class AggregateScope: NestedScope{
 
 	override AggregateDecl getAggregate(){ return aggr; }
 	override AggregateDecl getDeclaration(){ return aggr; }
+
+	override size_t getFrameNesting(){ return parent.getFrameNesting()+1; }
 private:
 	AggregateDecl aggr;
 }
@@ -307,12 +307,15 @@ class InheritScope: AggregateScope{
 		mixin(LookupHere!q{auto d; super, ident, alt});
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
-		if(d && typeid(d) is typeid(DoesNotExistDecl))
+		// if sstate is 'completed', DoesNotExistDecls do not need to be generated
+		if(!d && raggr.sstate == SemState.completed ||
+		   d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!q{
 			auto lkup = parent.asc.lookupHere(ident, null);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
-			if(!d || typeid(d) !is typeid(DoesNotExistDecl)) break;
+			if(parent.sstate != SemState.completed && !d ||
+			   d && typeid(d) !is typeid(DoesNotExistDecl)) break;
 		});
 		if(!d) d = alt;
 		return d.independent;
@@ -340,8 +343,7 @@ class TemplateScope: NestedScope{
 		this.tmpl=tmpl;
 	}
 
-	override size_t getFunctionNesting(){ return iparent.getFunctionNesting(); }
-	override size_t getNesting(){ return iparent.getNesting()+1; }
+	override size_t getFrameNesting(){ return iparent.getFrameNesting(); }
 
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
@@ -395,7 +397,7 @@ final class FunctionScope: OrderedScope{
 		else _unresolvedLabels~=stm;
 	}
 
-	override size_t getFunctionNesting(){ return parent.getFunctionNesting()+1; }
+	override size_t getFrameNesting(){ return parent.getFrameNesting()+1; }
 
 	override FunctionDef getFunction(){return fun;}
 	override FunctionDef getDeclaration(){return fun;}

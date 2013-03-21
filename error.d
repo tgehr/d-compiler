@@ -54,7 +54,7 @@ class VerboseErrorHandler: ErrorHandler{
 		impl(err, loc, true);
 	}
 	private void impl(lazy string err, Location loc, bool isNote){
-		if(loc.line == 0){ // just here for robustness
+		if(loc.line == 0||!loc.rep.length){ // just here for robustness
 			stderr.writeln("(location missing): "~err);
 			return;
 		}

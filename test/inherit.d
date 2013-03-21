@@ -1,3 +1,33 @@
+
+struct TEst{
+	enum x = { auto x = new C; return x.foo(); }();
+	template Foo2(){
+		static if(x) alias D Foo22;
+		else alias C Foo22;
+		alias D Foo2;
+	}
+	enum a = {auto x = new D; return x.s();}();
+	class D{ int x=1337; string s(){ return q{int foo()const{ return 2; }};}}
+	class C: Foo2!(){
+		int foo(){ return 2; }
+		int bar(){
+			// mixin(this.D.s()); // TODO!
+			mixin(D.s());
+		}
+	}
+}
+
+int testHide(){
+	class A{
+		final int foo(int){return 1;}
+		final int foo(double){return 2;}
+	}
+	class B: A{
+		final int foo(int){return 3;} // TODO: error
+		//final int
+	}
+}
+
 auto testLocalClass(){
 	class L{}
 	return new L;
@@ -40,10 +70,9 @@ class ConstrDeflt{
 }
 
 void testDeflt(){
-	auto c = new ConstrDeflt();
+	auto c = new ConstrDeflt(); // TODO
 }
 
-/+
 struct OvStatic{
 	static void foo(int x){}
 	int foo(int x){ return x+1; }
@@ -365,7 +394,7 @@ class CircOverride1: CircOverride2{
 	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
 	override int bar(int x){ return x; }// ok (hidden by circular inheritance)
 }
-class CircOverride2: CircOverride1{
+class CircOverride2: CircOverride1{ // error
 	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
 }
 
@@ -580,12 +609,11 @@ class C : A!C{}
 
 class D(T) : A!T{
 	// static if(is(T==D)) enum x = "success!";
-	// static if(is(T:C!T)) enum x = "success!";
+	//static if(is(T:C!T)) enum x = "success!";
 }
 
-
 class E: D!E{
-	//pragma(msg, x);
+	// pragma(msg, x);
 }
 
 //pragma(msg, D);

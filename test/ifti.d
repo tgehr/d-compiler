@@ -1,11 +1,26 @@
 
+// TODO: match template instantiations
+struct A(T, int N){ }
+
+struct B(T, int N, int M){ alias B!(T, N, 1) C; }
+
+alias B!(int, 2, 2) b_t;
+
+void foo(T, int N)(in A!(T,N), in B!(T,N,1)){}
+
+void matchTemplateInstantiation(){
+	A!(int,2) a;
+	B!(int,2,1) b;
+	foo(a, b); // TODO!
+}
+
+
 auto exec(T)(T arg){
 	pragma(msg, T);
 	return arg();
 }
 pragma(msg, exec((int x=2)=>x));// TODO: strip default params
 pragma(msg, exec((int x=3)=>x));
-
 
 
 /+// TODO: should this work?
@@ -41,7 +56,7 @@ void transform(IR,OR,I=ElementType!IR,O)(IR input, OR output, scope Delegate!(O,
 	for(auto i = input.length-input.length; i<input.length; i++)
 		output[i] = dg(input[i]);
 }
-	
+
 pragma(msg, "transform: ",{
 	auto a = [1,2,3];
 	auto r = [0,0,0];
@@ -155,7 +170,6 @@ bool all(alias a,T)(T[] r){
 }
 
 pragma(msg, "all: ",all!(x=>x&1)([1,3,4,5]));
-
 
 
 //T identity(T)(const arg=2) {pragma(msg,T," ",typeof(arg)); return arg; }

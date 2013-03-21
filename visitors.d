@@ -46,8 +46,18 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 		import std.c.string;
 		memcpy(data.ptr, cast(void*)this, siz);
 		auto res=cast(T)data.ptr;
+		static if(is(T==VarDecl)){
+			if(init)
+			if(auto tmp=(cast()init).isTemporaryExp()){
+				assert(tmp.tmpVarDecl is this);
+				tmp.tmpVarDecl = null;
+				auto n = tmp.ddup();
+				n.tmpVarDecl = cast()this;
+				res.init = n;
+			}
+		}
 		foreach(x;__traits(allMembers, T)){
-			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="inst")&&(!is(T==VarDecl)||x!="tupleContext") && (!is(T==TemplateInstanceDecl)||x!="eponymousDecl"&&x!="constraintEponymousFunctionParameters")){ // hack
+			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="inst")&&(!is(T==VarDecl)||x!="tupleContext") && (!is(T==TemplateInstanceDecl)||x!="eponymousDecl"&&x!="constraintEponymousFunctionParameters") && (!is(T==VarDecl)||x!="init")){ // hack
 				static if(is(typeof(*mixin("&res."~x)) S) &&
 					     !is(S:immutable(S))){
 					static if(is(S:const(Node))){

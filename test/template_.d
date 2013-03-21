@@ -289,14 +289,6 @@ class TemplatedLocalVariable{ // TODO: make it illegal
 	}
 }
 
-
-T foo123(T)(T arg){
-	return arg>0?arg+foo!T(arg-1):0;
-}
-void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
-
-pragma(msg, foo123!double(42.23));
-
 template test(){
 	void test(){
 		//enum test = 2;
@@ -335,6 +327,7 @@ pragma(msg, "fun: ",fun());
 
 T twotimes(T)(T arg)=>arg+arg;
 pragma(msg, twotimes!double(32.2));
+
 
 
 void foo(){
@@ -452,6 +445,13 @@ auto foo(alias a)(){
 	//pragma(msg, typeof(a));
 	return a();
 }
+T foo123(T)(T arg){
+	return arg>0?arg+foo!T(arg-1):0;
+}
+void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
+
+pragma(msg, foo123!double(42.23));
+
 
 auto test2(){
 	auto x = "hello, world!";

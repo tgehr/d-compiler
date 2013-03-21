@@ -14,6 +14,7 @@ import file = std.file;
 
 int Ḁ(){return 0;}
 int main(string[] args){
+	import core.memory;
 	/+import variant,type;
 
 	Variant var = 0L;//"I am a string!";
