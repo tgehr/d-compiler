@@ -115,7 +115,7 @@ static assert(is(TypeTuple!(int delegate(int, int[]))==TypeTuple!(int delegate(i
 
 pragma(msg, TypeTuple!(1,TypeTuple!(int,double),2,TypeTuple!(float,real,int[])));
 
-TypeTuple!(1,2,3)[1] aaa;
+TypeTuple!(1,2,3)[1] aaa; // error
 
 pragma(msg, TypeTuple!(1,2,3,TypeTuple!(1,2,3)));
 
@@ -126,9 +126,9 @@ pragma(msg, typeof(as));
 //pragma(msg, x);
 
 
-Alias!(TypeTuple!(int,2)) a;
+Alias!(TypeTuple!(int,2)) a; // error
 
-static assert(TypeTuple!(0,"test"));
+static assert(TypeTuple!(0,"test")); // error
 
 static assert(TypeTuple!(1,""));
 void main(){assert(TypeTuple!(1,""));}
@@ -136,7 +136,7 @@ void main(){assert(TypeTuple!(1,""));}
 
 mixin(TypeTuple!("int x;"));
 
-int[TypeTuple!(1,2)] ad;
+int[TypeTuple!(1,2)] ad; // error
 
 
 alias TypeTuple!(1,2) start;
@@ -243,7 +243,7 @@ pragma(msg, IsPrime!103);+/
 pragma(msg, ListPrimes!103);
 
 template Primes(int i){
-	alias StaticFilter!(IsPrime, i-1, StaticIota!(2,i+1)) Primes;
+	alias StaticFilter!(IsPrime, StaticIota!(2,i+1)) Primes;
 }
 
 template ListPrimes(int upper){

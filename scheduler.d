@@ -20,8 +20,7 @@ class Scheduler{
 	}
 
 
-	final void await(Node from, Node to, Scope sc){
-		// dw("dep from ", from," to ",to);
+	final void await(Node from, Node to, Scope sc)in{assert(from !is to);}body{
 		workingset.await(from, to, sc);
 	}
 	
@@ -62,22 +61,99 @@ class Scheduler{
 		}
 		
 		void await(Node from, Node to, Scope sc){
-			if(from in asleep) return; // TODO: turn into preconditions
 			if(from !in active) return;
-
 			awaited[to]~=from;
+			if(from in asleep) return;
+
 			asleep[from]=active[from]; // ...
 			active.remove(from);
 			add(to,sc);
+		}
+
+		void awake()in{assert(!active.length);}body{
+			// tarjan's algorithm
+			static struct Info{
+				uint index;
+				uint lowlink;
+				uint component = -1;
+				bool instack = false;
+			}
+			
+			Info[Node] info;
+
+			uint index = 0;
+			uint component = 0;
+			Node[] stack;
+			void push(Node n){
+				stack~=n;
+				info[n].instack=true;
+			}
+			Node pop(){
+				auto n=stack[$-1];
+				stack=stack[0..$-1];
+				stack.assumeSafeAppend();
+				info[n].instack=false;
+				return n;
+			}
+			void tarjan(Node n){
+				info[n]=Info(index, index);
+				index++;
+				push(n);
+				
+				foreach(x;awaited.get(n,[])){
+					if(x !in info){
+						tarjan(x);
+						info[n].lowlink = min(info[n].lowlink, info[x].lowlink);
+					}else if(info[x].instack){
+						info[n].lowlink = min(info[n].lowlink, info[x].index);
+					}
+				}
+				if(info[n].index==info[n].lowlink){
+					Node x;
+					do{
+						x = pop();
+						info[x].component = component;
+					}while(x !is n);
+					component++;
+				}
+			}
+
+			foreach(n,_; asleep) if(n !in info) tarjan(n);
+			auto nodes = asleep.keys;
+/+			foreach(i;0..component){
+				write("component ",i,": [");
+				foreach(x;nodes)
+					if(info[x].component==i) write(x,",");
+				writeln("]");
+			}+/
+
+			bool[] bad = new bool[component];
+			
+			foreach(dependee,_; asleep){
+				foreach(dependent; awaited.get(dependee,[])){
+					if(info[dependee].component == info[dependent].component) continue;
+					bad[info[dependent].component] = true;
+				}
+			}
+			Node[] toRemove;
+			foreach(nd,sc; asleep){
+				if(bad[info[nd].component]) continue;
+				active[nd]=sc;
+				toRemove~=nd;
+			}
+			foreach(nd; toRemove) asleep.remove(nd);
+			
+			update();
+			foreach(nd,sc; payload) if(auto n=nd.isExpression()) n.noHope(sc);
+			update();
 		}
 		
 		void update(){
 			// dw("active: ",active.keys);
 			// dw("asleep: ",asleep.keys);
-			
 			foreach(nd,sc; active){
 				if(nd.sstate == SemState.completed && !nd.needRetry
-				|| nd.sstate == SemState.error)
+				|| nd.sstate == SemState.error || nd.rewrite)
 					done[nd] = true;
 			}
 			foreach(nd,b; done) active.remove(nd);
@@ -93,7 +169,7 @@ class Scheduler{
 			assert(0); // TODO!
 		}
 		void semantic(){
-			// dw(payload);
+			//dw(payload);
 			foreach(nd,sc; payload){
 				// TODO: kludgy
 				auto tmpl = sc?sc.getTemplateInstance():null;
@@ -140,8 +216,11 @@ class Scheduler{
 			Identifier.allowDelay=true;
 			//dw("workingset: ",map!(_=>text(_," ",_.sstate," ",typeid(_)))(workingset.payload.keys));
 			// dw(workingset.payload.length);
+			if(!workingset.payload.length&&workingset.asleep.length)
+				workingset.awake();
 		}while(workingset.payload.length);
 
+		// dw(workingset.asleep.keys,"\n\n\n",workingset.awaited);
 		// dw(champ," ",champ.cccc);
 	}
 

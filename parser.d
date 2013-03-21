@@ -211,7 +211,8 @@ private struct Parser{
 		ttype=tok.type;
 		if(!code.errors.length || muteerr) return;
 		while(code.errors.length&&code.errors[0].loc.rep.ptr<tok.loc.rep.ptr){
-			handler.error(code.errors[0].str,code.errors[0].loc);
+			// a lexer error amidst expect errors is likely to be uninteresting
+			if(displayExpectErr) handler.error(code.errors[0].str,code.errors[0].loc);
 			code.errors.popFront();
 		}
 	}
@@ -244,6 +245,7 @@ private struct Parser{
 	}
 	static class ParseErrorException: Exception{this(string s){super(s);}} alias ParseErrorException PEE;
 	void expect(TokenType type){
+		// if(type==Tok!";"){if(ttype==Tok!";") nextToken(); return;} //optional semicolons :)
 		if(ttype==type){displayExpectErr=true; nextToken(); return;}
 		// employ some bad heuristics to avoid cascading error messages. TODO: make this better
 		if(!displayExpectErr) return;

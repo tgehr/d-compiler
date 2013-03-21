@@ -90,7 +90,8 @@ mixin template Interpret(T) if(is(T==Expression)){
 		auto x = this;
 		mixin(Rewrite!q{x});
 		fixupLocations(x);
-		mixin(SemProp!q{x});
+		if(this is x) mixin(SemCheck);
+		else mixin(SemProp!q{x});
 		auto r = x.interpretV().toExpr();
 		fixupLocations(r);
 		r.dontConstFold();
@@ -541,6 +542,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 		//}
 		//if(fn.type.ret is Type.get!void()) return this; // TODO: ok?
 		// better error messages
+		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
 		static struct MakeStrong{ void perform(Symbol sym){ sym.makeStrong(); } }
 		runAnalysis!MakeStrong(this);
 		mixin(SemChld!q{e});
@@ -569,8 +571,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 			r.loc = this.loc;
 			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
-			needRetry = e.needRetry;
-			return;
+			mixin(PropRetry!q{e.node});
 		}catch(Exception){
 			sc.note("during evaluation requested here", loc);
 			mixin(ErrEplg);
@@ -582,7 +583,7 @@ private:
 	FunctionDef ctfeCallWrapper;
 }
 
-class CTFERetryException: Exception{ubyte needRetry;this(ubyte b){super("");needRetry=b;}}
+class CTFERetryException: Exception{Node node;this(Node n){super("");node = n;}}
 
 // bytecode interpreter for functions
 import expression, declaration, statement;
@@ -1517,7 +1518,7 @@ Ltailcall:
 
 				if(sym.needRetry){
 					// TODO: make as unlikely as possible
-					throw new CTFERetryException(sym.needRetry);
+					throw new CTFERetryException(sym);
 				}
 				if(sym.sstate == SemState.error) goto Linvfunction;
 				assert(cast(FunctionDef)sym.meaning);

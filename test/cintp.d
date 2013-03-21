@@ -1,4 +1,4 @@
-/+template CommonType(T...){
+template CommonType(T...){
 	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }() };
 	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType; // TODO
 	else alias void CommonType;
@@ -722,7 +722,7 @@ ref int testrefret(){
 }
 pragma(msg, "testrefret: ",testrefret());
 static assert(testrefret()==8);
-+/
+
 ref int testrefret2(){
 	//auto x = delegate(ref int x)ref{ return x; };
 	//auto y = delegate(ref int y)ref{ return x(y); };
@@ -739,7 +739,7 @@ ref int testrefret2(){
 }
 static assert(testrefret2()==4);
 pragma(msg, testrefret2());
-/+
+
 int testrefoutlazy(){
 	int x=1;
 	void testout(out int x){

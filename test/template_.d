@@ -95,10 +95,10 @@ pragma(msg, CircularInstantiation!3);
 
 
 template fc(int x){
-	static if(x<=1) enum fc=1; // TODO: shouldn't be ambiguous
+	static if(x<=1) enum fc=1;
 	else enum fc = x*fc!(x-1);
 }
-pragma(msg, fc!10);
+pragma(msg, "fc: ",fc!10);
 
 
 template tmpl(T){

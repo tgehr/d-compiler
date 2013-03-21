@@ -1,5 +1,4 @@
 
-
 /+
 template asdf(){}
 template Uninstantiable() if(asdf(2)){}
@@ -40,9 +39,9 @@ auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
 static assert(indexOf2("aba",'b')==1); // spurious error message+/
 
 
-/+// improve error messages!
+// improve error messages!
 
-template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+/+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
 auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
 auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
@@ -63,21 +62,55 @@ auto testcallCC(){
 	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
 }+/
 
-/+
+// ok now
+
+template Seq(T...){alias T Seq;}
 template StaticFilter(alias F, a...){
 	static if(!a.length) alias a StaticFilter;
-	else static if(F!(a[0])) alias TypeTuple!(a[0], Rest) StaticFilter;
+	else static if(F!(a[0])) alias Seq!(a[0], Rest) StaticFilter;
 	else alias Rest StaticFilter;
 	static if(a.length) alias StaticFilter!(F,a[1..a.length]) Rest;
 }
 
 template Pred(int x){ enum bool Pred = x&1; }
-pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));+/
+pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));
 
+template toStringNow(ulong v)
+{
+    static if (v < 10)
+        enum toStringNow = "" ~ cast(char)(v + '0');
+    else
+        enum toStringNow = toStringNow!(v / 10) ~ toStringNow!(v % 10);
+}
 
+void unittest_()
+{
+    static assert(toStringNow!(1uL << 62) == "4611686018427387904");
+}
+template toStringNow(long v)
+{
+    static if (v < 0)
+        enum toStringNow = "-" ~ toStringNow!(cast(ulong) -v);
+    else
+        enum toStringNow = toStringNow!(cast(ulong) v);
+}
 
+void unittest_()
+{
+	static assert(toStringNow!(0x100000000) == "4294967296");
+    static assert(toStringNow!(-138L) == "-138");
+}
 
-// ok now
+static assert(!is(typeof({
+	template U(long v){
+		static if (v < 0){}
+		else enum U = U!(cast(ulong) v);
+	}
+	void testU(){ U!2; }
+})));
+
+template U2(long v) { static if(true) enum U2 = 2; }
+void testU2(){ U2!2; }
 
 auto balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 	auto init = 0;
@@ -178,8 +211,6 @@ enum unsorted = [1,2];
 
 pragma(msg, rec(unsorted));
 pragma(msg, rec(unsorted));
-
-
 
 int[][] funny2(int[] a, int n){
 	int*[] ptrs;

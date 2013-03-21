@@ -15,6 +15,8 @@ abstract class ErrorHandler{
 	void error(lazy string err, Location loc)in{assert(loc.line>=1&&loc.rep);}body{nerrors++;}   // in{assert(loc.rep);}body
 	void note(lazy string note, Location loc)in{assert(loc.rep);}body{};
 
+	void message(string msg){ stderr.write(msg); }
+
 	bool showsEffect(){ return true; }
 
 	this(){

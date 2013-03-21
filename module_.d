@@ -5,7 +5,7 @@ import lexer, parser, error, scope_, semantic, util;
 import analyze;
 
 import core.memory;
-import std.stdio, std.algorithm;
+import std.stdio, std.algorithm, std.conv;
 
 class Module: Declaration{
 	Declaration[] decls;
@@ -55,7 +55,7 @@ class Module: Declaration{
 			mixin(Rewrite!q{x});
 		}
 		foreach(x; decls) mixin(SemProp!q{x});
-		assert(sstate==SemState.error||{foreach(x; decls) assert(x.sstate == SemState.completed && !x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
+		assert(sstate==SemState.error||{foreach(x; decls) assert(x.sstate == SemState.completed && !x.needRetry, text(x," ", x.sstate, " ", x.needRetry));return 1;}());
 		mixin(SemEplg);
 	}
 

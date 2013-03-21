@@ -104,7 +104,7 @@ template PropRetryNoRew(string s) if(!s.canFind(",")){
 			if(sstate != SemState.error){
 				needRetry = _nR;
 				if(_nR==2) @(sp[1]).needRetry=false;
-				// dw("propagated retry ",_nR," from ",@(s)," to ",toString()," @",__LINE__);
+				// dw("propagated retry ",_nR," from ",@(sp[1])," to ",toString()," ",__LINE__);
 				Scheduler().await(this, @(sp[1]), @(sp[0]));
 			}
 			mixin(SemRet);
@@ -126,7 +126,7 @@ template SemProp(string s){
 
 enum CheckRewrite=mixin(X!q{ if(rewrite) mixin(SemRet); });
 
-enum SemCheck=CheckRewrite~mixin(X!q{ if(needRetry||sstate==SemState.error){mixin(SemRet);} });
+enum SemCheck=mixin(X!q{ if(needRetry||rewrite||sstate==SemState.error){mixin(SemRet);} });
 
 private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid of duplication
 	template Doit(string v){
@@ -234,9 +234,9 @@ template CreateBinderForDependent(string name, string fun){
 				auto _@(name)_`~varn~`=`~e1~`.@(fun)(`~er~`);
 				if(auto d=_@(name)_`~varn~`.dependee){
 					static if(is(typeof(return) A: Dependent!T,T)) return d.dependent!T;
-					else mixin(SemProp!q{sc=null;d});
+					else mixin(SemProp!q{sc=d.scope_;d.node});
 				}
-				assert(!_@(name)_`~varn~`.dependee,"illegal dependee "~_@(name)_`~varn~`.dependee.toString());
+				assert(!_@(name)_`~varn~`.dependee,"illegal dependee "~_@(name)_`~varn~`.dependee.node.toString());
 				static if(!is(typeof(_@(name)_`~varn~`)==Dependent!void))`~var~`=_@(name)_`~varn~`.value;
 			`;
 		}
@@ -256,6 +256,7 @@ mixin CreateBinderForDependent!("MatchCall","matchCall");
 mixin CreateBinderForDependent!("MatchCallHelper","matchCallHelper");
 mixin CreateBinderForDependent!("AtLeastAsSpecialized","atLeastAsSpecialized");
 mixin CreateBinderForDependent!("DetermineMostSpecialized","determineMostSpecialized");
+mixin CreateBinderForDependent!("Lookup","lookup");
 
 
 template IntChld(string s) if(!s.canFind(",")){
@@ -284,7 +285,8 @@ template RevEpoLkup(string e){
 		if(auto ident=@(e).isIdentifier()){
 			if(ident.recursiveLookup && typeid(ident) !is typeid(LookupIdentifier)){
 				if(!ident.meaning && ident.sstate != SemState.error){
-					ident.lookup(sc);
+					//ident.lookup(sc);
+					mixin(Lookup!q{_; ident, sc});
 					if(auto nr=ident.needRetry) { needRetry = nr; return; }
 				}
 				if(ident.sstate == SemState.failed){
@@ -343,12 +345,12 @@ enum SemPrlg=mixin(X!q{
 	Scheduler().add(this,sc);
 	//dw(cccc++); if(!champ||cccc>champ.cccc) champ=this;
 	//dw(champ);
-	debug scope(failure){
+/+	debug scope(failure){
 		if(loc.line) write("here! ",loc," ",typeid(this));
 		else write("here! ",toString()," ",typeid(this));
 		static if(is(typeof(meaning))) write(" meaning: ",meaning," ",typeid(this.meaning)," ",meaning.sstate);
 		writeln();
-	}
+	}+/
 });
 //static if(is(typeof(dw(this)))) dw(this);
 
@@ -463,6 +465,8 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 	override void semantic(Scope sc){ sc.error("feature "~to!string(typeid(this))~" not implemented",loc); mixin(ErrEplg); }
 
+	// analysis is trapped because of circular await-relationship involving this node
+	void noHope(Scope sc){}
 
 	Type typeSemantic(Scope sc){
 		Expression me=this;
@@ -495,7 +499,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 			}
 		}
 	}
-
+	
 	final void weakenAccessCheck(AccessCheck check){
 		//TODO: why is WeakenCheck 'a nested function and not accessible' if it is not static?
 		static struct WeakenCheck{
@@ -1074,7 +1078,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 
 		if(a.length>1){
 			if(tp) sc.error(format("can only use one index to index '%s'",e.type),a[0].loc.to(a[$-1].loc));
-			else sc.error("can only specify one dimension for static array",a[0].loc.to(a[$-1].loc));
+			else sc.error("can only specify one dimension for fixed-length array",a[0].loc.to(a[$-1].loc));
 			mixin(ErrEplg);
 		}
 		assert(a.length==1);
@@ -2362,7 +2366,7 @@ mixin template Semantic(T) if(is(T==TemplateParameter)){
 					mixin(Rewrite!q{conv});
 					// TODO: this loses the expression...
 					if(conv.sstate!=SemState.completed)
-						return conv.dependent!bool;
+						return Dependee(conv, null).dependent!bool;
 					if(arg.interpretV()!=rspec.interpretV()) return false.independent;
 				}
 				return true.independent;
@@ -2394,7 +2398,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	Dependent!bool atLeastAsSpecialized(TemplateDecl rhs)in{
 		assert(sstate == SemState.completed && sstate == rhs.sstate);
 	}body{
-		Node dependee = null;
+		Dependee dependee;
 		foreach(i,p; params[0..min($, rhs.params.length)]){
 			auto rp = rhs.params[i];
 			with(WhichTemplateParameter)
@@ -2617,8 +2621,6 @@ private:
 
 
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
-	bool firstlookup = true;
-
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 
@@ -2764,7 +2766,8 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(!eponymous.meaning && eponymous.sstate != SemState.failed
 		&& eponymous.sstate != SemState.error){
 			eponymous.recursiveLookup = false;
-			eponymous.lookup(res.getMemberScope());
+			//eponymous.lookup(res.getMemberScope());
+			mixin(Lookup!q{_; eponymous, res.getMemberScope()});
 		}
 		if(auto nr=eponymous.needRetry) { needRetry = nr; return; }
 		mixin(PropErr!q{eponymous});
@@ -2773,7 +2776,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			needRetry=false;
 			auto r = res;
 			if(r.sstate!=SemState.completed&&r.sstate!=SemState.error)
-			r.needRetry=true; // let the caller do the semantic analysis
+				r.needRetry=true; // let the caller do the semantic analysis
 			mixin(RewEplg!q{r});
 		}
 		Expression r=New!(BinaryExp!(Tok!"."))(res, eponymous);
@@ -2814,6 +2817,11 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(!rewrite) mixin(ErrEplg);
 	}
 
+	override void noHope(Scope sc){
+		auto unresolved = res.getMemberScope();
+		if(!unresolved.inexistent(eponymous))
+			mixin(ErrEplg);
+	}
 
 private:
 	Expression res;
@@ -3515,6 +3523,8 @@ class Symbol: Expression{ // semantic node
 				errsc.note("part of dependency cycle",x.loc);
 				mixin(SetErr!q{x});
 			}
+			meaning.needRetry = meaning.sstate != SemState.error
+				&& meaning.sstate != SemState.completed;
 			clist=[];
 		}else{
 			needRetry = 2;
@@ -3998,6 +4008,7 @@ class GaggingErrorHandler: ErrorHandler{
 
 	override void error(lazy string, Location){ nerrors++; }
 	override void note(lazy string, Location){ /* do nothing */ }
+	override void message(string msg){ /* do nothing */ }
 
 	/* for errors that span gagging boundaries, this is important information
 	 */
@@ -4040,21 +4051,31 @@ class GaggingScope: NestedScope{
 class GaggingRecordingErrorHandler: GaggingErrorHandler{
 		override void error(lazy string err, Location loc){
 		nerrors++;
-		records~=ErrorRecord(err,loc);
+		records~=ErrorRecord(err,loc,RecordKind.error);
 	}
 	override void note(lazy string err, Location loc){
-		records~=ErrorRecord(err,loc,true);
+		records~=ErrorRecord(err,loc,RecordKind.note);
+	}
+	override void message(string err){
+		records~=ErrorRecord(err,Location.init,RecordKind.message);
 	}
 
 	void replay(ErrorHandler h){
-		foreach(r;records) (r.isNote?&h.note:&h.error)(r.err,r.loc);
+		foreach(r;records)
+			(r.kind==RecordKind.message?h.message(r.err):
+			 (r.kind==RecordKind.note?&h.note:&h.error)(r.err,r.loc));
 	}
 
 private:
+	enum RecordKind{
+		error,
+		note,
+		message
+	}
 	static struct ErrorRecord{
 		string err;
 		Location loc;
-		bool isNote=false;
+		RecordKind kind;
 	}
 	ErrorRecord[] records;
 }
@@ -4319,7 +4340,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	}body{
 		mixin(SemPrlg);
 		assert(sstate != SemState.failed);
-		lookup(lkup);
+		///lookup(lkup);
+		mixin(Lookup!q{_;this,lkup});
 		if(needRetry) return;
 		if(sstate == SemState.failed){
 			sc.error(format("undefined identifier '%s'",name), loc);
@@ -4335,51 +4357,60 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	   + if the lookup succeeds, then 'meaning' will become initialized
 	 */
 
-	final void lookup(Scope lkup)in{
+	final Dependent!void lookup(Scope lkup)in{
 		assert(!!lkup);
 		assert(!meaning && sstate != SemState.error && sstate != SemState.failed, text(meaning," ",sstate));
 	}out{
 		if(!needRetry && sstate != SemState.error && sstate != SemState.failed)
 			assert(!!meaning && !!meaning.scope_);
 	}body{
+		enum SemRet = q{ return indepvoid; };
 		needRetry = false;
 		if(allowDelay){
 			sstate=SemState.begin; // reset
 
-			if(unresolved){
-				// dw("but...",unresolved.potentialLookup(this));
-				if(!unresolved.inexistent(this)) mixin(ErrEplg);
-				unresolved = null;
-				tryAgain = true;
-			}
-
 			meaning=recursiveLookup?lkup.lookup(this, null):lkup.lookupHere(this, null);
 
 			if(!meaning){
+				if(unresolved){
+					// dw("but...",unresolved.potentialLookup(this));
+					auto l=unresolved.potentialLookup(this);
+					if(l.length){
+						needRetry = true;
+						unresolved = null;
+						assert(l[0].sstate!=SemState.completed&&l[0].sstate!=SemState.error);
+						l[0].needRetry = true;
+						// TODO: wait for ANY of them
+						return Dependee(l[0],l[0].scope_).dependent!void;
+					}
+					if(!unresolved.inexistent(this)) mixin(ErrEplg);
+					unresolved = null;
+					tryAgain = true;
+				}
 				sstate = SemState.started;
 				mixin(RetryBreakEplg);
 			}else if(typeid(this.meaning) is typeid(DoesNotExistDecl)){
 				meaning = null;
 				needRetry=false;
 				sstate = SemState.failed;
-				return;
 			}else{
 				needRetry=false;
 				Identifier.tryAgain = true;
+				return indepvoid;
 			}
 		}else{
 			if(sstate == SemState.started) unresolved=lkup.getUnresolved(this);
 			sstate = SemState.begin;
 			mixin(RetryEplg);
 		}
+		unresolved = null;
+		return indepvoid;
 		// lkup.note(text("looked up ", this, " as ", meaning), loc);
 	}
 
 	/* performs reverse eponymous lookup for eponymous templates
 	   eg. T foo(T)(T arg){return foo!T(arg);} and
 	   eg. double foo(T)(T arg){return foo(2.0);} should compile
-	   TODO: is there maybe a way to optimize the requirements for the caller?
-	   at the moment, the caller is required to keep around two references just in case
 	 */
 
 	final Expression reverseEponymousLookup(Scope sc)in{
@@ -4398,6 +4429,13 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			}
 		}
 		return this;
+	}
+
+	override void noHope(Scope sc){
+		if(meaning) return;
+		auto unresolved = sc.getUnresolved(this);
+		if(!unresolved.inexistent(this))
+			mixin(ErrEplg);
 	}
 
 	static bool tryAgain = false;
@@ -4468,7 +4506,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(!e2.meaning){
 			if(auto ident = e2.isIdentifier()){
 				ident.recursiveLookup = false;
-				ident.lookup(msc);
+				//ident.lookup(msc);
+				mixin(Lookup!q{_;ident,msc});
 				if(ident.needRetry) { needRetry=true; return; }
 				mixin(PropErr!q{ident});
 				if(ident.sstate == SemState.failed) goto Linexistent;
@@ -4547,6 +4586,15 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		else
 			sc.error(format("no member '%s' for type '%s'",member.toString(),e1.isType()?e1:e1.type),loc);
 		mixin(ErrEplg);
+	}
+
+	void noHope(){
+		if(auto i=e2.isIdentifier()){
+			if(i.meaning) return;
+			auto unresolved = e1.getMemberScope().getUnresolved(i);
+			if(!unresolved.inexistent(i))
+				mixin(ErrEplg);
+		}
 	}
 
 	/* given that 'this' of type thisType is required, check if
@@ -6960,9 +7008,7 @@ mixin template Semantic(T) if(is(T==EmptyDecl)){
 }
 
 mixin template Semantic(T) if(is(T==GenerativeDecl)){
-/+	protected struct PotentialDeclEntry{Identifier name; size_t degree;}
-	abstract protected ???[] getRequiredSymbols();
-	abstract protected PotentialDeclEntry[] getPotentiallyProvidedSymbols();+/
+	
 }
 
 mixin template Semantic(T) if(is(T==ConditionalDecl)){
@@ -6981,11 +7027,12 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		if(sstate != SemState.pre) return;
 		scope_=sc;
 		sstate = SemState.begin;
-		ConditionalDecl.potentialInsert(sc, this);
+		potentialInsert(sc, this);
 	}
 
 	private Statement evaluate(Scope sc){
 		mixin(SemPrlg);
+		scope(exit) if(!needRetry) potentialRemove(sc, this);
 		cond.prepareInterpret();
 		cond.prepareLazyConditionalSemantic();
 		mixin(SemChld!q{cond});
@@ -6998,13 +7045,11 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		if(cond.interpretV()){
 			if(lazyDup) { lazyDup = false; bdy = bdy.ddup(); }
 			if(auto d=bdy.isDeclaration()) d.pickupSTC(stc);
-			potentialRemove(sc, this);
 			if(auto decl = bdy.isDeclaration()) decl.presemantic(sc);
 			return bdy;
 		}else if(els){
 			if(lazyDup) { lazyDup = false; els = els.ddup(); }
 			if(auto d=els.isDeclaration()) d.pickupSTC(stc);
-			potentialRemove(sc, this);
 			if(auto decl = els.isDeclaration()) decl.presemantic(sc);
 			return els;
 		}else{
@@ -7175,8 +7220,13 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 				Scheduler().add(x, sc);
 			addedToScheduler = true;
 		}
+		foreach(ref x; decls){
+			x.semantic(sc);
+			mixin(Rewrite!q{x});
+		}
+		foreach(x; decls) mixin(SemProp!q{x});
 
-		mixin(SemChld!q{decls});
+		//mixin(SemChld!q{decls});
 		mixin(SemEplg);
 	}
 
@@ -7244,10 +7294,10 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		if(parents[0].sstate != SemState.error){
 			mixin(SemChld!q{sc=scope_;rparents[0]});
 			hasExplicitBaseClass = !!(cast(AggregateTy)cast(void*)parents[0]).decl.isClassDecl();
-		}  
+		}else rparents[0].sstate = SemState.error;
 		
 		foreach(i, x;parents[1..$]){
-			if(x.sstate == SemState.error) continue;
+			if(x.sstate == SemState.error){rparents[i].sstate=SemState.error; continue;}
 			assert(x.sstate == SemState.completed);
 			assert(!!cast(AggregateTy)x);
 			if((cast(AggregateTy)cast(void*)x).decl.isClassDecl()){
@@ -7262,25 +7312,6 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 		mixin(PropErr!q{rparents});
 	}
-
-	private static{
-		// TODO: this can be done in a more elegant way
-		// currently it is rather dangerous because this does not work well in all contexts
-		class InScope: Expression{
-			Scope sc;
-			Expression nd;
-			this(Expression nd,Scope sc){ this.nd=nd; this.sc=sc; sstate=nd.sstate; needRetry=nd.needRetry;}
-			void semantic(Scope _){ mixin(SemChld!q{nd}); auto r=nd; mixin(RewEplg!q{r}); }
-			// override Type typeSemantic(Scope _){ auto ty=nd.typeSemantic(sc); if(ty) nd=ty; return ty; }
-			override void _doAnalyze(scope void delegate(Node) dg){assert(0);}
-			override inout(Expression) ddup()@trusted inout{assert(0);}
-			override string kind(){ return nd.kind; }
-			override string toString(){ return nd.toString(); }
-		}
-		
-		auto inScope(Expression nd, Scope sc){ return New!InScope(nd,sc);}
-	}
-
 	
 	// TODO: make resolution faster (?)
 	final Dependent!bool isSubtypeOf(ReferenceAggregateDecl rhs) in{
@@ -7299,9 +7330,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		if(stack.has(this)){ failed=true; return false.independent; }
 		stack.insert(this); scope(exit) stack.remove(this);
 		findParents();
-		if(auto x=unresolvedParent()) return inScope(x, scope_).dependent!bool;
 		foreach(i,ref x;parents){
-			if(x.sstate == SemState.error || rparents[i].sstate == SemState.error) continue;
+			if(x.sstate != SemState.completed || rparents[i].sstate == SemState.error) continue;
 			assert(!!cast(AggregateTy)x&&cast(ReferenceAggregateDecl)(cast(AggregateTy)x).decl);
 			auto rad =
 				cast(ReferenceAggregateDecl)cast(void*)
@@ -7317,6 +7347,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			}
 			if(t) return t;
 		}
+		// TODO: return a dummy that wakes up when ANY parent finishes analysis
+		if(auto x=unresolvedParent()) return Dependee(x, scope_).dependent!bool;
 		return false.independent;
 	}
 
@@ -7388,11 +7420,11 @@ mixin template Semantic(T) if(is(T==ClassDecl)){
 
 		if(parents.length&&
 		   (parents[0].needRetry||parents[0].sstate == SemState.error))
-			return parents[0].dependent!ClassDecl;
+			return Dependee(parents[0], scope_).dependent!ClassDecl;
 		
 		if(rhs.parents.length&&
 		   (rhs.parents[0].needRetry||rhs.parents[0].sstate == SemState.error))
-			return rhs.parents[0].dependent!ClassDecl;
+			return Dependee(rhs.parents[0], scope_).dependent!ClassDecl;
 
 		assert((!parents.length||cast(AggregateTy)parents[0])&&
 		       (!rhs.parents.length||cast(AggregateTy)rhs.parents[0]));
@@ -8294,10 +8326,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 
 		if(type.sstate == SemState.error) sstate = SemState.error, needRetry=false;
 
-		bdy.semantic(fsc);
-		//if(sstate != SemState.error) mixin(PropRetry!q{bdy}); // TODO: is this ok?
-		if(sstate != SemState.error)
-			if(auto nr=bdy.needRetry) { needRetry = nr; return; }// TODO: is this ok?
+		mixin(SemChldPar!q{sc=fsc; bdy});
 
 		if(type.hasUnresolvedReturn()){
 			type.resolveReturn(Type.get!void());
@@ -8358,7 +8387,6 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					intprt = false;
 					goto case;
 				case "msg":
-					// if(!sc.handler.showsEffect) mixin(SemEplg); // TODO: introduce again
 					if(args.length<2){if(bdy)mixin(SemChld!q{bdy}); mixin(SemEplg);}
 					//foreach(ref x; args[1..$]) x = x.semantic(sc);
 					//mixin(SemChldPar!q{args[1..$]});
@@ -8376,12 +8404,12 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 
 					// TODO: this should use the scope's error handler for output
 					import std.stdio;
-					if(!sc.handler.showsEffect) stderr.write("(gagged:) "); // TODO: remove
+					// if(!sc.handler.showsEffect) stderr.write("(gagged:) ");
 					foreach(x; a)
 						if(!x.isType() && !x.isExpTuple() && intprt)
-							stderr.write(x.interpretV().get!string());
-						else stderr.write(x.toString());
-					stderr.writeln();
+							sc.handler.message(x.interpretV().get!string());
+						else sc.handler.message(x.toString());
+					sc.handler.message("\n");
 					if(bdy) mixin(SemChld!q{bdy});
 					mixin(SemEplg);
 				default: break;

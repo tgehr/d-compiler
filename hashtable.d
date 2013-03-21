@@ -28,7 +28,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 		auto ees = es;
 		es = new B[](es.length*incrementFactor+uniform(0,incrementFactor));
 		length = 0;
-		foreach(b;ees) foreach(ref e;b) insert(e);
+		foreach(b;ees) foreach(e;b) insert(e);
 	}
 	
 	private void compact(){
@@ -286,7 +286,7 @@ private static if(size_t.sizeof==4) enum fnvp = 16777619U, fnvb = 2166136261U;
 else static if(size_t.sizeof==8) enum fnvp = 1099511628211LU, fnvb = 14695981039346656037LU;
 
 size_t FNV(size_t data, size_t start=fnvb){
-	return start^data*fnvp;
+	return (start^data)*fnvp;
 }
 
 size_t FNVred(R)(R i){

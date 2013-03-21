@@ -43,6 +43,13 @@ class DoesNotExistDecl: Declaration{
 abstract class Scope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
+	private void potentialAmbiguity(Identifier decl, Identifier lookup){
+		//error(format("declaration of '%s' results in potential ambiguity", decl), decl.loc);
+		// note("offending symbol lookup", lookup.loc);
+		error(format("declaration of '%s' smells fishy", decl), decl.loc);
+		note("this lookup should have succeeded if it was valid", lookup.loc);
+	}
+
 	bool insert(Declaration decl)in{
 		assert(decl.name&&decl.name.ptr&&!decl.scope_, decl.toString()~" "~(decl.scope_ is null?" null scope":"non-null scope"));
 	}out(result){
@@ -50,8 +57,7 @@ abstract class Scope{ // SCOPE
 	}body{
 		if(auto d=lookupHere(decl.name,null)){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
-				error(format("declaration of '%s' results in potential ambiguity", decl.name), decl.name.loc);
-				note("offending symbol lookup", d.name.loc);
+				potentialAmbiguity(decl.name, d.name);
 				mixin(SetErr!q{d.name});
 				return false;
 		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
@@ -82,8 +88,7 @@ abstract class Scope{ // SCOPE
 	bool inexistent(Identifier ident){
 		if(auto d = lookupHere(ident, null)){
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
-				error(format("declaration of '%s' results in potential ambiguity", d.name), d.name.loc);
-				note("offending symbol lookup", ident.loc);
+				potentialAmbiguity(d.name, ident);
 				mixin(SetErr!q{ident});
 				return false;
 			}

@@ -20,7 +20,7 @@ abstract class Node{
 	mixin DownCastMethods!(
 		Declaration,
 		//Statement,
-		//Expression,
+		Expression,
 	);
 
 	mixin Visitors;
@@ -39,7 +39,7 @@ template Dependent(T){
 	}
 	struct Dependent{
 		private alias Dependent D;
-		Node dependee;
+		Dependee dependee;
 		static if(!is(T==void)) T value;
 		DependentOrTrue prop()(){ return DependentOrTrue(this); }
 		
@@ -60,9 +60,15 @@ template Dependent(T){
 	}
 }
 //auto independent(T:void)() if(is(T==void)){ return Dependent!void(null); } // Y U NO WORK?
-auto indepvoid(){ return Dependent!void(null); }
-auto independent(T)(T value) if(!is(T==void)){ return Dependent!T(null, value); }
-auto dependent(T)(Node dependee){ return Dependent!T(dependee); }
+auto indepvoid(){ return Dependent!void(Dependee()); }
+auto independent(T)(T value) if(!is(T==void)){ return Dependent!T(Dependee(), value); }
+auto dependent(T)(Dependee dependee){ return Dependent!T(dependee); }
+
+struct Dependee{
+	Node node = null;
+	Scope scope_ = null;
+	bool opCast(T: bool)(){return !!node;}
+}
 
 
 
@@ -86,6 +92,8 @@ abstract class Expression: Node{
 		ExpTuple,
 		TypeTuple,
 	);
+
+	mixin DownCastMethod;
 
 	// UnaryExp!(Tok!"&") isAddressExp(){ return null; } // TODO: reduce bug
 	

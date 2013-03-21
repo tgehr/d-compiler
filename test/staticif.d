@@ -1,6 +1,6 @@
 
-static if(!is(typeof(a))) enum b = 2;
-static if(!is(typeof(b))) enum a = 2;
+static if(!is(typeof(ffff))) enum gggg = 2;
+static if(!is(typeof(gggg))) enum ffff = 2;
 
 
 // void bazz(){}
@@ -83,5 +83,5 @@ void main(){
 	pragma(msg, is(typeof(S.d2)));
 }
 
-+/
+
 // +/

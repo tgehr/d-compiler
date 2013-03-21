@@ -1,4 +1,8 @@
 
+//static if(!is(typeof(a))) enum b = 2;
+//static if(!is(typeof(b))) enum a = 2;
+
+
 template Test(bool x){
 	static if(x) enum Test = false;
 	else enum Test = true;
@@ -11,28 +15,28 @@ pragma(msg, Test!false);
 //pragma(msg, a);
 
 
-
-/+
 template IfNotConvertible(alias From, alias To, alias A){
 	static if(is(From:To)) alias Seq!() IfNotConvertible;
 	else alias A IfNotConvertible;
 }
-
 class AClass{}
 
-class Contradict: IfNotConvertible!(Contradict, AClass, AClass){
-	
-}
+static assert(!is(typeof({
+	class Contradict: IfNotConvertible!(Contradict, AClass, AClass){}
+})));
+
+class NoContradict: AClass, IfNotConvertible!(NoContradict, AClass, AClass){}
+
 
 int test(){
-	Contradict c;
+	NoContradict c;
 	AClass b = c;
 	return 2;
-}+/
+}
 //pragma(msg, test());
 
 
-/+
+
 class X{}
 class Y:X{}
 class Z:Y{}

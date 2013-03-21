@@ -3,13 +3,20 @@ auto exec(T)(T arg){
 	pragma(msg, T);
 	return arg();
 }
-pragma(msg, exec((int x=2)=>x));
+pragma(msg, exec((int x=2)=>x));// TODO: strip default params
 pragma(msg, exec((int x=3)=>x));
 
-/+
 
-/+
-// TODO: should this work?
+
+/+// TODO: should this work?
+string myAssert(Args...)(lazy bool condition, lazy Args args, int line = 12, string file = "file.d"){
+	if(!condition) return "Assertion failed @ "~file~":"~toString(line)~"\n"~args[0];
+	return "";
+}
+pragma(msg, myAssert(false, "hello"));+/
+
+
+/+// TODO: should this work?
 bool queueDG(S,T,R=T)(S x, R delegate(T) delegate(S) dg, T y){
 	return dg(x)(y);
 }
