@@ -297,7 +297,7 @@ template XX(string x){
 	enum XX = mixin(Ximpl(x));
 }
 
-// Missing from Phobos:
+// Versions from Phobos do not work. TODO: reduce and file bug report
 
 import std.range;
 bool any(alias a,R)(R range) if(is(typeof(a(R.init)): bool) && isInputRange!R){

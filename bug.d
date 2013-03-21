@@ -1,10 +1,16 @@
-int main(){
-		//float f = float.infinity;
-		int i = 0;
 
-		assert(0 == 0x80000000);
-		return 0;
-	}
+
+void main(){
+	string delegate(int, string) dg = (n, int x){};
+}
+
+/+int main(){
+	//float f = float.infinity;
+	int i = 0;
+	
+	assert(0 == 0x80000000);
+	return 0;
+}+/
 
 //int
 

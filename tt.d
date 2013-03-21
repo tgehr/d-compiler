@@ -29,6 +29,7 @@ auto tbaz4(R)(R delegate() dg) { static assert(is(R == void)); return 2; }
 static assert(0,typeof(tbaz4({})));
 
 void main(){
+	string delegate(int, string) dg = (n, int x){};
 	int delegate(int) dg = true ? (x => x) : (x => m*2);
 	byte b;
 	short s = b<<1;

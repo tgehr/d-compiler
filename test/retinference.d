@@ -17,3 +17,4 @@ void main(){
 	}();
 	pragma(msg, typeof(y));
 }
+

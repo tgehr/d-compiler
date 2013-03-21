@@ -83,7 +83,7 @@ protected:
 		foreach(i;0..column-1) stderr.write(" ");
 		stderr.write("^");
 		rep.popFront();
-		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");};
+		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");}
 		stderr.writeln();		
 	}
 }

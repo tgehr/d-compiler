@@ -4,6 +4,8 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
 
+import analyze;
+
 import variant;
 import interpret, error; // byteCompile
 
@@ -22,6 +24,8 @@ abstract class Declaration: Statement{
 	mixin DownCastMethods!(
 		VarDecl,
 		FunctionDecl,
+		FunctionDef
+,
 		// purely semantic nodes
 		OverloadableDecl,
 		OverloadSet,
@@ -168,6 +172,7 @@ final class TemplateParameter: Node{
 	}
 	override string kind(){return "template parameter";}
 
+	mixin Analyze; // Visitors
 }
 
 class TemplateDecl: OverloadableDecl{
@@ -329,6 +334,7 @@ class FunctionDef: FunctionDecl{
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();
 	}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 

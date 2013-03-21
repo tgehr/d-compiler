@@ -5,6 +5,8 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, declaration, statement, type;
 import scope_, semantic, visitors, vrange, util;
 
+import analyze;
+
 import variant;
 
 
@@ -22,6 +24,7 @@ abstract class Node{
 	mixin Visitors;
 	// Workaround for DMD forward reference bug, other part is in visitors.Visitors
 	mixin CTFEInterpret!Node; // TODO: minimize, report
+	abstract void _doAnalyze(scope void delegate(Node) dg);
 }
 
 abstract class Expression: Node{
@@ -32,6 +35,7 @@ abstract class Expression: Node{
 	override @property string kind(){return "expression";}
 
 	mixin DownCastMethods!(
+		Symbol,
 		Identifier,
 		Type,
 		LiteralExp,
@@ -239,8 +243,23 @@ class TemplateInstanceExp: Expression{
 	this(Expression exp, Expression[] a){e=exp; args=a;}
 	override string toString(){return _brk(e.toString()~"!"~(args.length!=1?"(":"")~join(map!(to!string)(args),",")~(args.length!=1?")":""));}
 }
-class BinaryExp(TokenType op): Expression{
+
+// super class for all binary expressions
+abstract class ABinaryExp: Expression{
 	Expression e1, e2;
+
+	mixin Visitors;
+}
+
+abstract class AssignExp: ABinaryExp{}
+
+template BinaryExpGetParent(TokenType op){
+	static if(isAssignOp(op)) alias AssignExp result;
+	else alias ABinaryExp result;
+	alias result BinaryExpGetParent;
+}
+
+class BinaryExp(TokenType op): BinaryExpGetParent!op{
 	this(Expression left, Expression right){e1=left; e2=right;}
 	override string toString(){
 		static if(op==Tok!"in"||op==Tok!"is"||op==Tok!"!in"||op==Tok!"!is") return _brk(e1.toString() ~ " "~TokChars!op~" "~e2.toString());

@@ -1,5 +1,6 @@
-static assert(cast(short)cast(ulong)1e10 == -7168);
+static assert( (4.0 + 3.0i) * (5 + 7i) ==-1 + 43i  );
 
+static assert(cast(short)cast(ulong)1e10 == -7168);
 
 //pragma(msg, 2*2);
 //static assert(0);
@@ -17,7 +18,7 @@ int gun(int x){
 }
 
 void main(){
-	enum ass = (assert(0,"foo"),2);
+	enum ass = (assert(1,"foo"),2);
 	pragma(msg, ass);
 	*cast(int*)&x[0] = 2;
 	immutable int x=a;
@@ -63,3 +64,5 @@ void main(){
 	//pragma(msg, [][y]);
 }
 //mixin("pragma(msg)");
+
+// +/

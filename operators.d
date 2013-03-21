@@ -18,8 +18,8 @@ enum binaryOps=mixin({string r="[";
 
 // left binding power
 template lbp(TokenType type){enum lbp=getLbp(type);}
-// right binding power: ^^, (op)= bind weaker to the right than to the left, '.' binds only primaryExpressions
-template rbp(TokenType type){enum rbp=type==Tok!"."?180:lbp!type-(type==Tok!"^^"||lbp!type==30);}
+// right binding power: ^^, (op)=, ? bind weaker to the right than to the left, '.' binds only primaryExpressions
+template rbp(TokenType type){enum rbp=type==Tok!"."?180:lbp!type-(type==Tok!"^^"||lbp!type==30||type==Tok!"?");}
 
 int getLbp(TokenType type) pure{ // operator precedence
 	switch(type){

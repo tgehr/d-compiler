@@ -1,4 +1,4 @@
-alias void foo(){};
+//alias void foo(){};
 
 void main(){
 	//auto x = r"\ ";
@@ -31,4 +31,17 @@ void main(){
 			else if(false){}// if(false){}
 			else{}
 	//x="";
+
+	void dddx(){
+		try{
+			try{
+
+			}finally{
+
+			}
+		}
+		catch(Exception e){
+		}
+	}
+	
 }

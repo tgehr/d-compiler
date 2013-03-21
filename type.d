@@ -5,6 +5,8 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, util;
 import semantic, scope_, vrange, visitors;
 
+import analyze;
+
 import std.traits : Unqual;
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
@@ -208,7 +210,7 @@ int basicTypeBitSize(TokenType op){
 		default: return -1;
 	}
 }
-bool integralIsSigned(TokenType op){
+bool basicTypeIsSigned(TokenType op){
 	switch(op){
 		case Tok!"bool", Tok!"ubyte", Tok!"ushort", Tok!"dchar", Tok!"uint", Tok!"ulong":
 				return false;

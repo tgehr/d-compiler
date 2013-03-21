@@ -4,12 +4,15 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, scope_, semantic, visitors, util;
 
+import analyze;
 
 abstract class Statement: Node{
 	override @property string kind(){return "statement";}
 
 	mixin DownCastMethods!(
 		BlockStm,
+		BreakableStm,
+		LoopingStm,
 	);
 
 	mixin Visitors;
@@ -42,6 +45,8 @@ class LabeledStm: Statement{
 	Statement s;
 	this(Identifier label, Statement statement){l=label; s=statement;}
 	override string toString(){return l.toString()~": "~s.toString();}
+
+	mixin Visitors;
 }
 
 class ExpressionStm: Statement{
@@ -60,21 +65,31 @@ class IfStm: Statement{
 
 	mixin Visitors;
 }
-class WhileStm: Statement{
+
+abstract class BreakableStm: Statement{
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+abstract class LoopingStm: BreakableStm{
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+
+class WhileStm: LoopingStm{
 	Expression e; Statement s;
 	this(Expression cond, Statement statement){e=cond; s=statement;}
 	override string toString(){return "while(" ~ e.toString() ~ ") "~s.toString();}
 
 	mixin Visitors;
 }
-class DoStm: Statement{
+class DoStm: LoopingStm{
 	Statement s; Expression e;
 	this(Statement statement, Expression cond){s=statement;e=cond;}
 	override string toString(){return "do "~s.toString()~"while("~e.toString()~");";}
 
 	mixin Visitors;
 }
-class ForStm: Statement{
+class ForStm: LoopingStm{
 	Statement s1; Expression e1, e2;
 	Statement s2;
 	this(Statement init, Expression cond, Expression next, Statement statement){s1=init; e1=cond; e2=next; s2=statement;}
@@ -82,7 +97,7 @@ class ForStm: Statement{
 
 	mixin Visitors;
 }
-class ForeachStm: Statement{
+class ForeachStm: LoopingStm{
 	Parameter[] vars;
 	Expression aggregate;
 	Statement bdy;
@@ -100,7 +115,7 @@ class ForeachRangeStm: Statement{
 	this(Parameter v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~var.toString()~";"~left.toString()~".."~right.toString()~") "~bdy.toString();}
 }
-class SwitchStm: Statement{
+class SwitchStm: BreakableStm{
 	bool f; Expression e; Statement s;
 	this(bool isfinal, Expression exp, Statement statement){f=isfinal; e=exp; s=statement;}
 	this(Expression exp, Statement statement){f=false; e=exp; s=statement;}
@@ -125,11 +140,15 @@ class ContinueStm: Statement{
 	Identifier e;
 	this(Identifier identifier){e=identifier;}
 	override string toString(){return "continue"~(e?" "~e.name:"")~";";}
+
+	mixin Visitors;
 }
 class BreakStm: Statement{
 	Identifier e;
 	this(Identifier identifier){e=identifier;}
 	override string toString(){return "break"~(e?" "~e.name:"")~";";}
+
+	mixin Visitors;
 }
 class ReturnStm: Statement{
 	Expression e;
@@ -155,6 +174,8 @@ class GotoStm: Statement{
 			case WhichGoto.caseExp: return "goto case "~e.toString()~";";
 		}
 	}
+
+	mixin Visitors;
 }
 class WithStm: Statement{
 	Expression e; Statement s;
@@ -177,7 +198,7 @@ class TryStm: Statement{
 	Statement statement;
 	CatchStm[] catches;
 	Statement finally_;
-	this(Statement s,CatchStm[] c, Statement f)in{assert(s&&1);foreach(x;c[0..$-1]) assert(x.type&&1);}body{
+	this(Statement s,CatchStm[] c, Statement f)in{assert(s&&1);if(c.length)foreach(x;c[0..$-1]) assert(x.type&&1);}body{
 		statement=s;
 		catches=c;
 		finally_=f;

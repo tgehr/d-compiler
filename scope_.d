@@ -41,7 +41,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 	ErrorHandler handler;
 
 	bool insert(Declaration decl)in{
-		assert(decl.name&&decl.name.ptr&&!decl.scope_);
+		assert(decl.name&&decl.name.ptr&&!decl.scope_, decl.toString()~" "~(decl.scope_ is null?" null scope":"non-null scope"));
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
@@ -67,6 +67,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		decl.scope_=this;
 		return true;
 	}
+
 	// TODO: useful or just unnecessarily convenient?
 	Declaration lookup(Identifier ident, lazy Declaration alt){
 		return symtab.get(ident.ptr, alt);
@@ -76,13 +77,26 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		error(format("undefined identifier '%s'",ident.name), ident.loc);
 		return New!ErrorDecl();
 	}
-	
+
+
 	FunctionDef getFunction(){return null;}
-	
-	//T push(T:NestedScope)(R sc){ return New!T(this); }
-	//Scope pop(){assert(0,"tried to pop module scope");}
+	// control flow structures:
+	BreakableStm getBreakableStm(){return null;}
+	LoopingStm getLoopingStm(){return null;}
+	SwitchStm getSwitchStm(){return null;}
+	bool isEnclosing(BreakableStm){return false;}
+
+	bool insertLabel(LabeledStm stm){ assert(0); }
+	LabeledStm lookupLabel(Identifier lbl){ assert(0); }	
+	void registerForLabel(GotoStm stm, Identifier l)in{
+		assert(stm.t==WhichGoto.identifier);
+	}body{ assert(0); }
+	int unresolvedLabels(scope int delegate(GotoStm) dg){return 0;}
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
+
+
+	string toString(){return "scope{"~join(map!(to!string)(symtab.values),",")~"}";}
 
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
@@ -103,6 +117,18 @@ abstract class NestedScope: Scope{
 		return symtab.get(ident.ptr, parent.lookup(ident, alt));
 	}
 
+	override bool insertLabel(LabeledStm stm){
+		return parent.insertLabel(stm);
+	}
+	override LabeledStm lookupLabel(Identifier ident){
+		return parent.lookupLabel(ident);
+	}
+	void registerForLabel(GotoStm stm, Identifier l){
+		parent.registerForLabel(stm, l);
+	}
+	override int unresolvedLabels(scope int delegate(GotoStm) dg){
+		return parent.unresolvedLabels(dg);
+	}
 
 	override FunctionDef getFunction(){return parent.getFunction();}
 
@@ -113,8 +139,30 @@ class FunctionScope: NestedScope{ // Forward references don't get resolved
 		super(parent);
 		this.fun=fun;
 	}	
-	override FunctionDef getFunction(){return fun;}
 
+	override bool insertLabel(LabeledStm stm){
+		if(auto s = lstmsymtab.get(stm.l.ptr,null)){
+			error(format("rededefinition of label '%s'",stm.l.toString()),stm.l.loc);
+			note("previous definition was here",s.l.loc);
+			return false;
+		}
+		lstmsymtab[stm.l.ptr] = stm;
+		return true;
+	}
+	override LabeledStm lookupLabel(Identifier l){
+		if(auto s = lstmsymtab.get(l.ptr,null)) return s;
+		return null;
+	}
+	override int unresolvedLabels(scope int delegate(GotoStm) dg){
+		foreach(x;_unresolvedLabels) if(auto r = dg(x)) return r;
+		return 0;
+	}
+	override void registerForLabel(GotoStm stm, Identifier l){
+		// rename to lbl to make DMDs hashtable fail
+		if(auto lbll = lookupLabel(l)) stm.resolveLabel(lbll);
+		else _unresolvedLabels~=stm;
+	}
+	override FunctionDef getFunction(){return fun;}
 	alias Scope.lookup lookup; // overload lookup
 protected:
 	bool canDeclareNested(Declaration decl){ // for BlockScope
@@ -122,6 +170,8 @@ protected:
 	}
 private:
 	FunctionDef fun;
+	LabeledStm[const(char)*] lstmsymtab;
+	GotoStm[] _unresolvedLabels;
 }
 
 class BlockScope: NestedScope{ // No shadowing of declarations in the enclosing function.
@@ -138,8 +188,37 @@ class BlockScope: NestedScope{ // No shadowing of declarations in the enclosing 
 		super.insert(decl); // overload lookup
 		return true;
 	}
+
+	void setBreakableStm(BreakableStm brk)in{assert(!brokenOne);}body{
+		brokenOne = brk;
+	}
+	void setLoopingStm(LoopingStm loop)in{assert(!brokenOne&&!theLoop);}body{
+		brokenOne = theLoop = loop;
+	}
+	void setSwitchStm(SwitchStm swstm)in{assert(!brokenOne&&!swstm);}body{
+		brokenOne = theSwitch = swstm;
+	}
+
+	override BreakableStm getBreakableStm(){
+		return brokenOne ? brokenOne : parent.getBreakableStm();
+	}
+	override LoopingStm getLoopingStm(){
+		return theLoop ? theLoop : parent.getLoopingStm();
+	}
+	override SwitchStm getSwitchStm(){
+		return theSwitch ? theSwitch : parent.getSwitchStm();
+	}
+
+	override bool isEnclosing(BreakableStm stm){
+		return brokenOne is stm || parent.isEnclosing(stm);
+	}
+
 protected:
 	override bool canDeclareNested(Declaration decl){
 		return super.canDeclareNested(decl) && parent.canDeclareNested(decl);
 	}
+private:
+	BreakableStm brokenOne;
+	LoopingStm theLoop;
+	SwitchStm theSwitch;
 }

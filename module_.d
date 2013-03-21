@@ -2,6 +2,8 @@
 
 import lexer, parser, error, scope_, semantic, util;
 
+import analyze;
+
 import core.memory;
 import std.stdio, std.algorithm;
 
@@ -43,6 +45,8 @@ class Module: Node{
 		mixin(PropErr!q{decls});
 		mixin(SemEplg);
 	}
+
+	mixin Analyze;
 
 	override @property string kind(){return "module";}
 	override string toString(){return "some module";} // TODO

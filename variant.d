@@ -11,6 +11,33 @@ import std.string : text;
 
 import std.stdio;
 
+// TODO: refactor the whole code base into smaller modules
+struct BCSlice{
+	void[] container;
+	void[] slice;
+
+	this(void[] va){
+		container = slice = va;
+	}
+	this(void[] cnt, void[] slc){
+		container = cnt;
+		slice = slc;
+	}
+	BCPointer getPtr(){
+		return BCPointer(container, slice.ptr);
+	}
+	size_t getLength(){
+		return slice.length;
+	}
+}
+
+struct BCPointer{
+	void[] container;
+	void* ptr;
+}
+
+
+
 enum Occupies{
 	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, err
 }
@@ -68,7 +95,9 @@ private struct RTTypeID{
 		static if(is(T==typeof(null))){
 			r.occupies = Occupies.none;
 			r.toExpr = function(ref Variant self){
-				return New!LiteralExp(token!"null");
+				auto r = New!LiteralExp(token!"null").semantic(null);
+				r.dontConstFold();
+				return r;
 			};
 			r.convertTo = function(ref Variant self, Type to){
 				if(to is Type.get!(typeof(null))()) return self;
@@ -76,13 +105,15 @@ private struct RTTypeID{
 				return cannotConvert(self, to);
 			};
 			r.toString = function(ref Variant self){return "null";};
-			r.toVoidArray = function (ref Variant self) => null;
+			r.toBCSlice = function (ref Variant self) => BCSlice(null);
 		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
 			enum occ = getOccupied!T;
 			r.whichBasicType=Tok!(is(T==string)?"``c":is(T==wstring)?"``w":is(T==dstring)?"``d":assert(0));
 			r.occupies = occ;
 			r.toExpr = function Expression(ref Variant self){
-				return LiteralExp.create!New(mixin(`self.`~to!string(occ)));
+				auto r=LiteralExp.create!New(mixin(`self.`~to!string(occ)));
+				r.dontConstFold();
+				return r;
 			};
 			r.convertTo = function Variant(ref Variant self, Type to){
 				auto tou = to.getHeadUnqual();
@@ -110,15 +141,19 @@ private struct RTTypeID{
 				return to!string('"'~escape(mixin(`self.`~to!string(occ)))~'"'~sfx);
 			};
 
-			r.toVoidArray = function void[](ref Variant self){
-				return cast(void[])mixin(`self.`~to!string(occ));
+			r.toBCSlice = function BCSlice(ref Variant self){
+				auto str = mixin(`self.`~to!string(occ));
+				str=str~0; // duplicate payload and zero terminate
+				return BCSlice(cast(void[])str, cast(void[])str[0..$-1]);
 			};
 		}else static if(isBasicType!T){//
 			alias getOccupied!T occ;
 			r.whichBasicType = Tok!(T.stringof);
 			r.occupies = occ;
 			r.toExpr = function Expression(ref Variant self){
-				return LiteralExp.create!New(cast(T)mixin(`self.`~to!string(occ)));
+				auto r=LiteralExp.create!New(cast(T)mixin(`self.`~to!string(occ)));
+				r.dontConstFold();
+				return r;
 				//assert(0,"TODO");
 			};
 			r.convertTo = function Variant(ref Variant self, Type to){
@@ -127,7 +162,7 @@ private struct RTTypeID{
 						foreach(x;ToTuple!basicTypes){
 							static if(x!="void")
 							case Tok!x:
-							return Variant(mixin(`cast(`~x~`)self.`~.to!string(occ)));
+								return Variant(mixin(`cast(`~x~`)cast(T)self.`~.to!string(occ)));
 						}
 						case Tok!"void": return self;
 						default: break;
@@ -153,7 +188,7 @@ private struct RTTypeID{
 
 				return left~to!string(mixin(`cast(T)self.`~to!string(occ)))~right~sfx;
 			};
-			r.toVoidArray = function void[](ref Variant self){
+			r.toBCSlice = function BCSlice(ref Variant self){
 				assert(0,"cannot turn basic type into void[]");
 			};
 		}else static if(is(T==Variant[])){
@@ -163,7 +198,9 @@ private struct RTTypeID{
 				Expression[] lit = new Expression[self.length];
 				foreach(i,ref x;lit) x = self.arr[i].id.toExpr(self.arr[i]);
 				// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
-				return New!ArrayLiteralExp(lit).semantic(null); // TODO: ok?
+				auto r=New!ArrayLiteralExp(lit).semantic(null); // TODO: ok?
+				r.dontConstFold();
+				return r;
 			};
 			r.convertTo = function Variant(ref Variant self, Type to){
 				// assert(to.getHeadUnqual().getElementType()!is null);
@@ -187,24 +224,24 @@ private struct RTTypeID{
 				import std.algorithm, std.array;
 				return '['~join(map!(to!string)(self.arr),",")~']';
 			};
-			r.toVoidArray = function void[](ref Variant self){
+			r.toBCSlice = function BCSlice(ref Variant self){
 				import std.typetuple;
 				auto el = self.getType().getElementType();
 				assert(el);
 				if(el.getElementType()){
 					// TODO: this allocates, probably ok
-					auto r = new void[][self.length];
-					foreach(i,ref x;r) x=self.arr[i].get!(void[])();
-					return r;
+					auto r = new BCSlice[self.length];
+					foreach(i,ref x;r) x=self.arr[i].get!BCSlice();
+					return BCSlice(r);
 				}
 				if(auto bt=el.getUnqual().isBasicType()){
-					if(bt.isIntegral){
+					if(bt.isIntegral()){
 						switch(bt.getSizeof()){
 							foreach(U; TypeTuple!(ubyte, ushort, uint, ulong)){
 								case U.sizeof:
 								auto r=new U[self.length];
 								foreach(i,ref x;r) x=cast(U)self.arr[i].get!ulong();
-								return r;
+								return BCSlice(r);
 							}
 							default: import std.stdio; writeln(self);assert(0);
 						}
@@ -213,25 +250,25 @@ private struct RTTypeID{
 						if(bt is Type.get!U()){
 							auto r=new U[self.length];
 							foreach(i,ref x;r) x=cast(U)self.arr[i].flt80;
-							return r;
+							return BCSlice(r);
 						}
 					}
 					foreach(U; TypeTuple!(ifloat, idouble, ireal)){
 						if(bt is Type.get!U()){
 							auto r=new U[self.length];
 							foreach(i,ref x;r) x=cast(U)self.arr[i].fli80;
-							return r;
+							return BCSlice(r);
 						}
 					}
 					foreach(U; TypeTuple!(cfloat, cdouble, creal)){
 						if(bt is Type.get!U()){
 							auto r=new U[self.length];
 							foreach(i,ref x;r) x=cast(U)self.arr[i].cmp80;
-							return r;
+							return BCSlice(r);
 						}
 					}
 				}
-				assert(0,"TODO: toVoidArray for "~to!string(self.id.type));
+				assert(0,"TODO: toBCSlice for "~to!string(self.id.type));
 			};
 		}else{
 			static assert(!isBasicType!T);
@@ -253,7 +290,7 @@ private:
 	Expression function(ref Variant) toExpr;
 	string function(ref Variant) toString;
 	Variant function(ref Variant,Type) convertTo;
-	void[] function(ref Variant) toVoidArray;
+	BCSlice function(ref Variant) toBCSlice;
 
 	private static Variant function(ref Variant,Type) cannotConvert;
 	static this(){ // meh
@@ -320,12 +357,9 @@ struct Variant{
 		string str; wstring wstr; dstring dstr;
 		ulong int64;
 		real flt80; ireal fli80; creal cmp80;
-		// TODO: arrays
 		Variant[] arr;
 		ErrorRecord[] err;
 		// TODO: structs, classes
-		// strings with location
-		// TODO: WithLoc!string* strl; WithLoc!wstring* wstrl; WithLoc!dstring* dstrl;
 	}
 
 	T get(T)(){
@@ -342,20 +376,21 @@ struct Variant{
 			        || is(T==ifloat) || is(T==idouble)||is(T==ireal)){
 			assert(id.occupies == Occupies.flt80 || id.occupies == Occupies.fli80);
 			return flt80;
-		}else static if(is(T==void[])) return id.toVoidArray(this);
+		}else static if(is(T==BCSlice)) return id.toBCSlice(this);
 		else static assert(0, "cannot get this field (yet?)");
 	}
 
-	static Variant fromVoidArray(void[] v, Type type)in{assert(type.getElementType);}body{
+	static Variant fromBCSlice(BCSlice bc, Type type)in{assert(type.getElementType());}body{
+		auto v = bc.slice;
 		auto tyu=type.getHeadUnqual();
 		import std.typetuple;
 		foreach(T;TypeTuple!(string, wstring, dstring))
 			if(tyu is Type.get!T()) return Variant(cast(T)v);
 		auto el = type.getElementType().getHeadUnqual();
 		if(el.getElementType()){
-			auto from = cast(void[][])v;
+			auto from = cast(BCSlice[])v;
 			auto res = new Variant[from.length];
-			foreach(i,ref x; res) x = fromVoidArray(from[i],el);
+			foreach(i,ref x; res) x = fromBCSlice(from[i],el);
 			return Variant(res);
 		}
 		if(auto bt = el.isBasicType()){
@@ -498,10 +533,12 @@ struct Variant{
 				assert(id.occupies == occ);
 				enum code = to!string(occ)~op~`rhs.`~to!string(occ);
 				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
-				static if(is(typeof(mixin(code)))) case Tok!x: 
+				static if(is(typeof(mixin(code)))){
+					case Tok!x: 
 					if(rhs.id.occupies == id.occupies)
 						return Variant(mixin(code));
 					else return strToArr().opBinary!op(rhs);
+				}
 			}
 			default: break;
 		}

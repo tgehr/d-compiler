@@ -60,7 +60,7 @@ bool isClosingToken(TokenType type){
 
 //private template isCode(R){enum isCode=isForwardRange!R && is(Unqual!(ElementType!R) == Token);}
 private template GetStringOf(T){enum GetStringOf=T.stringof;} // Workaround for strange compiler limitations
-// uncomment to trigger forward reference bug: 
+// uncomment to trigger forward reference bug:
 //private template GetStringOf(S: UnaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 //private template GetStringOf(S: BinaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 //private template GetStringOf(S: PostfixExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
@@ -83,11 +83,11 @@ private template getParseProc(T...){
 //dummy structs for some of the parsing procedures:
 private{
 	struct StorageClass{}   struct ArgumentList{}          struct AssocArgumentList{}
-	struct IdentifierList{} struct AssignExp{}             struct OrOrExp{}
+	struct IdentifierList{} struct SimpleIdentifierList{}  struct OrOrExp{}
 	struct Existing{}       struct DebugCondition{}        struct VersionCondition{}
 	struct CondDeclBody{}   struct OptTemplateConstraint{} struct TemplateParameterList{}
 	struct Tuple{}          struct TypeOrExpression{}      struct Initializer{}
-	struct DeclDef{}        struct Condition{}             struct SimpleIdentifierList{}
+	struct DeclDef{}        struct Condition{}
 }
 private template TTfromStr(string arg){ // turns "a,b,c,..." into TypeTuple(a,b,c,...)
 	alias TypeTuple!(mixin("TypeTuple!("~arg~")")) TTfromStr;
@@ -106,7 +106,7 @@ private template doParseImpl(bool d,T...){
 				static if(T[0]=="OPT")
 						return (d?"auto ":"")~T[2]~" = "~(T[3]!=")"?"ttype==Tok!\""~T[3]~"\" || ":"")~"ttype==Tok!\")\" ? null : "~
 						getParseProc!(T[1..$]).prc~";\n"~doParseImpl!(d,T[1+getParseProc!T.off..$]);
-				default: return "expect(Tok!\""~T[0]~"\");\n"~doParseImpl!(d,T[1..$]);;
+				default: return "expect(Tok!\""~T[0]~"\");\n"~doParseImpl!(d,T[1..$]);
 			}
 		}();
 	else static if(is(T[0]==Existing)) alias doParseImpl!(d,T[2..$]) doParseImpl;
@@ -742,15 +742,21 @@ private struct Parser{
 				mixin(rule!(DefaultStm,Existing,"s.data"));
 			case Tok!"continue":
 				nextToken();
-				if(ttype==Tok!"i") res=New!ContinueStm(New!Identifier(tok.name)), nextToken();
-				else res=New!ContinueStm(cast(Identifier)null);
+				if(ttype==Tok!"i"){
+					auto i = New!Identifier(tok.name);
+					i.loc = tok.loc;
+					res=New!ContinueStm(i), nextToken();
+				}else res=New!ContinueStm(cast(Identifier)null);
 				expect(Tok!";");
 				return res;
 			//mixin(pStm!("break", "OPT", Identifier, ";");
 			case Tok!"break":
 				nextToken();
-				if(ttype==Tok!"i") res=New!BreakStm(New!Identifier(tok.name)), nextToken();
-				else res=New!BreakStm(cast(Identifier)null);
+				if(ttype==Tok!"i"){
+					auto i = New!Identifier(tok.name);
+					i.loc = tok.loc;
+					res=New!BreakStm(i), nextToken();
+				}else res=New!BreakStm(cast(Identifier)null);
 				expect(Tok!";");
 				return res; // TODO: location
 			mixin(pStm!("return","OPT",Expression,";"));
@@ -758,7 +764,9 @@ private struct Parser{
 				nextToken();
 				switch(ttype){
 					case Tok!"i":
-						res=New!GotoStm(WhichGoto.identifier,New!Identifier(tok.name));
+						auto i = New!Identifier(tok.name);
+						i.loc = tok.loc;
+						res=New!GotoStm(WhichGoto.identifier,i);
 						nextToken(); expect(Tok!";");
 						return res;
 					case Tok!"default": mixin(rule!(GotoStm,Existing,q{WhichGoto.default_,cast(Expression)null},"_",";"));
@@ -776,7 +784,7 @@ private struct Parser{
 			case Tok!"try":
 				mixin(doParse!("_",Statement,"ss"));
 				auto catches=appender!(CatchStm[])();
-				do{ // TODO: abstract loop away, as soon as compile memory usage is better
+				if(ttype != Tok!"finally") do{ // TODO: abstract loop away, as soon as compile memory usage is better
 					Location loc=tok.loc;
 					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
 					auto c=New!CatchStm(type,ident,s); c.loc=loc.to(ptok.loc);
@@ -860,7 +868,7 @@ private struct Parser{
 			switch(ttype){
 				case Tok!"*":
 					auto loc = tt.loc;
-					tt=New!PointerTy(tt); 
+					tt=New!PointerTy(tt);
 					tt.loc=loc.to(tok.loc);
 					nextToken();
 					continue;
@@ -1309,7 +1317,7 @@ private struct Parser{
 				nextToken();
 			}else if(ttype == Tok!"this"){
 				which = WhichTemplateParameter.this_;
-				nextToken();				
+				nextToken();
 			}else{
 				auto tt=peek().type;
 				if(tt!=Tok!"," && tt!=Tok!":" && tt!=Tok!"=" && tt!=Tok!")" && tt!=Tok!"...") type=parseType();
