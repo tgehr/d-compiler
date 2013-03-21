@@ -98,7 +98,7 @@ struct ChunkGCAlloc{
 	}
 	void[] NewImpl()(size_t size){
 		import std.c.stdlib;
-		enum size_t alignm=4, chunksize=2*1024;
+		enum size_t alignm=4, chunksize=1024*1024;
 		auto offs=cast(void*)(cast(size_t)(_mlp.ptr+alignm-1)&~(cast(size_t)alignm-1))-_mlp.ptr;
 		if(_mlp.length>=size+offs){
 			Lok:

@@ -165,68 +165,23 @@ struct Location{
 string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~']'; return r;}
 struct Token{
 	TokenType type;
-	//uint loc;
 	string toString() const{
-		switch(type) {
-			case Tok!"i":
-				return name;
-			case Tok!"``":
-				return '"'~escape(str)~'"';
-			case Tok!"``c":
-				return '"'~escape(str)~`"c`;
-			case Tok!"``w":
-				return '"'~escape(str)~`"w`;
-			case Tok!"``d":
-				return '"'~escape(str)~`"d`;
-			case Tok!"''":
-				return '\''~escape(to!string(cast(dchar)int64),false)~'\'';
-			case Tok!"0":
-				return to!string(int64);
-			case Tok!"0U":
-				return to!string(int64)~'U';
-			case Tok!"0L":
-				return to!string(int64)~'L';
-			case Tok!"0LU":
-				return to!string(int64)~"LU";
-			case Tok!".0":
-				return to!string(flt80);
-			case Tok!".0f":
-				return to!string(flt80)~'f';
-			case Tok!".0L":
-				return to!string(flt80)~'L';
-			case Tok!".0i":
-				return to!string(flt80)~'i';
-			case Tok!".0fi":
-				return to!string(flt80)~"fi";
-			case Tok!".0Li":
-				return to!string(flt80)~"Li";
-			case Tok!"Error":
-				return "error: "~str;
-			default:
-				return TokenTypeToString(type);
-		}
+		if(rep!is null) return rep;
+		return TokenTypeToString(type);
 	}
 	union{
 		string str, name;  // string literals, identifiers
 		ulong int64;       // integer literals
 		real flt80;        // float, double, real literals
 	}
-	/*@property void str(string){}
-	@property void name(string){}
-	@property void int64(ulong){}
-	@property void flt80(real){}
-
-	@property string str()const{return "aa";}
-	@property string name()const{return "aa";}
-	@property ulong int64()const{return 0;}
-	@property real flt80()const{return 0.0L;}*/
+	string rep; // slice of the code representing this token
 }
-
 template token(string t){enum token=Token(Tok!t);}
 
-Token tokError(string s) {
+Token tokError(string s, string rep) {
 	auto r = token!"Error";
 	r.str = s;
+	r.rep = rep;
 	GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
 	return r;
 }
@@ -260,382 +215,463 @@ string caseSimpleToken(string prefix="", bool needs = false){
 	return r;
 }
 
-immutable(Token)[] lex(string code)in{assert(!code[$-4]&&!code[$-3]&&!code[$-2]&&!code[$-1]);}body{ // four padding zero bytes required because of UTF
-	alias mallocAppender appender;
-	if(code.length > int.max) return [tokError("no support for sources exceeding 2GB")];
-	if(!code.length) return [];
-	GC.disable(); scope(exit) GC.enable(); // no garbage collection during lexing
+struct Anchor{
+	size_t index;
+}
 
-	auto lexed = appender!(immutable(Token)[])();
-	auto p=code.ptr;
-	auto s=p;
-	Token tok;
-	ulong value;
-	char del;
-	size_t len;
-	typeof(p) invCharSeq_l=null;
-	void invCharSeq(){if(p>invCharSeq_l+1) invCharSeq_l=p, lexed.put(tokError("invalid character sequence")); p++;}
-	int nl = 0; // count number of newlines to be able to give the unterminated string Error in the approp. place
-	// text macros:
-	enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}};
-	enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}}; // don't break, continue
-	enum caseNl = q{case '\r':  if(p[1]=='\n') p++; goto case; case '\n': p++; lexed.put(token!"\n"); continue;};
-	enum caseNl2 = q{case '\r': if(p[1]=='\n') p++; goto case; case '\n': p++; nl++; continue;}; // just count newlines
-	loop: for(;;) { // breaks on EOF
-		switch(*p++){
-			// whitespace
-			case 0, 0x1A:
-				tok = token!"EOF";
-				break loop;
-			case ' ', '\t', '\v':
-				continue;   // ignore whitespace
-			case '\r': if(*p=='\n') p++; goto case;
-			case '\n':
-				tok=token!"\n"; // needed for line information in the parser
-				break;
+auto lex(string code){
+	return Lexer(code);
+}
+
+import std.c.stdlib;
+
+struct Lexer{
+	string code; // Manually allocated!
+	Token[] buffer;
+	size_t n,m; // start and end index in buffer
+	size_t s,e; // global start and end index
+	size_t numAnchors;  // number of existing anchors for this lexer
+	size_t firstAnchor; // first local index that has to remain in buffer
+	/+invariant(){ // useless because DMD does not test the invariant at the proper time...
+		assert(e-s == (m-n+buffer.length)%buffer.length); // relation between (s,e) and (n,m)
+		assert(!(buffer.length&buffer.length-1)); // buffer size is always a power of two
+		assert(numAnchors||firstAnchor==size_t.max);
+	}+/
+	this(string c)in{assert(c.length>=4&&!c[$-4]&&!c[$-3]&&!c[$-2]&&!c[$-1]);}body{ // four padding zero bytes required because of UTF
+		code = c;
+		//if(code.length > int.max) return res[0]=tokError("no support for sources exceeding 2GB",null),1; // TODO: move check away from here
+		enum initsize=1;//4096;//685438;//
+		buffer = new Token[](initsize);//
+		//buffer = (cast(Token*)malloc(Token.sizeof*initsize))[0..initsize];//
+		numAnchors=0;
+		firstAnchor=size_t.max;
+		n=s=0;
+		e=lexTo(buffer);
+		m=e&buffer.length-1;
+	}
+	@property ref const(Token) front()const{return buffer[n];}
+	@property bool empty(){return buffer[n].type==Tok!"EOF";}
+	void popFront(){
+		//writeln(buffer.length);
+		assert(!empty,"attempted to popFront empty lexer.");
+		//writeln("popFront"); scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
+		n = n+1 & buffer.length-1; s++;
+		if(s<e) return; // if the buffer still contains elements
+		assert(s==e && n==m);
+		if(!numAnchors){// no anchors, that is easy, just reuse the whole buffer
+			n=0;
+			e+=m=lexTo(buffer);
+			m&=buffer.length-1;
+			return;
+		}
+		assert(firstAnchor<buffer.length);
+		size_t num;
+		if(m < firstAnchor){ // there is an anchor but still space
+			num=lexTo(buffer[n..firstAnchor]);
+			e+=num; m=m+num&buffer.length-1;
+			return;
+		}else if(m > firstAnchor){ // ditto
+			num=lexTo(buffer[m..$]);
+			if(firstAnchor) num+=lexTo(buffer[0..firstAnchor]);
+			e+=num; m=m+num&buffer.length-1;
+			return;
+		}
+		auto len=buffer.length;
+		buffer.length=len<<1; // double buffer size
+		//buffer=(cast(Token*)realloc(buffer.ptr,(len<<1)*Token.sizeof))[0..len<<1];
+		n=len+firstAnchor; // move start and firstAnchor
+		buffer[len..n]=buffer[0..firstAnchor]; // move tokens to respect the new buffer topology
+		num=0;
+		if(n<buffer.length){
+			num=lexTo(buffer[n..$]);
+			e+=num; m=n+num&buffer.length-1;
+		}	
+		if(!m&&firstAnchor){
+			num=lexTo(buffer[0..firstAnchor]);
+			e+=num; m=num&buffer.length-1;
+		}
+	}
+	Anchor pushAnchor(){
+		//writeln("pushAnchor");scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
+		if(!numAnchors) firstAnchor=n;
+		numAnchors++;
+		return Anchor(s);
+	}
+	void popAnchor(Anchor anchor){
+		//writeln("popAnchor");scope(exit){writeln(buffer); writeln(s," ",e," ",n," ",m);}
+		numAnchors--;
+		if(!numAnchors) firstAnchor=size_t.max;
+		n=n+anchor.index-s&buffer.length-1;
+		s=anchor.index;
+	}
+	size_t lexTo(Token[] res)in{assert(res.length);}body{
+		alias mallocAppender appender;
+		if(!code.length) return 0;
+		
+		auto p=code.ptr;
+		auto s=p;    // used if the input has to be sliced
+		Token tok;   // scratch space for creating new tokens
+		char del;    // used if a delimiter of some sort needs to be remembered
+		size_t len;  // used as a temporary that stores the length of the last UTF sequence
+		size_t num=0;// number of tokens lexed, return value
+		typeof(p) invCharSeq_l=null;
+		void invCharSeq(){if(p>invCharSeq_l+1) invCharSeq_l=p/*, lexed.put(tokError("invalid character sequence",p[0..1]))*/; p++;} // TODO: fix
+		// text macros:
+		enum skipUnicode = q{if(*p<0x80){p++;break;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}};
+		enum skipUnicodeCont = q{if(*p<0x80){p++;continue;} len=0; try utf.decode(p[0..4],len), p+=len; catch{invCharSeq();}}; // don't break, continue
+		enum caseNl = q{case '\r':  if(p[1]=='\n') p++; goto case; case '\n': p++; continue;};
+		loop: while(res.length) { // breaks on EOF or buffer full
+			auto begin=p; // start of a token's representation
+			switch(*p++){
+				// whitespace
+				case 0, 0x1A:
+					tok = token!"EOF";
+					res[0]=tok; res=res[1..$];
+					num++;
+					break loop;
+				case ' ', '\t', '\v':
+					continue;   // ignore whitespace
+				case '\r': if(*p=='\n') p++; goto case;
+				case '\n':
+					continue;
 			
-			// simple tokens
-			mixin(caseSimpleToken());
+				// simple tokens
+				mixin(caseSimpleToken());
 			
-			// slash is special
-			case '/':
-				switch(*p){
-					case '=': tok = token!"/="; p++;
-					break;
-					case '/': p++;
-						while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
-						continue; // ignore comment
-					case '*':
-						p++;
-						consumecom2: for(;;){
-							switch(*p){
-								mixin(caseNl); // handle newlines
-								case '*': p++; if(*p=='/'){p++; break consumecom2;} break;
-								case 0, 0x1A: break consumecom2; //TODO: Error
-								default: mixin(skipUnicode);
-							}
-						}
-						continue; // ignore comment
-					case '+':
-						int d=1; p++;
-						consumecom3: while(d){
-							switch(*p){
-								mixin(caseNl); // handle newlines
-								case '+':  p++; if(*p=='/') d--, p++; break;
-								case '/':  p++; if(*p=='+') d++, p++; break;
-								case 0, 0x1A: break consumecom3; //TODO: ERROR
-								default: mixin(skipUnicode);
-							}
-						}
-						continue; // ignore comment
-					default: tok = token!"/";
-				}
-				break;
-			// dot is special
-			case '.':
-				if('0' > *p || *p > '9'){
-					if(*p != '.')      tok = token!".";
-					else if(*++p!='.') tok = token!"..";
-					else               tok = token!"...", p++;
-					break;
-				}
-				p++; goto case;
-			// numeric literals
-			case '0': .. case '9':
-				tok = lexNumber(--p);
-				if(tok.type == Tok!"Error") lexed.put(tok), tok=token!"__error";
-				break;
-			// character literals
-			case '\'':
-				tok.type = Tok!"''";
-				if(*p=='\\'){
-					try p++, tok.int64 = cast(ulong)readEscapeSeq(p);
-					catch(EscapeSeqException e) e.msg?lexed.put(tokError(e.msg)):invCharSeq();
-				}else{
-					try{
-						len=0;
-						tok.int64 = utf.decode(p[0..4],len);
-						p+=len;
-					}catch{invCharSeq();}
-				}
-				if(*p!='\''){
-					//while((*p!='\''||(p++,0)) && *p && *p!=0x1A) mixin(skipUnicodeCont);
-					lexed.put(tokError("unterminated character constant"));
-				}else p++;
-				break;
-			// string literals
-			// WYSIWYG string/AWYSIWYG string
-			case 'r':
-				if(*p!='"') goto case 'R';
-				p++; del='"';
-				goto skipdel;
-			case '`':
-				del = '`'; skipdel:
-				nl = 0;
-				s = p;
-				readwysiwyg: for(;;){
-					if(*p==del){p++; break;} 
+				// slash is special
+				case '/':
 					switch(*p){
-						mixin(caseNl2); // handle newlines
-						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal"));
-							break readwysiwyg;
-						default: mixin(skipUnicode);
-					}
-				}
-				tok.type = Tok!"``";
-				tok.str = s[0..p-s-1]; // reference to code
-				goto lexstringsuffix;
-			// token string
-			case 'q':
-				if(*p=='"') goto delimitedstring;
-				if(*p!='{') goto case 'Q';
-				nl = 0;
-				p++; s = p;
-				readtstring: for(int nest=1;;){
-					switch(*p){
-						mixin(caseNl2);
-						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal"));
-							break readtstring;
-						case '{': p++; nest++; break;
-						case '}': p++; nest--; if(!nest) break readtstring; break;
-						default: mixin(skipUnicode);
-					}
-				}
-				tok.type = Tok!"``";
-				tok.str = s[0..p-s-1]; // reference to code
-				goto lexstringsuffix;
-				delimitedstring:
-				tok.type = Tok!"``";
-				nl=0;
-				s=++p;
-				switch(*p){
-					case 'a': .. case 'z':
-					case 'A': .. case 'Z':
-						for(;;){
-							switch(*p){
-								case '\r': if(p[1]=='\n') p++; goto case;
-								case '\n': nl++; break;
-								case 0, 0x1A: break;
-								case 'a': .. case 'z':
-								case 'A': .. case 'Z':
-								case '0': .. case '9':
-									p++;
-									continue;
-								case 0x80: .. case 0xFF:
-									len=0;
-									try{auto ch=utf.decode(p[0..4],len);
-										if(isUniAlpha(ch)){p+=len; continue;}
-										break;
-									}catch{invCharSeq(); break;}
-								default: break;
-							}
-							break;
-						}
-						if(*p!='\n' && *p!='\r') lexed.put(tokError("heredoc identifier must be followed by a new line"));
-						while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont); // mere error handling
-						auto ident=s[0..p-s];
-						if(*p=='\r'){nl++; if(*++p=='\n') p++;}
-						else if(*p=='\n') nl++, p++;
-						s=p;
-						readheredoc: while((*p!=0) & (*p!=0x1A)){ // always at start of new line here
-							for(auto ip=ident.ptr, end=ident.ptr+ident.length;;){
-								if(ip==end) break readheredoc;
+						case '=': tok = token!"/="; p++;
+						break;
+						case '/': p++;
+							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
+							continue; // ignore comment
+						case '*':
+							p++;
+							consumecom2: for(;;){
 								switch(*p){
-									mixin(caseNl2);
+									mixin(caseNl); // handle newlines
+									case '*': p++; if(*p=='/'){p++; break consumecom2;} break;
+									case 0, 0x1A: break consumecom2; //TODO: Error
+									default: mixin(skipUnicode);
+								}
+							}
+							continue; // ignore comment
+						case '+':
+							int d=1; p++;
+							consumecom3: while(d){
+								switch(*p){
+									mixin(caseNl); // handle newlines
+									case '+':  p++; if(*p=='/') d--, p++; break;
+									case '/':  p++; if(*p=='+') d++, p++; break;
+									case 0, 0x1A: break consumecom3; //TODO: ERROR
+									default: mixin(skipUnicode);
+								}
+							}
+							continue; // ignore comment
+						default: tok = token!"/";
+					}
+					break;
+				// dot is special
+				case '.':
+					if('0' > *p || *p > '9'){
+						if(*p != '.')      tok = token!".";
+						else if(*++p!='.') tok = token!"..";
+						else               tok = token!"...", p++;
+						break;
+					}
+					p++; goto case;
+				// numeric literals
+				case '0': .. case '9':
+					tok = lexNumber(--p);
+					//if(tok.type == Tok!"Error") lexed.put(tok), tok=token!"__error"; // TODO: fix
+					break;
+				// character literals
+				case '\'':
+					tok.type = Tok!"''";
+					if(*p=='\\'){
+						try p++, tok.int64 = cast(ulong)readEscapeSeq(p);
+						catch(EscapeSeqException e) e.msg?cast(void)0/*lexed.put(tokError(e.msg))*/:invCharSeq(); // TODO: fix
+					}else{
+						try{
+							len=0;
+							tok.int64 = utf.decode(p[0..4],len);
+							p+=len;
+						}catch{invCharSeq();}
+					}
+					if(*p!='\''){
+						//while((*p!='\''||(p++,0)) && *p && *p!=0x1A) mixin(skipUnicodeCont);
+						//lexed.put(tokError("unterminated character constant")); // TODO: fix
+					}else p++;
+					break;
+				// string literals
+				// WYSIWYG string/AWYSIWYG string
+				case 'r':
+					if(*p!='"') goto case 'R';
+					p++; del='"';
+					goto skipdel;
+				case '`':
+					del = '`'; skipdel:
+					s = p;
+					readwysiwyg: for(;;){
+						if(*p==del){p++; break;} 
+						switch(*p){
+							mixin(caseNl); // handle newlines
+							case 0, 0x1A:
+								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+								break readwysiwyg;
+							default: mixin(skipUnicode);
+						}
+					}
+					tok.type = Tok!"``";
+					tok.str = s[0..p-s-1]; // reference to code
+					goto lexstringsuffix;
+				// token string
+				case 'q':
+					if(*p=='"') goto delimitedstring;
+					if(*p!='{') goto case 'Q';
+					p++; s = p;
+					readtstring: for(int nest=1;;){
+						switch(*p){
+							mixin(caseNl);
+							case 0, 0x1A:
+								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+								break readtstring;
+							case '{': p++; nest++; break;
+							case '}': p++; nest--; if(!nest) break readtstring; break;
+							default: mixin(skipUnicode);
+						}
+					}
+					tok.type = Tok!"``";
+					tok.str = s[0..p-s-1]; // reference to code
+					goto lexstringsuffix;
+					delimitedstring:
+					tok.type = Tok!"``";
+					s=++p;
+					switch(*p){
+						case 'a': .. case 'z':
+						case 'A': .. case 'Z':
+							for(;;){
+								switch(*p){
+									case '\r': if(p[1]=='\n') p++; goto case;
+									case '\n': break;
+									case 0, 0x1A: break;
+									case 'a': .. case 'z':
+									case 'A': .. case 'Z':
+									case '0': .. case '9':
+										p++;
+										continue;
 									case 0x80: .. case 0xFF:
 										len=0;
 										try{auto ch=utf.decode(p[0..4],len);
-											if(isUniAlpha(ch)){
-												if(p[0..len]!=ip[0..len]) break;
-												p+=len; ip+=len; continue;
-											}
+											if(isUniAlpha(ch)){p+=len; continue;}
 											break;
 										}catch{invCharSeq(); break;}
-									default: 
-										if(*p!=*ip) break;
-										p++; ip++; continue;
+									default: break;
 								}
 								break;
 							}
-							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
-							if(*p=='\r'){nl++; if(*++p=='\n') p++;}
-							else if(*p=='\n') nl++, p++;
-						}
-						tok.str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
-						if(*p!='"'){lexed.put(tokError("unterminated heredoc string literal")); break;}
-						else p++;
-						break;
-					default:
-						del=*p; char rdel=del; dchar ddel=0;
-						switch(del){
-							case '[': rdel=']'; s=++p; break;
-							case '(': rdel=')'; s=++p; break;
-							case '<': rdel='>'; s=++p; break;
-							case '{': rdel='}'; s=++p; break;
-							case ' ','\t','\v','\r','\n':
-								lexed.put(tokError("string delimiter cannot be whitespace"));
-							case 0x80: case 0xFF:
-								s=p;
-								len=0;
-								try{
-									ddel=utf.decode(p[0..4],len);
-									s=p+=len;
-								}catch{invCharSeq();}
-							default: break;
-						}
-						if(ddel){
-							while((*p!=0) & (*p!=0x1A)){
-								if(*p=='\r'){nl++; if(*++p=='\n') p++;}
-								else if(*p=='\n') nl++, p++;
-								else if(*p<0x80){p++; continue;}
-								try{
-									auto x=utf.decode(p[0..4],len);
-									if(ddel==x){
-										tok.str = s[0..p-s]; // reference to code
-										p+=len; break;
+							//if(*p!='\n' && *p!='\r') lexed.put(tokError("heredoc identifier must be followed by a new line")); // TODO: fix
+							while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont); // mere error handling
+							auto ident=s[0..p-s];
+							if(*p=='\r') p++;
+							if(*p=='\n') p++;
+							s=p;
+							readheredoc: while((*p!=0) & (*p!=0x1A)){ // always at start of new line here
+								for(auto ip=ident.ptr, end=ident.ptr+ident.length;;){
+									if(ip==end) break readheredoc;
+									switch(*p){
+										mixin(caseNl);
+										case 0x80: .. case 0xFF:
+											len=0;
+											try{auto ch=utf.decode(p[0..4],len);
+												if(isUniAlpha(ch)){
+													if(p[0..len]!=ip[0..len]) break;
+													p+=len; ip+=len; continue;
+												}
+												break;
+											}catch{invCharSeq(); break;}
+										default: 
+											if(*p!=*ip) break;
+											p++; ip++; continue;
 									}
-									p+=len;
-								}catch{invCharSeq();}								
+									break;
+								}
+								while(((*p!='\n') & (*p!='\r')) & ((*p!=0) & (*p!=0x1A))) mixin(skipUnicodeCont);
+								if(*p=='\r') p++;
+								if(*p=='\n') p++;
 							}
-						}else{
-							for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);p++){
-								if(*p=='\r'){nl++; if(*++p=='\n') p++;}
-								else if(*p=='\n') nl++, p++;
-								else if(*p==rdel) nest--;
-								else if(*p==del) nest++;
-								else if(*p & 0x80){
+							tok.str = p>s+ident.length?s[0..p-s-ident.length]:""; // reference to code
+							if(*p!='"')/*lexed.put(tokError("unterminated heredoc string literal"));*/{} // TODO: fix
+							else p++;
+							break;
+						default:
+							del=*p; char rdel=del; dchar ddel=0;
+							switch(del){
+								case '[': rdel=']'; s=++p; break;
+								case '(': rdel=')'; s=++p; break;
+								case '<': rdel='>'; s=++p; break;
+								case '{': rdel='}'; s=++p; break;
+								case ' ','\t','\v','\r','\n':
+									//lexed.put(tokError("string delimiter cannot be whitespace")); //TODO: fix
+									goto case;
+								case 0x80: case 0xFF:
+									s=p;
+									len=0;
+									try{
+										ddel=utf.decode(p[0..4],len);
+										s=p+=len;
+									}catch{invCharSeq();}
+								default: break;
+							}
+							if(ddel){
+								while((*p!=0) & (*p!=0x1A)){
+									if(*p=='\r') p++;
+									if(*p=='\n') p++;
+									else if(*p<0x80){p++; continue;}
+									try{
+										auto x=utf.decode(p[0..4],len);
+										if(ddel==x){
+											tok.str = s[0..p-s]; // reference to code
+											p+=len; break;
+										}
+										p+=len;
+									}catch{invCharSeq();}								
+								}
+							}else{
+								for(int nest=1;(nest!=0) & (*p!=0) & (*p!=0x1A);p++){
+									if(*p=='\r') p++;
+									if(*p=='\n') p++;
+									else if(*p==rdel) nest--;
+									else if(*p==del) nest++;
+									else if(*p & 0x80){
+										try{
+											utf.decode(p[0..4],len);
+											p+=len-1;
+										}catch{invCharSeq();}
+									}
+								}
+								tok.str = s[0..p-s-1]; // reference to code
+							}
+							if(*p!='"') /*lexed.put(tokError("expected '\"' to close delimited string literal"));*/{} // TODO: fix
+							else p++;
+							break;
+					}
+					goto lexstringsuffix;
+				// Hex string
+				case 'x':
+					if(*p!='"') goto case 'X';
+					auto r=appender!string(); p++;
+					readhexstring: for(int c=0,ch,d;;p++,c++){
+						switch(*p){ // TODO: display correct error locations
+							mixin(caseNl); // handle newlines
+							case 0, 0x1A:
+								//lexed.put(tokError("unterminated hex string literal")); // TODO: fix
+								break readhexstring;
+							case '0': .. case '9': d=*p-'0'; goto handlexchar;
+							case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
+							case 'A': .. case 'F': d=*p-('A'-0xA); goto handlexchar;
+							handlexchar:
+								if(c&1) r.put(cast(char)(ch|d));
+								else ch=d<<4; break;
+							case '"': // TODO: improve error message
+								//if(c&1) lexed.put(tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":""))); // TODO: fix
+								p++; break readhexstring;
+							default:
+								if(*p<128){}// lexed.put(tokError(format("found '%s' when expecting hex digit",*p))); // TODO: fix
+								else{
+									s=p;
+									len=0;
 									try{
 										utf.decode(p[0..4],len);
 										p+=len-1;
 									}catch{invCharSeq();}
+									//lexed.put(tokError(format("found '%s' when expecting hex digit",s[0..len]))); // TODO: fix
 								}
-							}
-							tok.str = s[0..p-s-1]; // reference to code
+								break;
 						}
-						if(*p!='"') lexed.put(tokError("expected '\"' to close delimited string literal"));
-						else p++;
-						break;
-				}
-				goto lexstringsuffix;
-			// Hex string
-			case 'x':
-				if(*p!='"') goto case 'X';
-				nl=0;
-				auto r=appender!string(); p++;
-				readhexstring: for(int c=0,ch,d;;p++,c++){
-					switch(*p){ // TODO: display correct error locations
-						mixin(caseNl2); // handle newlines
-						case 0, 0x1A:
-							lexed.put(tokError("unterminated hex string literal"));
-							break readhexstring;
-						case '0': .. case '9': d=*p-'0'; goto handlexchar;
-						case 'a': .. case 'f': d=*p-('a'-0xa); goto handlexchar;
-						case 'A': .. case 'F': d=*p-('A'-0xA); goto handlexchar;
-						handlexchar:
-							if(c&1) r.put(cast(char)(ch|d));
-							else ch=d<<4; break;
-						case '"': // TODO: improve error message
-							if(c&1) lexed.put(tokError(format("found %s character%s when expecting an even number of hex digits",toEngNum(c),c!=1?"s":"")));
-							p++; break readhexstring;
-						default:
-							if(*p<128) lexed.put(tokError(format("found '%s' when expecting hex digit",*p)));
-							else{
-								s=p;
+					}
+					tok.type = Tok!"``";
+					tok.str = r.data;
+					goto lexstringsuffix;
+				// DQString
+				case '"':
+					auto r=appender!string();
+					auto start = p;
+					readdqstring: for(;;){
+						s = p;
+						switch(*p){
+							case 0, 0x1A:
+								//lexed.put(tokError("unterminated string literal")); // TODO: fix
+								break readdqstring;
+							case '\\':
+								p++;
+								try r.put(readEscapeSeq(p));
+								catch(EscapeSeqException e) e.msg?cast(void)0/*lexed.put(tokError(e.msg))*/:invCharSeq(); // TODO: always error out at the correct location // TODO: fix
+								continue;
+							case '"': p++; break readdqstring;
+							default: mixin(skipUnicode);
+						}
+						r.put(s[0..p-s]);
+					}
+					tok.type = Tok!"``";
+					tok.str = r.data;
+					goto lexstringsuffix;
+					lexstringsuffix:
+					if(*p=='c')      tok.type = Tok!"``c", p++;
+					else if(*p=='w') tok.type = Tok!"``w", p++;
+					else if(*p=='d') tok.type = Tok!"``d", p++;
+					break;
+				// identifiers and keywords
+				case '_':
+				case 'a': .. case 'p': /*q, r*/ case 's': .. case 'w': /*x*/ case 'y', 'z':
+				case 'A': .. case 'Z':
+					s = p-1;
+					identifier:
+					readident: for(;;){
+						switch(*p){
+							case '_':
+							case 'a': .. case 'z':
+							case 'A': .. case 'Z':
+							case '0': .. case '9':
+								p++;
+								break;
+							case 0x80: .. case 0xFF:
 								len=0;
-								try{
-									utf.decode(p[0..4],len);
-									p+=len-1;
-								}catch{invCharSeq();}
-								lexed.put(tokError(format("found '%s' when expecting hex digit",s[0..len])));
-							}
-							break;
+								try if(isUniUpper(utf.decode(p[0..4],len))) p+=len;
+									else break readident;
+								catch{break readident;} // will be caught in the next iteration
+								break;
+							default: break readident;
+						}
 					}
-				}
-				tok.type = Tok!"``";
-				tok.str = r.data;
-				goto lexstringsuffix;
-			// DQString
-			case '"':
-				auto r=appender!string();
-				nl=0;
-				auto start = p;
-				readdqstring: for(;;){
-					s = p;
-					switch(*p){
-						case '\r': if(p[1]=='\n') p++; goto case;  // handle newlines
-						case '\n': p++; nl++; break;
-						case 0, 0x1A:
-							lexed.put(tokError("unterminated string literal"));
-							break readdqstring;
-						case '\\':
-							p++;
-							try r.put(readEscapeSeq(p));
-							catch(EscapeSeqException e) e.msg?lexed.put(tokError(e.msg)):invCharSeq(); // TODO: always error out at the correct location
-							continue;
-						case '"': p++; break readdqstring;
-						default: mixin(skipUnicode);
+					tok.type = Tok!"i";
+					tok.name = s[0..p-s];
+					switch(tok.name){
+						// TODO: If this is removed, dmd builds an executable, else an object file. reduce.
+						mixin({string r; foreach(kw;keywords) r~="case \""~kw~"\": tok.type=Tok!\""~kw~"\"; break;\n";return r;}());
+						default: break;
 					}
-					r.put(s[0..p-s]);
-				}
-				tok.type = Tok!"``";
-				tok.str = r.data;
-				goto lexstringsuffix;
-				lexstringsuffix:
-				if(*p=='c')      tok.type = Tok!"``c", p++;
-				else if(*p=='w') tok.type = Tok!"``w", p++;
-				else if(*p=='d') tok.type = Tok!"``d", p++;
-				lexed.put(tok);
-				foreach(i;0..nl) lexed.put(token!"\n");
-				continue;
-			// identifiers and keywords
-			case '_':
-			case 'a': .. case 'p': /*q, r*/ case 's': .. case 'w': /*x*/ case 'y', 'z':
-			case 'A': .. case 'Z':
-				s = p-1;
-				identifier:
-				readident: for(;;){
-					switch(*p){
-						case '_':
-						case 'a': .. case 'z':
-						case 'A': .. case 'Z':
-						case '0': .. case '9':
-							p++;
-							break;
-						case 0x80: .. case 0xFF:
-							len=0;
-							try if(isUniUpper(utf.decode(p[0..4],len))) p+=len;
-							    else break readident;
-							catch{break readident;} // will be caught in the next iteration
-							break;
-						default: break readident;
-					}
-				}
-				tok.type = Tok!"i";
-				tok.name = s[0..p-s];
-				switch(tok.name){
-					// TODO: If this is removed, dmd builds an executable, else an object file. reduce.
-					mixin({string r; foreach(kw;keywords) r~="case \""~kw~"\": tok.type=Tok!\""~kw~"\"; break;\n";return r;}());
-					default: break;
-				}
-				break;
-			case 0x80: .. case 0xFF:
-				len=0; p--;
-				try{auto ch=utf.decode(p[0..4],len);
-					s=p, p+=len;
-					if(isUniAlpha(ch)) goto identifier;
-					lexed.put(tokError(format("unsupported character '%s'",ch)));
+					break;
+				case 0x80: .. case 0xFF:
+					len=0; p--;
+					try{auto ch=utf.decode(p[0..4],len);
+						s=p, p+=len;
+						if(isUniAlpha(ch)) goto identifier;
+						// lexed.put(tokError(format("unsupported character '%s'",ch))); // TOOD: fix
+						continue;
+					}catch{} goto default; // moved outside handler to make -w shut up
+				default:
+					invCharSeq();
 					continue;
-				}catch{} goto default; // moved outside handler to make -w shut up
-			default:
-				invCharSeq();
-				continue;
+			}
+			tok.rep=begin[0..p-begin];
+			res[0]=tok; res=res[1..$];
+			num++;
 		}
-		lexed.put(tok);
+		code=code[p-code.ptr..$];
+		return num;
 	}
-	lexed.put(tok); // for EOF
-	return lexed.data;
 }
 /* Lex a number FSM. TDPL p33/35
 	Returns either a valid literal token or one of the following:
@@ -908,12 +944,12 @@ private Token lexNumber(ref immutable(char)* _p) {
 			tok.type = Tok!"0LU";
 	}
 	if(tok.type == Tok!"0L"){
-		if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max");
+		if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
 		else if(val > long.max && base == HEX) tok.type = Tok!"0LU"; // EXTENSION: Just here to match what DMD does
-	}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max");
-	if(leadingzero && val > 7) tok = tokError("octal literals are deprecated");
+	}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
+	if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
 	return _p=p, tok;
-	Lexp: return _p=p, tokError("exponent expected");
+	Lexp: return _p=p, tokError("exponent expected",p[0..1]);
 }
 
 // Exception thrown on unrecognized escape sequences

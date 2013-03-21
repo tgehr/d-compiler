@@ -376,7 +376,7 @@ class TypeofReturnExp: Type{
 class BasicType: Type{
 	TokenType type;
 	this(TokenType type){this.type=type;}
-	override string toString(){return _brk(Token(type).toString());}
+	override string toString(){return _brk(TokenTypeToString(type));}
 }
 
 class Pointer: Type{
@@ -552,7 +552,7 @@ class IsExp: Expression{
 	}
 	override string toString(){
 		return "is("~type.toString()~(ident?" "~ident.toString():"")~(which!=WhichIsExp.type?(which==WhichIsExp.isEqual?"==":": ")~
-			(typeSpec?typeSpec.toString():Token(typeSpec2).toString())~(tparams?","~join(map!(to!string)(tparams),","):""):"")~")";
+			(typeSpec?typeSpec.toString():TokenTypeToString(typeSpec2))~(tparams?","~join(map!(to!string)(tparams),","):""):"")~")";
 	}
 }
 
@@ -776,7 +776,7 @@ class ScopeGuardStm: Statement{
 class AsmStm: Statement{
 	Code asmcode; // TODO: Implement inline assembler parsing
 	this(Code ac){asmcode=ac;}
-	override string toString(){return "asm{ "~join(map!(to!string)(asmcode)," ")~" } /* TODO: fix this */";}
+	//override string toString(){return "asm{ "~join(map!(to!string)(asmcode)," ")~" } /* TODO: fix this */";}
 }
 class MixinStm: Statement{
 	Expression e;
@@ -1019,36 +1019,32 @@ private template rule(T...){ // applies a grammar rule and returns the result
 }
 
 
-alias immutable(Token)[] Code;
+alias Lexer Code;
 
 private struct Parser(alias Alloc=ChunkGCAlloc){
 	alias Alloc.New New;
 	alias Alloc.appender appender;
 	enum filename = "tt.d";
 	Code code;
-	Location loc;
 	int muteerr=0;
 	this(Code code){
 		this.code = code;
-		this.loc = Location(filename,1);
+		//tok=code.front;
 		if(tok.type==Tok!"Error"){error(tok.str);}
-		for(;;nextToken){
-			if(tok.type==Tok!"\n") loc.line++;
-			else if(tok.type!=Tok!"Error") break;
-		}
+		while(tok.type==Tok!"Error") nextToken();
 	}
-	@property ref immutable(Token) tok(){return code[0];}
+	void error(string msg){Location().error(msg);}
+	@property ref const(Token) tok(){return code.buffer[code.n];} // breaking encapsulation for efficiency
 	void nextToken(){
 	tryagain:
 		if(tok.type==Tok!"EOF") return;
 		code.popFront();
-		if(tok.type==Tok!"\n"){loc.line++; goto tryagain;}
-		else if(tok.type==Tok!"Error" && !muteerr){error(tok.str); goto tryagain;}
+		if(tok.type==Tok!"Error" && !muteerr){error(tok.str); goto tryagain;}
 	}
-	struct State{Location loc; Code code;}
-	State saveState(){muteerr++; return State(loc, code);} // saves the state and mutes all error messages until the state is restored
-	void restoreState(State state){muteerr--; loc=state.loc; code=state.code;}
+	auto saveState(){muteerr++; return code.pushAnchor();} // saves the state and mutes all error messages until the state is restored
+	void restoreState(Anchor state){muteerr--; code.popAnchor(state);}
 	Token peek(int x=1){
+		if(x<code.e-code.s) return code.buffer[code.n+x & code.buffer.length-1];
 		auto save = saveState();
 		foreach(i;0..x) nextToken();
 		auto t=tok;
@@ -1066,12 +1062,11 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		
 	}
 	static class ParseErrorException: Exception{this(string s){super(s);}} alias ParseErrorException PEE;
-	void error(string msg){loc.error(msg);}
 	void expect(TokenType type){
 		if(tok.type==type) nextToken();
 		else{ // employ some bad heuristics to avoid cascading error messages. TODO: make this better
-			if(tok.type==Tok!"__error") error("expected '"~Token(type).toString()~"'");
-			else error("found '" ~ tok.toString() ~ "' when expecting '" ~ Token(type).toString() ~"'");
+			if(tok.type==Tok!"__error") error("expected '"~TokenTypeToString(type)~"'");
+			else error("found '" ~ tok.toString() ~ "' when expecting '" ~ TokenTypeToString(type) ~"'");
 			if(tok.type!=Tok!")" && tok.type!=Tok!"}" && tok.type!=Tok!"]"){
 				nextToken();
 				if(tok.type==type) nextToken();
@@ -1528,9 +1523,10 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				nextToken();
 				expect(Tok!"{");
 				//error("inline assembly not implemented yet!");
-				auto start = code.ptr;
+				//auto start = code.ptr;
 				for(int nest=1;tok.type!=Tok!"EOF";nextToken()) if(!(tok.type==Tok!"{"?++nest:tok.type==Tok!"}"?--nest:nest)) break;
-				auto asmcode=start[0..code.ptr-start];
+				//auto asmcode=start[0..code.ptr-start];
+				Code asmcode; // TODO: fix
 				expect(Tok!"}");
 				mixin(rule!(AsmStm,Existing,"asmcode"));
 			case Tok!"mixin":
@@ -1548,7 +1544,6 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 				expectErr!"statement"; return parseStmError();
 		}
 	}
-	//auto parse(){return parseStatement();}
 	Expression parseType(string expectwhat="type"){
 		Expression tt;
 		bool brk=false;
@@ -2137,7 +2132,6 @@ private struct Parser(alias Alloc=ChunkGCAlloc){
 		}
 		return r;
 	}
-	//auto parse(){return skipDeclarations()?"wee, declarations":"boring statement";}
 }
 
 Declaration[] customParse(alias Allocator)(Code code){
