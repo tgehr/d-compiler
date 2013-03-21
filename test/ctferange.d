@@ -77,18 +77,13 @@ struct DynRange(T){
 	T delegate() front;
 	bool delegate() empty;
 	DynRange!T delegate() popFrontImpl;
-	void popFront(){
-		auto u = popFrontImpl();
-		front = u.front;
-		empty = u.empty;
-		popFrontImpl = u.popFrontImpl;
-	}
+	void popFront(){ this = popFrontImpl(); }
 }
 
 DynRange!(typeof(R.front())) dynRange(R)(R range)if(isInputRange!R){
 	DynRange!(typeof(range.front())) result;
-	result.front = &range.front;
-	result.empty = &range.empty;
+	result.front = ()=>range.front();
+	result.empty = ()=>range.empty();
 	result.popFrontImpl = (){
 		static if(is(typeof(range.tail())) && isInputRange!(typeof(range.tail()))){
 			auto newRange = range.tail();
@@ -187,10 +182,54 @@ template All(alias pred, T...){
 struct Tuple(T...){
 	T expand;
 	this(T args){
-		// expand = args; // TODO!
+		expand = args; // TODO!
 	}
 }
-auto tuple(T...)(T args){ return Tuple!()(args); }
+auto tuple(T...)(T args){ return Tuple!T(args); }
+
+/+template ID(alias a){ alias a ID; }
+template naryFun(size_t n, alias a)if(n<=26){
+	static if(isCallable!a) alias a fun;
+	else{
+		mixin("alias ID!(("~iota(0,n)
+		      .map!(i=>cast(char)('a'+i)~",")
+		      .join~")=>"~a~") naryFun;");
+	}
+}
+
+struct Zip(alias a, R...){
+	R inputs;
+	auto front(){
+		return mixin("naryFun!(R.length,a)("~iota(0,R.length)
+		             .map!(i=>"inputs["~to!string(i)~"].front,")()
+		             .join()~")");
+	}
+	bool empty(){
+/+		foreach(ref r;inputs) // TODO!
+			if(r.empty) return true;
+		return false;+/
+		return mixin(iota(0,R.length)
+		             .map!(i=>"inputs["~to!string(i)~"].empty()")()
+		             .join("||"));
+	}
+	@property void popFront(){
+		foreach(ref r;inputs) //TODO!
+			r.popFront();
+	}
+	static if(allSatisfy!(isForwardRange,R)){
+		@property Zip save(){
+			return mixin("Zip("~iota(0,R.length)
+			             .map!(i=>"inputs["~to!string(i)~"].save,")
+			             .join~")");
+		}
+	}
+}
+auto zip(alias a = tuple, R...)(R ranges){
+	return Zip!(a,R)(ranges);
+}
+
+pragma(msg, "zip: ", zip!q{a + b}([1,2,3],[2,3,4,5]));+/
+
 
 /+
 template zip(R...)if(All!(isInputRange, R)){
@@ -257,10 +296,12 @@ auto wrap(T)(T[] arr){
 	return wrp;
 }
 
-auto iota(int start, int end){
+// pragma(msg, "diota: ", array(iota(0,10.0))); // TODO!
+
+auto iota(T)(T start, T end){
 	static struct Iota{
-		int start, end;
-		int front(){ return start; }
+		T start, end;
+		T front(){ return start; }
 		bool empty(){ return start == end; }
 		void popFront(){ start++; }
 	}

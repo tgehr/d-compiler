@@ -541,7 +541,15 @@ mixin template Interpret(T) if(is(T==CallExp)){
 		if(sstate == SemState.error) return;
 		if(rewrite) return;
 		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
-		static struct MakeStrong{ void perform(Symbol sym){ sym.makeStrong(); } }
+		static struct MakeStrong{
+			void perform(Symbol sym){
+				// allow interpretation of partially analyzed functions
+				if(sym.meaning &&
+				   (!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)){
+					sym.makeStrong();
+				}
+			}
+		}
 		runAnalysis!MakeStrong(this);
 		mixin(SemChld!q{e});
 		Expression r;
@@ -598,7 +606,7 @@ enum Instruction : uint{
 	jmp,                        // jump to (constant) location of argument
 	jz,                         // jump if zero
 	jnz,                        // jump if non-zero
-	call,                       // function call (todo)
+	call,                       // function call
 	ret,                        // return from function
 	// stack control
 	push,                       // push 1
@@ -777,7 +785,10 @@ enum Instruction : uint{
 	storefkv,
 	ptrf,
 	// virtual methods
-	fetchvtbl,
+	fetchvtbl,                 // if there already is a vtbl, use it (if the child does have it as well)
+	fetchoverride,             // there is no vtbl, always determine overrides dynamically
+	// partially analyzed functions
+	analyzeandfail,
 	// error handling table
 	errtbl,
 }
@@ -836,6 +847,9 @@ size_t numArgs(Instruction inst){
 		 I.loadf: 2, I.loadfkr: 2, I.storef: 2, I.storefkr: 2, I.storefkv: 2, I.ptrf: 2,
 		 // virtual methods
 		 I.fetchvtbl: 1,
+		 I.fetchoverride: 1,
+		 // partially analyzed functions
+		 I.analyzeandfail: 2,
 		 // error handling table
 		 I.errtbl: 0,
 		 ];
@@ -1642,7 +1656,9 @@ Ltailcall:
 
 				if(!sym) goto Lnullfunction;
 				if(sym.meaning.sstate != SemState.completed){
-					sym.makeStrong();
+					// allow interpretation of partially analyzed function
+					if(!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)
+						sym.makeStrong();
 					// TODO: allow detailed discovery of circular dependencies
 					sym.semantic(sym.scope_);
 					Expression e = sym;
@@ -1663,12 +1679,20 @@ Ltailcall:
 					// clean up stack
 					stack.popFront(nargs);
 					byteCode = def.byteCode;
+
+					if(def.sstate != SemState.completed)
+						def.resetByteCode();
+
 					goto Ltailcall;
 				}
 
 				stack.stp-=nfargs;
 				Stack newstack = Stack(stack.stack[stack.stp+1..$], nfargs-1);
 				doInterpret(def.byteCode, newstack, handler);
+
+				if(def.sstate != SemState.completed)
+					def.resetByteCode;
+
 				if(newstack.stack.ptr!=stack.stack.ptr+stack.stp){
 					stack.stack = stack.stack[0..stack.stp+1];
 					void[] va = stack.stack;
@@ -2435,6 +2459,27 @@ Ltailcall:
 				static assert(Symbol.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
 				stack.push(cast(ulong)cast(void*)aggr.bcFetchVTBL(index));
 				break;
+			case I.fetchoverride:
+				auto fun = cast(FunctionDecl)cast(void*)byteCode[ip++];
+				auto aggr = cast(ReferenceAggregateDecl)cast(void*)stack.pop();
+				static assert(Symbol.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
+				stack.push(cast(ulong)cast(void*)aggr.bcFetchOverride(fun));
+				break;
+			// partially analyzed functions
+			case I.analyzeandfail:
+				auto stm = cast(Node)cast(void*)byteCode[ip++];
+				auto sc = cast(Scope)cast(void*)byteCode[ip++];
+				static struct MakeStrong{
+					void perform(Symbol sym){
+						// TODO: this is a little hacky, is there a more elegant way?
+						if(sym.meaning&&sym.meaning.isFunctionDecl() && sym.meaning.sstate == SemState.started)
+							sym.meaning.sstate = SemState.begin;
+					}
+				}
+				import analyze;
+				runAnalysis!MakeStrong(stm);
+				stm.semantic(sc); // TODO!
+				throw new UnwindException;
 			case I.errtbl:
 				assert(0);
 		}
@@ -3137,7 +3182,30 @@ mixin template CTFEInterpret(T) if(is(T==TernaryExp)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==CompoundStm)){
-	override void byteCompile(ref ByteCodeBuilder bld){ foreach(x; s) x.byteCompile(bld); }
+	override void byteCompile(ref ByteCodeBuilder bld){
+		foreach(x; s){
+			if(x.sstate == SemState.completed){
+				x.byteCompile(bld);
+			}else{
+				bld.emit(Instruction.analyzeandfail);
+				static assert(x.sizeof <= (void*).sizeof && (void*).sizeof<=ulong.sizeof);
+				bld.emitConstant(cast(ulong)cast(void*)x);
+				static struct FindScope{
+					Scope result;
+					void perform(Symbol self){
+						if(self.meaning&&self.meaning.isFunctionDecl()&&self.meaning.sstate==SemState.started){
+							if(!result) result = self.scope_; // TODO: shortcut
+						}
+					}
+				}
+				auto sc = runAnalysis!FindScope(x).result;
+				assert(!!sc);
+				static assert(sc.sizeof <= (void*).sizeof && (void*).sizeof<=ulong.sizeof);
+				bld.emitConstant(cast(ulong)cast(void*)sc);
+				break;
+			}
+		}
+	}
 }
 mixin template CTFEInterpret(T) if(is(T==LabeledStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
@@ -3446,14 +3514,13 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 
 mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		assert(scope_.getFrameNesting() >=
-		       meaning.scope_.getFrameNesting()
-		       ||cast(FunctionDecl)meaning&&(cast(FunctionDecl)meaning).isConstructor());
-
 		if(auto vd = meaning.isVarDecl()) return vd.byteCompileSymbol(bld, this, scope_);
 		else if(auto fd=meaning.isFunctionDef()){
 			static assert(this.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
 			if(!(meaning.stc&STCstatic) && !fd.isConstructor()){
+				assert(scope_.getFrameNesting() >=
+				       meaning.scope_.getFrameNesting());
+
 				auto diff = scope_.getFrameNesting() - meaning.scope_.getFrameNesting();
 				//dw(this," ",loc," ",scope_.getFrameNesting()," ",meaning.scope_.getFrameNesting());
 				bld.emitUnsafe(Instruction.pushcontext, this);
@@ -3554,22 +3621,31 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 	static void byteCompileVirtualCall(ref ByteCodeBuilder bld, ReferenceAggregateDecl raggr, FunctionDecl fun, Expression loader){
 		// TODO: this is not permissive enough
 		// ideally, virtual method calls would work like non-virtual ones
-		if(!raggr.vtbl.has(fun)){
+/+		if(!raggr.vtbl.has(fun)){
 			raggr.semantic(raggr.scope_);
-			if(raggr.needRetry) throw new CTFERetryException(raggr);
+			if(raggr.needRetry){
+				dw(raggr.needRetry," moo");
+				throw new CTFERetryException(raggr);
+			}
 			if(raggr.sstate == SemState.error){
 				bld.error(format("cannot perform a virtual method call on an object of invalid type '%s'", raggr.name),loader.loc);
 				return;
 			}
-		}
+		}+/
 
 		bld.emitDup(bcPointerBCSize); // copy the class reference
 		bld.emitUnsafe(Instruction.loadf, loader);
 		bld.emitConstant(ReferenceAggregateDecl.bcTypeidOffset);
 		bld.emitConstant(ReferenceAggregateDecl.bcTypeidSize);
 
-		bld.emit(Instruction.fetchvtbl);
-		bld.emitConstant(raggr.vtbl.vtblIndex[fun]);
+		if(raggr.vtbl.has(fun)){
+			bld.emit(Instruction.fetchvtbl);
+			bld.emitConstant(raggr.vtbl.vtblIndex[fun]);
+		}else{
+			bld.emit(Instruction.fetchoverride);
+			static assert(fun.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
+			bld.emitConstant(cast(ulong)cast(void*)fun);
+		}
 	}
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
@@ -3701,19 +3777,84 @@ private:
 
 mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 	private Symbol[] symbols;
+	private FunctionDecl findFunDeclFromIndex(size_t index){
+		if(vtbl.length>index) return vtbl.vtbl[index].fun;
+		assert(parents.length && cast(AggregateTy)parents[0] &&
+		       cast(ReferenceAggregateDecl)(cast(AggregateTy)parents[0]).decl);
+		auto pdecl = cast(ReferenceAggregateDecl)cast(void*)(cast(AggregateTy)cast(void*)parents[0]).decl;
+		return pdecl.findFunDeclFromIndex(index);
+	}
 	final Symbol bcFetchVTBL(size_t index){
-		if(vtbl.length<=index){
-			semantic(scope_);
-			if(needRetry) throw new CTFERetryException(this);
-			if(sstate == SemState.error) throw new UnwindException;
-		}
+		if(vtbl.length<=index) // incomplete vtbl
+			return bcFetchOverride(findFunDeclFromIndex(index));
 		if(!symbols.length) symbols = new Symbol[vtbl.length];
 		if(!symbols[index]){
-			symbols[index] = New!Symbol(vtbl.vtbl[index].fun);
-			symbols[index].scope_ = scope_;
-			symbols[index].accessCheck = AccessCheck.none;
+			symbols[index] = createSymbol(vtbl.vtbl[index].fun);
 		}
 		return symbols[index];
+	}
+	private Symbol createSymbol(FunctionDecl decl){
+		auto sym = New!Symbol(decl);
+		sym.scope_ = scope_;
+		sym.accessCheck = AccessCheck.none;
+		return sym;
+	}
+	private Symbol[FunctionDecl] dynSymbols;
+	private Identifier[FunctionDecl] lkupIdents;
+	final Symbol bcFetchOverride(FunctionDecl decl){
+		if(!dynSymbols.get(decl, null)){
+			if(!lkupIdents.get(decl, null)){
+				auto ident = New!Identifier(decl.name.name);
+				ident.loc = decl.name.loc; // TODO: improve
+				lkupIdents[decl]=ident;
+			}
+			auto ident = lkupIdents[decl];
+
+			if(!ident.meaning && ident.sstate != SemState.failed){
+				ident.recursiveLookup = false;
+				auto lkupd = ident.lookup(asc);
+				if(lkupd.dependee){
+					if(lkupd.dependee.node.needRetry){
+						throw new CTFERetryException(lkupd.dependee.node);
+					}else{
+						assert(lkupd.dependee.node.sstate == SemState.error);
+						throw new UnwindException;
+					}
+				}
+				if(ident.needRetry){
+					static class LkupNode: Node{
+						Scope sc;
+						Identifier ident;
+						this(Scope sc, Identifier ident){
+							this.sc=sc;
+							this.ident=ident;
+							needRetry = true;
+						}
+						void semantic(Scope _){
+							mixin(Lookup!q{_; ident, sc});
+							mixin(SemEplg);
+						}
+						override @property string kind(){
+							return ident.kind;
+						}
+						override string toString(){
+							return ident.toString();
+						}
+						override void _doAnalyze(scope void delegate(Node) dg){ assert(0); }
+						override inout(LkupNode) ddup()inout{ assert(0); }
+					}
+					throw new CTFERetryException(New!LkupNode(scope_, ident));
+				}
+			}
+			assert(ident.meaning || ident.sstate == SemState.failed);
+			auto res = ident.meaning;
+			assert(cast(OverloadSet)res);
+			auto ovs = cast(OverloadSet)cast(void*)res;
+			mixin(FindOverrider!q{auto ov; ovs, decl});
+			if(!ov){ throw new UnwindException; } // TODO: error message
+			dynSymbols[decl]=createSymbol(ov); // TODO!
+		}
+		return dynSymbols[decl];
 	}
 
 	override bool isLayoutKnown(){
@@ -4271,6 +4412,9 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		bcpreanalyze();
 
 		byteCode.doInterpret(stack, handler);
+
+		if(sstate != SemState.completed)
+			resetByteCode();
 
 		auto ret = type.ret.getHeadUnqual();
 		if(auto bt = ret.isBasicType()){

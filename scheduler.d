@@ -183,6 +183,15 @@ class Scheduler{
 					else tmpl = null;
 				}
 				scope(exit) if(tmpl) tmpl.sstate = SemState.begin;
+
+				auto fun = sc?sc.getFunction():null;
+				if(fun){
+					if(fun.sstate == SemState.begin) fun.sstate = SemState.started;
+					else fun = null;
+				}
+				scope(exit) if(fun) fun.sstate = SemState.begin;
+				///
+
 				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){

@@ -1,4 +1,25 @@
 
+struct TestPartialEvaluation{
+	static foo(string f){
+		if(f[0] == 's')
+			return "got somestring";
+		return bar!(foo("somestring"));
+	}
+	static template bar(string s){
+		enum bar = s;
+	}
+
+	// TODO: could work, but requires out-of-order function body
+	// analysis and scope cloning
+	static assert(!is(typeof({
+		static string nofoo(string f){
+			if(f[0] == 'n') return bar!(nofoo("somestring"));
+			return "not somestring";
+		}
+	})));
+}
+static assert(TestPartialEvaluation.foo("3")=="got somestring");
+
 int testClassConstructor(){
 	class C{
 		int x;
@@ -1057,8 +1078,8 @@ int twiceinterpret(){
 	int accessible = 2; // only accessible from 'foo'  on the second invocation
 	immutable zero = 0; // always accessible from 'foo'
 	int foo(bool first){return first?zero:accessible;}
-	enum y = foo(true); // fails
-	return foo(false);  // suceeds
+	enum y = foo(true); 
+	return foo(false);
 }
 static assert(twiceinterpret()==2);
 

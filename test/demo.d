@@ -1,4 +1,5 @@
 
+
 //static if(!is(typeof(x))) enum y = 2;
 //static if(!is(typeof(y))) enum x = 2;
 

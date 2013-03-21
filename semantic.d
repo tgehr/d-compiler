@@ -262,6 +262,7 @@ mixin CreateBinderForDependent!("LookupHere","lookupHere");
 mixin CreateBinderForDependent!("GetUnresolved","getUnresolved");
 mixin CreateBinderForDependent!("IsDeclAccessible","isDeclAccessible");
 mixin CreateBinderForDependent!("DetermineOverride","determineOverride");
+mixin CreateBinderForDependent!("FindOverrider","findOverrider");
 
 template IntChld(string s) if(!s.canFind(",")){
 	enum IntChld=mixin(X!q{
@@ -346,7 +347,6 @@ template RevEpoLkup(string e){
 	});
 }
 +/
-
 
 
 enum SemState:ubyte{
@@ -3787,7 +3787,7 @@ class Symbol: Expression{ // semantic node
 					fd.semantic(fd.scope_);
 					mixin(Rewrite!q{x});
 					mixin(CircErrMsg);
-					mixin(SemProp!q{sc=fd.scope_;x});
+					mixin(SemProp!q{sc=fd.scope_;x}); // TODO: depend just on type
 				}else fd.propagateSTC();
 
 				fd.analyzeType();
@@ -4353,7 +4353,8 @@ mixin template Semantic(T) if(is(T==CastExp)){
 	}
 
 	override bool isConstant(){
-		assert(sstate == SemState.completed); // repeat superclass contract for clarity
+		if(sstate == SemState.error) return false;
+		assert(sstate == SemState.completed);
 		if(type.getHeadUnqual().isPointerTy()
 		   || e.type.getHeadUnqual().isPointerTy()) return false; // TODO!
 		auto iconvd=e.type.implicitlyConvertsTo(type);
@@ -4364,7 +4365,8 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		return e.isConstant();
 	}
 	override bool isConstFoldable(){
-		assert(sstate == SemState.completed); // repeat superclass contract for clarity
+		if(sstate == SemState.error) return false;
+		assert(sstate == SemState.completed);
 		if(type.getHeadUnqual().isPointerTy()
 		   || e.type.getHeadUnqual().isPointerTy()) return false; // TODO!
 		auto iconvd=e.type.implicitlyConvertsTo(type);
@@ -8387,45 +8389,71 @@ class OverloadSet: Declaration{ // purely semantic node
 		FunctionDecl decl;
 	}
 
+	private mixin CreateBinderForDependent!("CanOverride","canOverride");
+	// TODO: make this a public member function of function decl instead
+	private static Dependent!bool canOverride(FunctionDecl fd, FunctionDecl fun){
+		alias util.all all;
+		import std.range;
+		if(fd.stc & STCnonvirtual) return false.independent;
+		// STC parent may be freely introduced, but will be here to stay
+		bool mayOverride(STC parent, STC child){
+			return !(fd.type.stc&parent) || fun.type.stc&child;
+		}
+		auto helper = Type.get!void.getPointer();
+		if(fun.type.params.length == fd.type.params.length &&
+		   !((fun.type.stc^fd.type.stc)&STCinvariantunderoverride) &&
+		   // reuse the type system for determining valid type constructor overrides
+		   // TODO: put these in the same implementation as the implicit conversion rules
+		   // for function pointers and delegates ?
+		   helper.applySTC(fd.type.stc&STCtypeconstructor)
+		   .refConvertsTo(helper.applySTC(fun.type.stc&STCtypeconstructor), 0)
+		   .force &&
+		   mayOverride(STCsafe, STCsafe|STCtrusted) &&
+		   mayOverride(STCpure, STCpure) &&
+		   mayOverride(STCnothrow, STCnothrow) &&
+		   mayOverride(STCdisable, STCdisable) &&
+		   
+			   // STCdeprecated ?
+		   
+		   all!(a=>a[0].type.equals(a[1].type) &&
+		        !((a[0].stc^a[1].stc)&STCmattersforparamoverride))
+		   (zip(fun.type.params, fd.type.params))
+		){
+			// TODO: resolve inout according to STC of parent
+			//mixin(RefConvertsTo!q{bool rconv; fun.type.ret, fd.type.ret, 0});
+			return fun.type.ret.refConvertsTo(fd.type.ret,0);
+		}
+		return false.independent;
+	}
+
+	/* find a function decl that may override fun, or return null
+	 */
+	Dependent!FunctionDecl findOverrider(FunctionDecl fun){
+		// TODO: multi-dep
+		// TODO: both const and non-const may override non-const
+		// TODO: in this case, the non-const overload is to be preferred!
+		foreach(ref decl; decls){
+			auto fd = decl.isFunctionDecl();
+			if(!fd) continue;
+			mixin(CanOverride!q{auto co; OverloadSet, fun, fd});
+			if(co) return fd.independent;
+		}
+		return null.independent!FunctionDecl;
+	}
+
+	/* find the function decl that fun overrides, or display an error and return null
+	 */
 	Dependent!FunctionDecl determineOverride(FunctionDecl fun){
 		size_t num = 0;
 		foreach(ref decl; decls){
 			decl.semantic(decl.scope_);
 			mixin(Rewrite!q{decl});
 			auto fd=decl.isFunctionDecl();
-			if(!fd||fd.needRetry||fd.sstate == SemState.error)
-				return Dependee(fd,fd.scope_).dependent!FunctionDecl;
-			alias util.all all;
-			import std.range;
-			if(fd.stc & STCnonvirtual) continue;
-			// STC parent may be freely introduced, but will be here to stay
-			bool mayOverride(STC parent, STC child){
-				return !(fd.type.stc&parent) || fun.type.stc&child;
-			}
-			auto helper = Type.get!void.getPointer();
-			if(fun.type.params.length == fd.type.params.length &&
-			   !((fun.type.stc^fd.type.stc)&STCinvariantunderoverride) &&
-			   // reuse the type system for determining valid type constructor overrides
-			   // TODO: put these in the same implementation as the implicit conversion rules
-			   // for function pointers and delegates ?
-			   helper.applySTC(fd.type.stc&STCtypeconstructor)
-			   .refConvertsTo(helper.applySTC(fun.type.stc&STCtypeconstructor), 0)
-			   .force &&
-			   mayOverride(STCsafe, STCsafe|STCtrusted) &&
-			   mayOverride(STCpure, STCpure) &&
-			   mayOverride(STCnothrow, STCnothrow) &&
-			   mayOverride(STCdisable, STCdisable) &&
-
-			   // STCdeprecated ?
-
-			   all!(a=>a[0].type.equals(a[1].type) &&
-			        !((a[0].stc^a[1].stc)&STCmattersforparamoverride))
-			   (zip(fun.type.params, fd.type.params))
-			){
-				// TODO: resolve inout according to STC of parent
-				mixin(RefConvertsTo!q{bool rconv; fun.type.ret, fd.type.ret, 0});
-				if(rconv) swap(decl, decls[num++]);
-			}
+			if(!fd) continue;
+			if(fd.needRetry||fd.sstate == SemState.error)
+				return Dependee(fd,fd.scope_).dependent!FunctionDecl;// TODO: depend just on type
+			mixin(CanOverride!q{auto covr; OverloadSet, fd, fun});
+			if(covr) swap(decl, decls[num++]);
 		}
 
 		//dw((cast(FunctionDecl)decls[0]).type.params.map!(a=>a.type)[0].equals(fun.type.params.map!(a=>a.type)[0]));
@@ -9300,6 +9328,10 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 			presemantic(sc); // add self to parent scope
 			if(sstate == SemState.error) needRetry=false;
 		}
+		assert(sstate == SemState.begin || sstate == SemState.started);
+		bool reset = sstate == SemState.begin;
+		sstate = SemState.started;
+		scope(exit) if(reset&&sstate == SemState.started) sstate = SemState.begin;
 		analyzeType();
 		if(auto nr=type.needRetry) { needRetry = nr; return; }
 		mixin(PropErr!q{type});
