@@ -1,13 +1,9 @@
-// TODO: currently, recursive templates have high algorithmic complexity
-// TODO: FIX!
-
 template factorial(int n){
 	static if(n<=1) enum factorial = 1.0L;
 	else enum factorial = n*factorial!(n-1);
 }
-pragma(msg, factorial!50);
+pragma(msg, factorial!20);
 
-/+
 
 auto gen(){
 	immutable(char)[] r;
@@ -32,14 +28,13 @@ template recu2(int n){
 	else auto recu2(){return recu2!(n-1)()+1;}
 }
 
-pragma(msg, "recu2: ",recu2!20());+/
+pragma(msg, "recu2: ",recu2!20());
 
 
 //pragma(msg, factorial!130.V);
 
 
 
-/+
 auto testtemplatefunclit(fun...)(){
 	static if(!fun.length) return "";
 	else{

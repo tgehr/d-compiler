@@ -363,6 +363,7 @@ struct Variant{
 		real flt80; ireal fli80; creal cmp80;
 		Variant[] arr;
 		// TODO: structs, classes
+		string err;
 	}
 
 	T get(T)(){
@@ -466,6 +467,16 @@ struct Variant{
 	}
 
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
+
+	size_t toHash()@trusted{
+		final switch(id.occupies){
+			case Occupies.none: return 0;
+				foreach(x; EnumMembers!Occupies[1..$]){
+					case x: return typeid(x).getHash(&mixin(to!string(x)));
+				}
+		}
+		assert(0); // TODO: file bug
+	}
 
 	// TODO: BUG: shift ops not entirely correct
 	Variant opBinary(string op)(Variant rhs)in{

@@ -193,6 +193,7 @@ template binaryFun(alias fun,T){
 }
 
 auto sort(alias p,T)(T[] arg){
+	pragma(__p, p,T);
 	alias binaryFun!(p,T) pred;
 	if(arg.length <= 1) return arg;
 	bool low(T x){return !!pred(x,arg[0]);}
@@ -209,16 +210,14 @@ auto mod10(int y){return mod(10)(y);}
 
 enum unsorted = [3,28,1,29,33,828,11,282,34,378,122,122];
 
-pragma(msg, sort!("a<b",int)(map!(mod10,int)(unsorted)));
-
-
-//pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
-
 bool less(int a,int b){return a<b;}
-pragma(msg, sort!(less,int)(unsorted));
-pragma(msg, sort!(less,int)(unsorted));
-pragma(msg, sort!("a>b",int)(unsorted));
+pragma(msg, "sort1: ", sort!(less,int)(unsorted));
 
+pragma(msg, "sort2: ",sort!less(unsorted));
+pragma(msg, "sort3: ",sort!"a>b"(unsorted));
+
+pragma(msg, "sort4: ",sort!"a<b"(map!mod10(unsorted)));
+//pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
 
 
 

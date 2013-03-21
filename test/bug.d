@@ -9,7 +9,17 @@ int rec(T)(int x){
 	if(!x) return 0;
 	return 1+rec!T(x-1);
 }
-pragma(msg, rec!int(5));
+pragma(msg, rec!int(2));
+
+int[] rec(int[] arg){
+	if(!arg.length) return arg;
+	return rec(arg[1..arg.length]);
+}
+enum unsorted = [1,2];
+
+pragma(msg, rec(unsorted));
+pragma(msg, rec(unsorted));
+
 
 
 int[][] funny2(int[] a, int n){
@@ -26,16 +36,6 @@ pragma(msg, "funny2: ",funny2([1,2,3,2,3,1,3,1,2,3,2,1],12));
 auto id(A)(A arg) => arg;
 
 pragma(msg, id(1));
-
-
-int[] rec(int[] arg){
-	if(!arg.length) return arg;
-	return rec(arg[1..arg.length]);
-}
-enum unsorted = [1,2];
-
-pragma(msg, rec(unsorted));
-pragma(msg, rec(unsorted));
 
 
 

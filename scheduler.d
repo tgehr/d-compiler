@@ -2,124 +2,104 @@ import util;
 import expression; // : Node, Identifier
 import semantic, scope_;
 
-import std.algorithm, std.conv, std.string:join;
+import std.algorithm, std.range, std.conv, std.string:join;
+import std.typecons : Tuple, tuple;
+
 
 class Scheduler{
-	void addRoot(Node root, Scope sc){
+	void add(Node root, Scope sc){
 		workingset.add(root, sc);
-		// workingset.payload~=WorkingSetEntry(root, sc);
 	}
 
-	Node[][Node] graph;
-	WorkingSetEntry[][Node] revs;
+	final void remove(Node node){
+		workingset.remove(node);
+	}
 
-	struct WorkingSetEntry{
-		Node node;
-		Scope sc;
-		void buildInterface(){ 
-			// TODO: rather inefficient, do something about it
-			auto decl = node.isDeclaration();
-			if(!decl) return;
-			decl.buildInterface(); mixin(Rewrite!q{node});
-		}
-		void semantic(){
-			if(node.sstate == SemState.completed){
-				if(node.needRetry){
-					assert(node.needRetry && cast(Expression)node,text(node.needRetry," ",node));
-					(cast(Expression)cast(void*)node).interpret(sc);
-					mixin(Rewrite!q{node});
-					if(!node.needRetry) Scheduler().removeNode(node);
-				}else Scheduler().removeNode(node);
-				return;
-			}else if(node.sstate == SemState.error) Scheduler().removeNode(node);
-			node.semantic(sc);
-			mixin(Rewrite!q{node});
-		}
+
+	final void await(Node from, Node to, Scope sc){
+		// dw("dep from ", from," to ",to);
+		workingset.await(from, to, sc);
 	}
 	
 	struct WorkingSet{
-		WorkingSetEntry[] payload;
-		bool[Node] toRemove;
-		bool[WorkingSetEntry] toAdd;
 
-		void add(WorkingSetEntry e) {
-			if(toAdd.get(e,false)) return;
-			toAdd[e]=true; toRemove.remove(e.node);
+		Scope[Node] active;
+		Scope[Node] asleep;
+
+		Node[][Node] awaited;
+
+		bool[Node] done;
+
+		Scope[Node] payload;
+
+		void add(Node node, Scope sc) {
+			if(node in asleep) return;
+			active[node]=sc;
 		}
-		void add(WorkingSetEntry[] es) { foreach(e; es) add(e); }
-		void add(Node node, Scope sc) { add(WorkingSetEntry(node, sc)); }
 
-		void remove(Node n) {
-			toRemove[n] = true;
-			foreach(k,v; toAdd){ // still linear...
-				if(k.node==n) { toAdd.remove(k); break; }
+		void remove(Node node) {
+			done[node] = true;
+			// dw("done with: ",node);
+
+			active.remove(node);
+			asleep.remove(node);
+
+			foreach(v; awaited.get(node,[])){
+				if(v !in asleep) continue; // TODO: why needed?
+				auto sc=asleep[v];
+				active[v]=sc;
+				asleep.remove(v);
 			}
-			//toAdd = toAdd.partition!(_=>toRemove.get(_.node, false))();
-			//toAdd.assumeSafeAppend();
+			awaited.remove(node);
 		}
+		
+		void await(Node from, Node to, Scope sc){
+			if(from in asleep) return; // TODO: turn into preconditions
+			if(from !in active) return;
+
+			awaited[to]~=from;
+			asleep[from]=active[from]; // ...
+			active.remove(from);
+			add(to,sc);
+		}
+		
 		void update(){
-			// dw("toAdd: ", join(map!(_=>text(_.node," ",_.node.sstate))(toAdd),","));
-			// dw("toRemove: ", join(map!(to!string)(toRemove.keys),","));
-			payload = payload.partition!(_=>toRemove.get(_.node, false))();
-			payload.assumeSafeAppend();
+			// dw("active: ",active.keys);
+			// dw("asleep: ",asleep.keys);
 
-			// toAdd = toAdd.partition!(_=>payload.canFind(_))(); // TODO: make fast
-			foreach(k; payload) toAdd.remove(k);
-			foreach(k,v; toAdd) payload~=k;
-			//payload ~= toAdd;
 
-			toAdd.clear();
-			toRemove.clear();
+			foreach(nd,sc; active){
+				if(nd.sstate == SemState.completed && !nd.needRetry
+				|| nd.sstate == SemState.error)
+					done[nd] = true;
+			}
+			foreach(nd,b; done) active.remove(nd);
 
-			// dw("updated: ",join(map!(_=>text(_.node," ",_.node.sstate))(payload),","));
+			payload = active.dup();
+
+			assert({foreach(nd,sc;payload) assert(!nd.rewrite,text(nd)); return 1;}());
+
+			done.clear();
 		}
 
 		void buildInterface(){
-			foreach(ref x; payload) x.buildInterface();
-			//foreach(ref x; payload) x.semantic();
-			update();
+			assert(0); // TODO!
 		}
 		void semantic(){
-			foreach(ref x; payload) x.semantic();
+			foreach(nd,sc; payload){
+				if(nd.sstate == SemState.completed){
+					if(nd.needRetry){
+						assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
+						(cast(Expression)cast(void*)nd).interpret(sc);
+					}else remove(nd);
+					continue;
+				}else if(nd.sstate == SemState.error) remove(nd);
+				nd.semantic(sc);
+			}
 			update();
 		}
 	}
 	WorkingSet workingset;
-
-	final void addDependency(Node from, Node to, Scope sc){
-		import statement;
-		if(cast(ReturnStm)from) assert(!!sc.getFunction());
-
-
-		Node[] e = graph.get(from,[]);
-		if(!e.canFind(to)){
-			// dw("we have a dependency from ", typeid(from)," ",from," to ",typeid(to)," ",to,/+" in scope ",sc+/);
-			e~=to;
-			graph[from]=e;
-			auto f = revs.get(to, []);
-			if(!f.map!(_=>_.node).canFind(from)){
-				f~=WorkingSetEntry(from,sc);
-				revs[to] = f;
-			}
-		}else { redundancy++; }
-		
-		workingset.remove(from);
-		workingset.add(to, sc);
-	}
-	int redundancy;
-
-	final void removeNode(Node node){
-		//if(node in revs) dw("done with ",typeid(node)," ",node," ",redundancy);
-		// if(node in revs) dw("completion of ", node, " brings in ", map!(_=>_.node)(revs.get(node,[])));
-
-		workingset.add(revs.get(node,[]));
-		workingset.remove(node);
-
-		graph.remove(node);
-		revs.remove(node);
-		
-		// dw(graph.length," ",revs.length);
-	}
 	
 	void run(){
 		mixin(Configure!q{Identifier.tryAgain = true});
@@ -127,7 +107,6 @@ class Scheduler{
 
 		workingset.update();
 
-		int num = 0;
 		do{
 			Identifier.tryAgain = true;
 			do{
@@ -138,7 +117,8 @@ class Scheduler{
 			Identifier.allowDelay=false;
 			workingset.semantic();
 			Identifier.allowDelay=true;
-			// dw("workingset: ",map!(_=>text(_.node," ",_.node.sstate," ",_.node.needRetry))(workingset.payload));
+			//dw("workingset: ",map!(_=>text(_," ",_.sstate," ",typeid(_)))(workingset.payload.keys));
+			// dw(workingset.payload.length);
 		}while(workingset.payload.length);
 
 		// dw(champ," ",champ.cccc);

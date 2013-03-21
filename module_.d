@@ -34,7 +34,7 @@ class Module: Declaration{
 			foreach(ref x;decls){
 				x.stc|=STCstatic;
 				x.presemantic(sc); // add all to symbol table
-				Scheduler().addRoot(x, sc);
+				Scheduler().add(x, sc);
 			}
 			scope_ = sc;
 			sstate = SemState.begin;
@@ -50,9 +50,7 @@ class Module: Declaration{
 	override void semantic(Scope=null){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic();
-		foreach(ref x; decls){x.semantic(sc); mixin(Rewrite!q{x});}
-		foreach(x; decls) mixin(PropRetry!q{x});
-		mixin(PropErr!q{decls});
+		mixin(SemChld!q{decls});
 		assert(sstate==SemState.error||{foreach(x; decls) assert(x.sstate == SemState.completed && !x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(SemEplg);
 	}

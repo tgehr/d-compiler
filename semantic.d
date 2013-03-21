@@ -103,7 +103,7 @@ template PropRetryNoRew(string s) if(!s.canFind(",")){
 			needRetry = _nR;
 			if(_nR==2) @(sp[1]).needRetry=false;
 			// dw("propagated retry ",_nR," from ",@(s)," to ",toString()," @",__LINE__);
-			Scheduler().addDependency(this, @(sp[1]), @(sp[0]));
+			Scheduler().await(this, @(sp[1]), @(sp[0]));
 			@(SemRet)
 		}
 	});
@@ -299,9 +299,9 @@ enum SemState:ubyte{
 	started,
 	completed,
 }
-
 enum SemPrlg=mixin(X!q{
 	if(sstate == SemState.error||sstate == SemState.completed||rewrite){@(SemRet)}
+	Scheduler().add(this,sc);
 	//dw(cccc++); if(!champ||cccc>champ.cccc) champ=this;
 	//dw(champ);
 });
@@ -329,7 +329,7 @@ enum SemPrlg=mixin(X!q{
 
 enum NoRetry=q{
 	needRetry = false;
-	Scheduler().removeNode(this);	
+	Scheduler().remove(this);	
 };
 
 enum SemEplg=q{
@@ -343,7 +343,7 @@ template RewEplg(string s) if(!s.canFind(",")){
 		rewrite = @(s);
 		static assert(is(typeof(return)==void)||is(typeof(return)==bool));
 
-		Scheduler().removeNode(this);
+		Scheduler().remove(this);
 		@(SemRet)
 	});
 }
@@ -358,7 +358,7 @@ template SetErr(string s) if(!s.canFind(",")){
 	enum t=s.length?s~".":"";
 	enum SetErr=mixin(X!q{
 		@(t)needRetry=false; // TODO: macrolize?
-		Scheduler().removeNode(@(s.length?s:"this"));
+		Scheduler().remove(@(s.length?s:"this"));
 		@(t)sstate=SemState.error;
 	});
 }
@@ -678,14 +678,17 @@ mixin template Semantic(T) if(is(T==Expression)){
 	LongRange getLongRange(){return type.getLongRange();}
 
 	// needed for template instantiation
-	bool templateParameterEquals(Expression rhs){
+	bool templateParameterEquals(Expression rhs)in{
 		assert(sstate == SemState.completed,"not completed sstate "~toString());
-		if(!type.equals(rhs.type)) return false;
-		if(isConstant() && rhs.isConstant())
-			return interpretV()==rhs.interpretV();
-		return false;
+	}body{
+		assert(0, "unsupported operation");
 	}
+/+	size_t templateParameterToHash(){
+		assert(0, "unsupported operation");
+	}+/
 }
+
+
 //pragma(msg, __traits(classInstanceSize,Expression)); // 0u. TODO: reduce and report
 
 mixin template Semantic(T) if(is(T==LiteralExp)){
@@ -745,6 +748,16 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 		}
 		return super.getLongRange();
 	}
+
+	override bool templateParameterEquals(Expression rhs){
+		if(!type.equals(rhs.type)) return false;
+		return interpretV()==rhs.interpretV();
+	}
+
+/+	override size_t templateParameterToHash(){
+		assert(!!type,text("no type! ",this));
+		return type.toHash()^value.toHash();
+	}+/
 }
 
 mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
@@ -809,6 +822,15 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		foreach(x; lit) if(!x.implicitlyConvertsTo(et)) return false;
 		return true;
 	}
+
+	override bool templateParameterEquals(Expression rhs){
+		if(!type.equals(rhs.type)) return false;
+		return interpretV()==rhs.interpretV();
+	}
+
+/+	override size_t templateParameterToHash(){
+		return typeid(TemplExpWrapper[]).getHash(&lit);
+	}+/
 }
 
 mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
@@ -835,7 +857,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 	mixin DollarExp.DollarProviderImpl!e;
 
 	override void semantic(Scope sc_){
-		mixin(SemPrlg);
+		{alias sc_ sc;mixin(SemPrlg);}
 		//mixin(SemChldPar!q{e});
 		if(e.sstate != SemState.completed){
 			alias sc_ sc;
@@ -1036,7 +1058,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 	mixin DollarExp.DollarProviderImpl!e;
 
 	override void semantic(Scope sc_){
-		mixin(SemPrlg);
+		{alias sc_ sc; mixin(SemPrlg);}
 		//mixin(SemChldPar!q{e});
 		if(e.sstate != SemState.completed){
 			alias sc_ sc;
@@ -1317,6 +1339,10 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return false;
 	}
 
+/+	size_t templateParameterToHash(){
+		return e.templateParameterToHash();
+	}+/
+
 	}
 
 	static if(S==Tok!"++"||S==Tok!"--"||S==Tok!"*")
@@ -1472,7 +1498,7 @@ class TemplateInstanceDecl: Declaration{
 	
 
 	override void buildInterface(){
-		mixin(SemPrlg);
+		if(sstate == SemState.completed || sstate == SemState.error || rewrite) return;
 		bdy.buildInterface();
 		mixin(SemProp!q{sc=bdy.scope_;bdy});
 	}
@@ -1785,7 +1811,7 @@ class TemplateInstanceDecl: Declaration{
 		}
 		sstate = SemState.begin;
 
-		Scheduler().addRoot(this, scope_); // TODO: ok? (eg. ungag ok?)
+		Scheduler().add(this, scope_); // TODO: ok? (eg. ungag ok?)
 	}
 
 
@@ -1846,7 +1872,7 @@ class TemplateInstanceDecl: Declaration{
 					matchState = completed;
 
 					// give the instance exp a chance to finish the instantiation process
-					Scheduler().removeNode(this);
+					Scheduler().remove(this);
 
 					break;
 				case checkingConstraint:
@@ -1858,7 +1884,7 @@ class TemplateInstanceDecl: Declaration{
 	}
 
 	private void instanceSemantic(Scope sc_){
-		mixin(SemPrlg);
+		{alias sc_ sc;mixin(SemPrlg);}
 		assert(!constraint||constraint.type is Type.get!bool());
 		assert(!constraint||constraint.isConstant() && constraint.interpretV());
 		assert(bdy !is parent.bdy);
@@ -2097,6 +2123,9 @@ class ExprTuple: Expression, Tuple{
 		}
 		return false;
 	}
+/+	override size_t templateParameterToHash(){
+		return typeid(TemplExpWrapper[]).getHash(&exprs);
+	}+/
 
 private:
 	Expression[] exprs;
@@ -2160,6 +2189,10 @@ class TypeTuple: Type, Tuple{
 		}
 		return false;
 	}
+
+/+	override size_t templateParameterToHash(){
+		return typeid(TemplExpWrapper[]).getHash(&types);
+	}+/
 
 private:
 	Type[] types;
@@ -2362,7 +2395,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 	void summon(TemplateInstanceDecl decl)in{
 		assert(!decl.rewrite,"declaration was not fully rewritten");
-		assert(gaggedStore.lookup(decl.resolved) is decl,text(gaggedStore," ",decl,"\n",store));
+		assert(gaggedStore.lookup(decl.resolved) is decl);//,text(gaggedStore," ",decl,"\n",store));
 		assert(decl.scope_ is scope_);
 	}body{
 		store.add(decl);
@@ -2372,6 +2405,13 @@ private:
 	struct TemplateInstanceStore{
 		TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
 		
+		/+
+		static double count = 0;
+		import std.datetime;
+		static StopWatch watch;
+		static ~this(){writeln(watch.peek().to!("seconds",double));}+/
+		/+ { watch.start();scope(exit) watch.stop(); } +/
+
 		// TODO: use 'resolved' as the key instead
 		TemplateInstanceDecl lookup(Expression[] args){
 			TemplateInstanceDecl r = null;
@@ -2392,7 +2432,24 @@ private:
 						return;
 
 			instances~=decl;
-		}	
+		}
+
+		/+private TemplateInstanceDecl[immutable(TemplExpWrapper)[]] instances;
+
+		void add(TemplateInstanceDecl decl)in{
+			assert(decl.completedParameterResolution);
+		}body{
+			foreach(x; decl.resolved)
+				if(auto ty = x.isType())
+					if(ty.hasPseudoTypes())
+						return;
+			
+			instances[cast(immutable(TemplExpWrapper)[])decl.resolved] = decl;
+		}
+
+		TemplateInstanceDecl lookup(Expression[] args){
+			return instances.get(cast(immutable(TemplExpWrapper)[])args,null);
+		}+/
 	}
 	
 	TemplateInstanceStore store;
@@ -2588,7 +2645,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		instantiateResSemantic(sc);
 		if(!rewrite) return;
 		assert(!!cast(Expression)rewrite);
-		rewrite=(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
+		auto r=(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
 		if(!rewrite) mixin(ErrEplg);
 	}
 
@@ -3606,7 +3663,10 @@ class Symbol: Expression{ // semantic node
 		if(auto sym = cast(Symbol)rhs) return meaning is sym.meaning;
 		return false;
 	}
-
+	
+/+	override size_t templateParameterToHash(){
+		return meaning.toHash();
+	}+/
 }
 
 import visitors;
@@ -4694,6 +4754,9 @@ mixin template Semantic(T) if(is(T==Type)){
 		if(auto type = cast(Type)rhs) return equals(type);
 		return false;
 	}
+/+	override size_t templateParameterToHash(){
+		return toHash(); // TODO!: fix!
+	}+/
 }
 
 
@@ -6663,7 +6726,7 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 			x.pickupSTC(stc);
 			x.presemantic(sc);
 
-			Scheduler().addRoot(x, sc);
+			Scheduler().add(x, sc);
 		}
 		sstate = SemState.begin;
 	}
@@ -6680,13 +6743,7 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
-		foreach(ref x; decls){
-			x.semantic(sc); // TODO: get rid of direct call
-			mixin(Rewrite!q{x});
-			if(x.needRetry==2) mixin(PropRetry!q{x});
-		}
-		foreach(ref x; decls) mixin(PropRetry!q{x});
-		mixin(PropErr!q{decls});
+		mixin(SemChld!q{decls});
 		mixin(SemEplg);
 	}
 }
@@ -6718,7 +6775,7 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 	}
 
 	override void buildInterface(){
-		mixin(SemPrlg);
+		if(sstate == SemState.completed || sstate == SemState.error || rewrite) return;
 		findParents();
 		bdy.buildInterface();
 		mixin(PropRetry!q{sc=asc;bdy});
@@ -7033,6 +7090,7 @@ class TemplateOverloadMatcher: SymbolMatcher{
 		mixin(RetryEplg);
 	}
 	override void semantic(Scope sc_){
+		{alias sc_ sc;mixin(SemPrlg);}
 		foreach(x; insts){
 			if(!x) continue;
 			{Scope sc=null;mixin(SemChldPar!q{x});}
@@ -7117,7 +7175,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	FunctionDecl rewriteIfOk = null;
 
 	override void semantic(Scope sc_){
-		mixin(SemPrlg);
+		{alias sc_ sc;mixin(SemPrlg);}
 		if(waitFor){
 			alias sc_ sc;
 			if(waitFor.sstate != SemState.started){

@@ -73,6 +73,6 @@ static assert(MetaNQueens!(2)==0);pragma(msg,"2:", MetaNQueens!2);
 static assert(MetaNQueens!(3)==0);pragma(msg,"3:", MetaNQueens!3);
 static assert(MetaNQueens!(4)==2);pragma(msg,"4:", MetaNQueens!4);
 static assert(MetaNQueens!(5)==10);pragma(msg,"5:", MetaNQueens!5);
-static assert(MetaNQueens!(6)==4);pragma(msg,"6:", MetaNQueens!6);
-static assert(MetaNQueens!(7)==40);pragma(msg,"7:", MetaNQueens!7);
+//static assert(MetaNQueens!(6)==4);pragma(msg,"6:", MetaNQueens!6);
+//static assert(MetaNQueens!(7)==40);pragma(msg,"7:", MetaNQueens!7);
 

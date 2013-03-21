@@ -57,7 +57,7 @@ int main(string[] args){
 	foreach(x; args){
 		// TODO: add to module repository
 		auto m=new Module(x);
-		Scheduler().addRoot(m, null);
+		Scheduler().add(m, null);
 		Scheduler().run();
 		if(m.sstate == SemState.error) sstate = SemState.error;
 	}
