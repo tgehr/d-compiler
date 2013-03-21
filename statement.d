@@ -10,6 +10,8 @@ class Statement: Node{ // empty statement if instanced
 
 class ErrorStm: Statement{
 	override string toString(){return "__error;";}
+
+	mixin Visitors;
 }
 
 class BlockStm: Statement{

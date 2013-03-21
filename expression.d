@@ -8,6 +8,8 @@ abstract class Node{
 	Location loc;
 	SemState sstate = SemState.begin;
 
+	abstract @property string kind();
+
 	mixin Visitors;
 }
 
@@ -17,10 +19,11 @@ class Expression: Node{ // empty expression if instanced
 	override string toString(){return _brk("{}()");}
 	protected string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
 
+	override @property string kind(){return "expression";}
+
 	mixin DownCastMethods!(
 		Identifier,
 		Type,
-		ErrorExp,
 	);
 
 	mixin Visitors;
@@ -28,8 +31,9 @@ class Expression: Node{ // empty expression if instanced
 
 class ErrorExp: Expression{
 	this(){sstate = SemState.error;}
-	override ErrorExp isErrorExp(){return this;}
 	override string toString(){return _brk("__error");}
+
+	mixin Visitors;
 }
 
 
@@ -52,6 +56,8 @@ class ArrayLiteralExp: Expression{
 	Expression[] lit;
 	this(Expression[] literal){lit=literal;}
 	override string toString(){return _brk("["~join(map!(to!string)(lit),",")~"]");}
+
+	mixin Visitors;
 }
 
 class FunctionLiteralExp: Expression{
@@ -73,6 +79,7 @@ class Identifier: Symbol{
 		else this.name = uniq[name] = name;
 	}
 	override string toString(){return _brk(name);}
+	override @property string kind(){return meaning?super.kind:"identifier";}
 
 	override Identifier isIdentifier(){return this;}
 
@@ -98,9 +105,11 @@ class DollarExp: Identifier{
 
 class CastExp: Expression{
 	STC stc;
-	Expression type,e;
-	this(STC ss,Expression tt,Expression exp){stc=ss; type=tt; e=exp;}
-	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(type?" ":""):"")~(type?type.toString():"")~")"~e.toString());}
+	Expression e; Expression ty;
+	this(STC ss,Expression tt,Expression exp){stc=ss; ty=tt; e=exp;}
+	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(ty?" ":""):"")~(ty?type.toString():"")~")"~e.toString());}
+
+	mixin Visitors;
 }
 class NewExp: Expression{
 	Expression[] a1;
@@ -144,6 +153,8 @@ class PostfixExp(TokenType op): Expression{
 	Expression e;
 	this(Expression next){e = next;}
 	override string toString(){return _brk(e.toString()~TokChars!op);}
+
+	mixin Visitors;
 }
 class IndexExp: Expression{ //e[a...]
 	Expression e;
@@ -189,6 +200,8 @@ class TernaryExp: Expression{
 	Expression e1, e2, e3;
 	this(Expression cond, Expression left, Expression right){e1=cond; e2=left; e3=right;}
 	override string toString(){return _brk(e1.toString() ~ '?' ~ e2.toString() ~ ':' ~ e3.toString());}
+
+	mixin Visitors;
 }
 
 enum WhichIsExp{

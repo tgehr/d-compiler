@@ -13,7 +13,7 @@ class Declaration: Statement{ // empty declaration if instanced
 	}
 	override string toString(){return ";";}
 
-	@property string kind(){return "declaration";}
+	override @property string kind(){return "declaration";}
 
 	mixin DownCastMethods!(
 		VarDecl,
@@ -21,7 +21,7 @@ class Declaration: Statement{ // empty declaration if instanced
 		// purely semantic nodes
 		OverloadableDecl,
 		OverloadSet,
-		FwdRef,
+		// FwdRef,
 		MutableAliasRef,
 		ErrorDecl,
 	);
@@ -30,9 +30,11 @@ class Declaration: Statement{ // empty declaration if instanced
 }
 
 class ErrorDecl: Declaration{
-	this(){super(STC.init, null);}
+	this(){super(STC.init, null); sstate=SemState.error;}
 	override ErrorDecl isErrorDecl(){return this;}
 	override string toString(){return "__error ;";}
+
+	mixin Visitors;
 }
 
 class ModuleDecl: Declaration{
@@ -275,6 +277,7 @@ class FunctionDecl: OverloadableDecl{
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");
 	}
+	override @property string kind(){return "function";}
 	override FunctionDecl isFunctionDecl(){return this;}
 }
 

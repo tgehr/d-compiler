@@ -162,7 +162,8 @@ string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~
 struct Location{
 	string rep; // slice of the code representing the Location
 	int line;   // line number at start of location
-	Location to(Location end)const in{assert(rep.ptr<=end.rep.ptr);}body{
+	Location to(Location end)const{// in{assert(rep.ptr<=end.rep.ptr);}body{ // requiring that is not robust enough
+		if(rep.ptr>end.rep.ptr) return this;
 		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length], line);
 	}
 }

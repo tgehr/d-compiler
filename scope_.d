@@ -5,24 +5,24 @@ import lexer, parser, expression, declaration, semantic, util, error;
 
 
 
-class FwdRef: Declaration{ // Forward reference. Dummy node for identifier that has not yet been resolved
+/*class FwdRef: Declaration{ // Forward reference. Dummy node for identifier that has not yet been resolved
 	this(Identifier name){
 		sstate=SemState.fwdRefs;
 		super(STC.init, name);
 	}
 	Declaration resolved = null;
-	Declaration semantic(Scope sc){
+	override Declaration semantic(Scope sc){
 		if(resolved) return resolved;
 		return sc.lookup(name, this);
 	}
 	override FwdRef isFwdRef(){return this;}
-}
+}*/
 
 class MutableAliasRef: Declaration{ // used if a declaration references another declaration, eg mixin Template;
 	Declaration other;
 	bool canShadow = true;
 	this(Declaration other){this.other=other; super(other.stc, other.name);}
-	Declaration semantic(Scope sc){
+	override Declaration semantic(Scope sc){
 		canShadow = false;
 		return other.semantic(sc);
 	}
@@ -30,7 +30,7 @@ class MutableAliasRef: Declaration{ // used if a declaration references another 
 		if(canShadow){ other = newDecl; canShadow = false; return; }
 		sc.error(format("cannot shadow declaration '%s' which has already been used", other.name), newDecl.loc);
 	}
-	MutableAliasRef isMutableAliasRef(){return this;}
+	override MutableAliasRef isMutableAliasRef(){return this;}
 }
 
 
@@ -41,9 +41,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 	void insert(Declaration decl)in{assert(decl.name.ptr);}body{
 		if(auto d=symtab.get(decl.name.ptr,null)){
-			if(auto fw=decl.isFwdRef()){ // forward references can be resolved, so no error
-				
-			}else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
+			if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					os.add(fd);
 					return;
@@ -52,8 +50,10 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 					return;
 				}
 			}
-			error(format("redefinition of '%s'",decl.name), decl.name.loc);
-			note("previous definition was here",d.name.loc);	             
+			if(d.sstate != SemState.error){ // TODO: is this always desirable?
+				error(format("redefinition of '%s'",decl.name), decl.name.loc);
+				note("previous definition was here",d.name.loc);	             
+			}
 			return;
 		}
 		return symtab[decl.name.ptr]=decl;
@@ -63,7 +63,9 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return symtab.get(ident.ptr, alt);
 	}
 	Declaration lookup(Identifier ident){
-		return lookup(ident, New!FwdRef(ident));  // the allocation is lazy
+		if(auto lk = symtab.get(ident.ptr, null)) return lk;
+		error(format("undefined identifier '%s'",ident.name), ident.loc);
+		return New!ErrorDecl();
 	}
 	
 	
@@ -76,7 +78,7 @@ protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
 private:
 	Declaration[const(char)*] symtab;
-	FwdRef[] FwdRefs; // TODO: maybe use more efficient datastructure
+	//FwdRef[] FwdRefs; // TODO: maybe use more efficient datastructure
 }
 
 abstract class NestedScope: Scope{
