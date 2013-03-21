@@ -1,3 +1,9 @@
+
+alias immutable(char)[] string;
+
+auto testtemplatefunclit(alias fun)(){ return fun!int(2); }
+pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!(x=>2)());
+
 int[] rec(int[] arg){
 	if(!arg.length) return arg;
 	return rec(arg[1..arg.length]);
@@ -15,3 +21,5 @@ typeof(z) x;
 typeof(x) y;
 typeof(y) z;
 +/
+
+// +/

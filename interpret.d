@@ -2304,7 +2304,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==EmptyStm) && !is(T==BlockStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==EmptyStm) && !is(T==BlockStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExprTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2331,6 +2331,13 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 		bld.emit(Instruction.ret);
 	}
 }
+
+mixin template CTFEInterpret(T) if(is(T==ExprTuple)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		foreach(x; exprs) x.byteCompile(bld);
+	}
+}
+
 
 mixin template CTFEInterpret(T) if(is(T==EmptyStm)){
 	void byteCompile(ref ByteCodeBuilder bld){ /+ ; +/ }

@@ -1,4 +1,12 @@
 
+alias TypeTuple Seq;
+
+auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
+//auto seqtak(){auto x = seqret(1,2); return x[0];}
+//pragma(msg, seqtak());
+//pragma(msg, seqret(1,2));
+
+
 /+ // TODO: make work
 struct Tpl{
 	TypeTuple!(int, double) foo;
@@ -17,6 +25,7 @@ void checkTpl(){
 template Alias(T){ alias T Alias; }
 
 template TypeTuple(T...){ alias T TypeTuple; }
+// template TypeTuple(T...){ alias T TypeTuple; } // TODO!
 
 
 pragma(msg, TypeTuple!(1,2,3,4)[1..3]);

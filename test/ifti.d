@@ -1,3 +1,13 @@
+template tmpl(T){
+	static if(is(T==double)){
+		T[] tmpl(T arg){return [arg, 2*arg];}
+	}else{
+		T[] tmpl(T arg){return is(T==int)?[arg]:[arg,arg,2*arg];}
+	}
+	//alias int T;
+}
+pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
+
 
 auto combine(T)(T a, T b, T c){return [a,b,c];}
 
@@ -89,17 +99,6 @@ bool all(alias a,T)(T[] r){
 
 pragma(msg, "all: ",all!(x=>x&1)([1,3,4,5]));
 
-
-
-template tmpl(T){
-	static if(is(T==double)){
-		T[] tmpl(T arg){return [arg, 2*arg];}
-	}else{
-		T[] tmpl(T arg){return is(T==int)?[arg]:[arg,arg,2*arg];}
-	}
-	//alias int T;
-}
-pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
 
 
 //T identity(T)(const arg=2) {pragma(msg,T," ",typeof(arg)); return arg; }

@@ -90,7 +90,7 @@ template PropRetryNoRew(string s) if(!s.canFind(",")){
 		if(auto _nR=@(s).needRetry){
 			needRetry = _nR;
 			if(_nR==2) @(s).needRetry=false;
-			//dw("propagated retry ",_nR," from ",@(s)," to ",toString()," @",__LINE__);
+			// dw("propagated retry ",_nR," from ",@(s)," to ",toString()," @",__LINE__);
 			Scheduler().addDependency(this, @(s));
 			@(SemRet)
 		}
@@ -406,11 +406,16 @@ mixin template Semantic(T) if(is(T==Expression)){
 		semantic(sc);
 		auto f = this;
 		mixin(Rewrite!q{f});
-		if(f.sstate == SemState.completed && f.isType()){
-			//sc.error(format("%s '%s' is not an expression", f.kind, loc.rep), loc);
+		void errorOut(){
 			sc.error(format("%s '%s' is not an expression", f.kind, f.toString()), loc);
 			rewrite = null;
 			mixin(ErrEplg);
+		}
+		if(f.sstate == SemState.completed){
+			if(f.isType()) return errorOut();
+			else if(auto et=f.isExprTuple()){
+				foreach(x; et) if(x.isType()) return errorOut();
+			}
 		}
 	}
 
@@ -2202,7 +2207,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	}
 
 	override TemplateDecl matchIFTI(Scope sc, const ref Location loc, ref TemplateInstanceDecl inst, Expression[] args, Expression[] funargs){
-		if(!iftiDecl) return super.matchIFTI(sc, loc, inst, args, funargs);
+		if(!iftiDecl) return matchInstantiation(sc, loc, inst, args);
 		auto r=matchHelper!false(sc, loc, inst, args, funargs);
 		// TODO: more explicit error message
 		if(!r && sc) sc.error("could not match call to function template",loc);
@@ -2291,7 +2296,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		TemplateDecl decl;
 		//assert(!inst);
 		decl = sym.meaning.matchIFTI(sc, loc, inst, args, funargs);
-		if(!decl) mixin(ErrEplg);
+		if(!decl||decl.sstate==SemState.error) mixin(ErrEplg);
 		assert(!!inst);
 		mixin(SemProp!q{decl, inst});
 
@@ -2340,7 +2345,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 					lit.meaning = fd.templatizeLiteral();
 					lit.meaning.semantic(sc);
 					mixin(Rewrite!q{lit.meaning});
-					assert(lit.meaning.sstate == SemState.completed);
+					assert(lit.meaning.sstate == SemState.completed && !lit.meaning.needRetry);
 					x = lit;
 				}}
 				continue;
@@ -2365,7 +2370,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		TemplateDecl decl;
 		if(!inst||!inst.completedMatching){
 			decl = sym.meaning.matchIFTI(sc, loc, inst, args, iftiArgs);
-			if(!decl) mixin(ErrEplg);
+			if(!decl||decl.sstate==SemState.error) mixin(ErrEplg);
 			assert(!!inst);
 			mixin(SemProp!q{decl, inst});
 		}else decl=inst.parent;
@@ -2377,7 +2382,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		TemplateDecl decl;
 		if(!inst||!inst.completedMatching){
 			decl = sym.meaning.matchInstantiation(sc, loc, inst, args);
-			if(!decl) mixin(ErrEplg);
+			if(!decl||decl.sstate==SemState.error) mixin(ErrEplg);
 			assert(!!inst);
 			mixin(SemProp!q{decl, inst});
 		}else decl=inst.parent;
@@ -3130,7 +3135,6 @@ class Symbol: Expression{ // semantic node
 			if(meaning.sstate != SemState.completed) meaning.semantic(meaning.scope_);
 			mixin(Rewrite!q{meaning});
 		};
-
 		// resolve alias
 		if(auto al=meaning.isAliasDecl()){
 			mixin(MeaningSemantic);
@@ -3222,12 +3226,12 @@ class Symbol: Expression{ // semantic node
 			}
 			type=Type.get!void();
 		}else if(auto ov=meaning.isOverloadSet()){
-			foreach(x; ov.decls) if(auto fd = x.isFunctionDecl()){
+			foreach(ref x; ov.decls) if(auto fd = x.isFunctionDecl()){
 				if(fd.type.hasUnresolvedReturn()){
 					fd.semantic(fd.scope_);
-					mixin(Rewrite!q{fd});
+					mixin(Rewrite!q{x});
 					mixin(CircErrMsg);
-					mixin(SemProp!q{fd});
+					mixin(SemProp!q{x});
 				}else{
 					fd.propagateSTC();
 					fd.type.semantic(fd.scope_);
@@ -4550,6 +4554,13 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 }
 mixin template Semantic(T) if(is(T==FunctionTy)){
 	Scope scope_;
+
+	void reset()in{
+		assert(hasUnresolvedParameters());
+	}body{
+		sstate = SemState.begin;
+		foreach(x;params) x.sstate = SemState.begin;
+	}
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -7000,6 +7011,8 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		size_t nump = 0;
 		assert(type.hasUnresolvedParameters());
 	}body{
+		type.reset();
+
 		size_t nump = 0;
 		foreach(x;type.params) if(x.mustBeTypeDeducted()) nump++;
 		// TODO: gc allocations
