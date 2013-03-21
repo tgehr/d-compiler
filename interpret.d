@@ -129,7 +129,9 @@ void copyLocations(ArrayLiteralExp r, ArrayLiteralExp a){
 
 mixin template Interpret(T) if(is(T==CastExp)){
 	override bool checkInterpret(Scope sc){
-		if(e.type.implicitlyConvertsTo(type)) return e.checkInterpret(sc);
+		auto impld = e.type.implicitlyConvertsTo(type);
+		assert(!impld.dependee); // analysis has already determined this
+		if(impld.value) return e.checkInterpret(sc);
 		if(type.getHeadUnqual().isPointerTy()){
 			sc.error(format("cannot interpret cast from '%s' to '%s' at compile time",e.type,type),loc);
 			return false;
@@ -1451,7 +1453,7 @@ string toString(ByteCode byteCode){
 
 /* for debugging purposes
  */
-bool _displayByteCode = false+1;
+bool _displayByteCode = false;
 bool _displayByteCodeIntp = false;
 
 import error;
@@ -2607,7 +2609,11 @@ mixin template CTFEInterpret(T) if(is(T==AssertExp)){
 			bld.error(format("assertion failure: %s is false", a[0].loc.rep),loc);
 		}else{
 			assert(a.length==2);
-			assert(a[1].type.implicitlyConvertsTo(Type.get!(const(char)[])()));
+			assert({
+				auto icd=a[1].type.implicitlyConvertsTo(Type.get!(const(char)[])());
+				assert(!icd.dependee);
+				return icd.value;
+			}());
 			a[1].byteCompile(bld);
 			bld.emitUnsafe(Instruction.hltstr, this);
 		}
@@ -3184,15 +3190,21 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		}
 		// TODO: sanity check for reinterpreted references
 		// TODO: sanity check for array cast alignment
-		if(t1.refConvertsTo(t2,0)) return;
+		auto rcd = t1.refConvertsTo(t2,0);
+		assert(!rcd.dependee); // must have been determined to type check the expression
+		if(rcd.value) return;
 		//if(t1.isDynArrTy() && t2.isDynArrTy()) return;
 		//if(t1.isPointerTy() && t2.isPointerTy()) return;
 		bld.error(format("cannot interpret cast from '%s' to '%s' at compile time", e.type,type),loc);
 	}
 	
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
-		assert(e.type.refConvertsTo(type,1)   // ref params
-		       ||type.refConvertsTo(type,1)); // out params
+		assert({
+			auto rcd1=e.type.refConvertsTo(type,1);   // ref params
+			auto rcd2= type.refConvertsTo(type,1); // out params	
+			assert(!rcd1.dependee&&!rcd2.dependee);
+			return rcd1.value || rcd2.value;
+		}());
 		return e.byteCompileLV(bld);
 	}
 }

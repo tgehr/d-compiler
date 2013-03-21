@@ -29,14 +29,14 @@ template ToTuple(alias a){
 
 template Seq(T...) { alias T Seq; }
 
-enum Ternary: ubyte{
+/+enum Ternary: ubyte{
 	no = 0,
 	yes = 1,
 	dunno = 2,
 }
 alias Ternary.no no;
 alias Ternary.yes yes;
-alias Ternary.dunno dunno;
+alias Ternary.dunno dunno;+/
 
 
 // escape a string

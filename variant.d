@@ -504,11 +504,14 @@ struct Variant{
 				// TODO: implement this
 				assert(0,"TODO");
 			}else static if(isRelationalOp(Tok!op)){
+				// TODO: create these as templates instead
 				auto l1 = length, l2=rhs.length;
 				static if(op=="=="){if(l1!=l2) return Variant(false);}
 				else static if(op=="!=") if(l1!=l2) return Variant(true);
 				if(l1&&l2){
-					Type ty = arr[0].id.type.combine(rhs.arr[0].id.type);
+					auto tyd = arr[0].id.type.combine(rhs.arr[0].id.type);
+					assert(!tyd.dependee);// should still be ok though.
+					Type ty = tyd.value;
 					foreach(i,v; arr[0..l1<l2?l1:l2]){
 						auto l = v.convertTo(ty), r = rhs.arr[i].convertTo(ty);
 						if(l.opBinary!"=="(r)) continue;

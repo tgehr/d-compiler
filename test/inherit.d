@@ -1,4 +1,5 @@
 class A(T){
+	pragma(msg, T);
 	static assert(is(T: A!T));
 }
 class C(T) : A!T{

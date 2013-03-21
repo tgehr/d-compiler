@@ -30,7 +30,6 @@ string biToString(int[] bi){
 pragma(msg, biToString(bigInt("00123453388338838")));
 
 
-
 auto memoizer(T,S)(T[] memo, T delegate(T delegate(S), S) formula){
 	bool[] e;
 	e.length = memo.length;
@@ -404,7 +403,7 @@ auto testnulldelegate(){
 
 auto testnullfunpointer(){
 	int function() fp=null;
-	return fp();
+	return fp(); // error
 }
 pragma(msg, testnulldelegate());
 pragma(msg, testnullfunpointer());

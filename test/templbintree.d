@@ -5,7 +5,7 @@ struct Binary(int depth, int a, B) if(depth!=0){
 		Binary!(depth-1, 1, Binary).value;
 }
 struct Binary(int depth, int a, B) if(depth==0){
-	enum int value = "";// TODO: show error message!
+	enum int value = ""; // error
 }
  
 void main(){

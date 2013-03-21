@@ -20,7 +20,7 @@ void testpuredollar(){
 
 
 template Inex(a...){
-	alias Inex!(1,a[0..n]) Inex;
+	alias Inex!(1,a[0..n]) Inex; // error
 }
 
 pragma(msg, Inex!(2,2,3));
@@ -84,12 +84,12 @@ void local(){
 	int x;
 	//alias x y;
 	alias Seq!x y;
-	static void foo(){y[0]++;}
+	static void foo(){y[0]++;} // error
 }
 
 template TT(int i){
 	alias Rest V;
-	static if(i) alias TT!(0).V Rest;
+	static if(i) alias TT!(0).V Rest; // TODO: should work
 	static if(i) enum thisisone=true;
 }
 
@@ -97,7 +97,7 @@ pragma(msg, TT!(0).V);
 pragma(msg, TT!(1).V);
 
 template SS(bool i){
-	static if(i) alias int V;
+	static if(i) alias int V; // TODO: should work
 	alias V A;
 }
 
@@ -116,21 +116,21 @@ struct QQ{
 	//int x=2,y=3;
 	int x(); int y;
 	static void foo(){
-		a();
-		b=b;
+		a(); // error
+		b=b; // error
 	}
 }
 
 
 struct G {G g; }
 struct F(T) { static int f(immutable ref T) {return 2;} }
-pragma(msg, F!G.f(G.g));
+pragma(msg, F!G.f(G.g)); // just a type error, because the pragma would attempt compile-time lookup of G.g
 
 
 
 struct WW{
 	void foo(){
-		a=2;
+		a=2; // error
 	}
 }
 
@@ -145,7 +145,7 @@ struct Foo{
 	static void goo(){
 		Foo f;
 		auto x=f.foo(2);
-		auto y=Foo.foo();
+		auto y=Foo.foo(); // error
 		pragma(msg, "x: ",typeof(x)," y: ",typeof(y));
 	}
 }
@@ -155,9 +155,9 @@ struct Test{
 	double foo(int){return 1.0;}
 	static void goo(){
 		//foo();
-		pragma(msg, typeof(Test.foo(cast(shared)1)));
+		pragma(msg, typeof(Test.foo(cast(shared)1))); // error
 
-		Test.foo(2);
+		Test.foo(2); // TODO: should work (?)
 	}
 }
 

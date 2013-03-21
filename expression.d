@@ -30,6 +30,42 @@ abstract class Node{
 	abstract inout(Node) ddup()inout in{assert(sstate==SemState.begin||sstate==SemState.pre);}body{assert(0);};
 }
 
+template Dependent(T){
+	// convoluted nesting of declarations to make DMD happy
+	struct DependentOrTrue{
+		Dependent!T dep;
+		alias dep this;
+		bool opCast(T: bool)(){return !!dep.dependee || dep.value;}					
+	}
+	struct Dependent{
+		private alias Dependent D;
+		Node dependee;
+		static if(!is(T==void)) T value;
+		DependentOrTrue prop()(){ return DependentOrTrue(this); }
+		
+		static if(is(T==bool)){
+		// for use in if(auto t = someExpression.prop) return t;
+			D not(){ return D(dependee, !value); }
+			D and(lazy D lb){
+				D b; if(!dependee&&value) b = lb;
+				return D(dependee?dependee:b.dependee, value && b.value);
+			}
+			D or(lazy D lb){
+				D b; if(!dependee&&!value) b = lb;
+				return D(dependee?dependee:b.dependee, value || b.value);
+			}
+		}
+		bool isIndependent(){ return !dependee; }
+		static if(!is(T==void))T force()in{assert(!dependee);}body{ return value; }
+	}
+}
+//auto independent(T:void)() if(is(T==void)){ return Dependent!void(null); } // Y U NO WORK?
+auto indepvoid(){ return Dependent!void(null); }
+auto independent(T)(T value) if(!is(T==void)){ return Dependent!T(null, value); }
+auto dependent(T)(Node dependee){ return Dependent!T(dependee); }
+
+
+
 abstract class Expression: Node{
 	int brackets=0;
 	override string toString(){return _brk("{}()");}
