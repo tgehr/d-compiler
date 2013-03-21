@@ -6,13 +6,14 @@ import std.traits : EnumMembers;
 
 import core.memory;
 
-import util;
-
 // enum TokenType;
 mixin("enum TokenType{"~TokenNames()~"}");
 
+import scope_, util; // ugly: if expression is imported before the mixin, it cannot reference the mixin with DMD
+
 template Tok(string type){mixin(TokImpl());}
 template TokChars(TokenType type){mixin(TokCharsImpl());}
+
 
 
 private immutable{
@@ -115,8 +116,8 @@ string[] keywords = ["abstract", "alias", "align", "asm", "assert", "auto", "bod
 enum string[2][] tokens = specialTokens ~ complexTokens ~ simpleTokens ~ compoundTokens ~ keywordTokens!();
 }
 
-TokenType[string] kwAA; // TODO: make more efficient. this seems to be faster than string switch though!
-static this(){foreach(i,x;keywords) kwAA[x]=cast(TokenType)(Tok!"abstract"+i);}
+//TokenType[string] kwAA; // TODO: make more efficient. this seems to be faster than string switch though!
+//static this(){foreach(i,x;keywords) kwAA[x]=cast(TokenType)(Tok!"abstract"+i);}
 
 private{
 template keywordTokens(){
@@ -304,7 +305,6 @@ struct Lexer{
 		auto r = token!"Error";
 		r.str = s;
 		r.loc = Location(rep, l?l:line);
-		GC.addRange(cast(void*)&r.str,r.str.sizeof); // error messages may be allocated on the GC heap
 		return r;
 	}
 
@@ -440,7 +440,6 @@ struct Lexer{
 					if(*p!='{') goto case 'Q';
 					p++; s = p; sl = line;
 					del = 0;
-					p++; s = p;
 					readtstring: for(int nest=1;;){ // TODO: implement more efficiently
 						Token tt;
 						code=code[p-code.ptr..$]; // update code to allow recursion
@@ -664,12 +663,7 @@ struct Lexer{
 					}
 					
 					res[0].name = s[0..p-s];
-					res[0].type=kwAA.get(res[0].name, Tok!"i");
-					/*switch(res[0].name){
-						// TODO: If this is removed, dmd builds an executable, else an object file. reduce.
-						mixin({string r; foreach(kw;keywords) r~="case \""~kw~"\": res[0].type=Tok!\""~kw~"\"; break;\n";return r;}());
-						default: res[0].type = Tok!"i";
-						}*/
+					res[0].type=isKeyword(res[0].name);
 					break;
 				case 0x80: .. case 0xFF:
 					len=0; p--;
@@ -679,7 +673,7 @@ struct Lexer{
 						if(!isWhite(ch)) errors~=tokError(format("unsupported character '%s'",ch),s[0..len]);
 						// else if(isNewLine(ch)) line++; // TODO: implement this everywhere
 						continue;
-					}catch{} goto default; // moved outside handler to make -w shut up
+					}catch{} goto default;
 				default:
 					invCharSeq();
 					continue;
@@ -1063,6 +1057,80 @@ unittest{
 	assert(lex("0x1234_5678_9ABC_5A5AL")[0].int64 == 0x1234_5678_9ABC_5A5AL);
 }
 
+private string isKw(string[] cases){
+	string r="switch(s){";
+	foreach(x;cases) r~=`case "`~x~`": return Tok!"`~x~`";`;
+	return r~="default: break;}";
+}
+TokenType isKeyword(string s){
+	switch(s.length){
+		case 2: //["do", "if", "in", "is"];
+			if(s[0]=='i'){
+				if(s[1]=='f') return Tok!"if";
+				if(s[1]=='s') return Tok!"is";
+				if(s[1]=='n') return Tok!"in";
+			}else if(s[0]=='d' && s[1]=='o') return Tok!"do";
+			break;
+		case 3://["asm", "for", "int", "new", "out", "ref", "try"]
+			switch(s[0]){
+				case 'i': if(s[1]=='n' && s[2]=='t') return Tok!"int"; break;
+				case 'f': if(s[1]=='o' && s[2]=='r') return Tok!"for"; break;
+				case 'n': if(s[1]=='e' && s[2]=='w') return Tok!"new"; break;
+				case 'r': if(s[1]=='e' && s[2]=='f') return Tok!"ref"; break;
+				case 'o': if(s[1]=='u' && s[2]=='t') return Tok!"out"; break;
+				case 't': if(s[1]=='r' && s[2]=='y') return Tok!"try"; break;
+				case 'a': if(s[1]=='s' && s[2]=='m') return Tok!"asm"; break;
+				default: break;
+			}
+			break;
+		case 4: //["auto", "body", "bool", "byte", "case", "cast", "cent", "char", "else", "enum", "goto", "lazy", "long", "null", "pure", "real", "this", "true", "uint", "void", "with"]
+			switch(s[0]){
+				case 'a': if(s[1]=='u' && s[2]=='t' && s[3]=='o') return Tok!"auto"; break;
+				case 'b': if(s[1]=='y' && s[2]=='t' && s[3]=='e') return Tok!"byte";
+					if(s[1]=='o'){
+						if(s[2]=='o' && s[3]=='l') return Tok!"bool";
+						if(s[2]=='d' && s[3]=='y') return Tok!"body";
+					}
+					break;
+				case 'c':
+					if(s[1]=='a' && s[2]=='s'){
+						if(s[3]=='e') return Tok!"case";
+						if(s[3]=='t') return Tok!"cast";
+					}
+					if(s[1]=='h' && s[2]=='a' && s[3]=='r') return Tok!"char";
+					break;
+				case 'e':
+					if(s[1]=='l' && s[2]=='s' && s[3]=='e') return Tok!"else";
+					if(s[1]=='n' && s[2]=='u' && s[3]=='m') return Tok!"enum";
+					break;
+				case 'g': if(s[1]=='o' && s[2]=='t' && s[3]=='o') return Tok!"goto"; break;
+				case 'l':
+					if(s[1]=='o' && s[2]=='n' && s[3]=='g') return Tok!"long";
+					if(s[1]=='a' && s[2]=='z' && s[3]=='y') return Tok!"lazy";
+				case 'n': if(s[1]=='u' && s[2]=='l' && s[3]=='l') return Tok!"null"; break;
+				case 'p': if(s[1]=='u' && s[2]=='r' && s[3]=='e') return Tok!"pure"; break;
+				case 'r': if(s[1]=='e' && s[2]=='a' && s[3]=='l') return Tok!"real"; break;
+				case 't':
+					if(s[1]=='h' && s[2]=='i' && s[3]=='s') return Tok!"this";
+					if(s[1]=='r' && s[2]=='u' && s[3]=='e') return Tok!"true";
+					break;
+				case 'u': if(s[1]=='i' && s[2]=='n' && s[3]=='t') return Tok!"uint"; break;
+				case 'v': if(s[1]=='o' && s[2]=='i' && s[3]=='d') return Tok!"void"; break;
+				case 'w': if(s[1]=='i' && s[2]=='t' && s[3]=='h') return Tok!"with"; break;
+				default: break;
+			}
+		case 5: mixin(isKw(["alias", "align", "break", "catch", "class", "const", "creal", "dchar", "debug", "false", "final", "float", "inout", "ireal", "macro", "mixin", "scope", "short", "super", "throw", "ubyte", "ucent", "ulong", "union", "wchar", "while"])); break;
+		case 6: mixin(isKw(["assert", "cfloat", "delete", "double", "export", "extern", "ifloat", "import", "module", "pragma", "public", "return", "shared", "static", "struct", "switch", "typeid", "typeof", "ushort"])); break;
+		case 7: mixin(isKw(["cdouble", "default", "finally", "foreach", "idouble", "nothrow", "package", "private", "typedef", "version"])); break;
+		case 8: mixin(isKw(["abstract", "continue", "delegate", "function", "override", "template", "unittest", "volatile", "__thread", "__traits"])); break;
+		case 9: mixin(isKw(["immutable", "interface", "invariant", "protected", "__gshared"])); break;
+		case 10: if(s=="deprecated") return Tok!"deprecated"; break;
+		case 12: if(s=="synchronized") return Tok!"synchronized"; break;
+		case 15: if(s=="foreach_reverse") return Tok!"foreach_reverse"; break;
+		default: break;
+	}
+	return Tok!"i";
+}
 
 
 

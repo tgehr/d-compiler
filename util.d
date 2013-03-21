@@ -38,6 +38,14 @@ string escape(string i,bool isc=false){ // TODO: COW, replace with std lib one a
 	return r;
 }
 
+string indent(string code){
+	import std.string;
+	auto sl=splitLines(code);if(!sl.length) return "";
+	string r="    "~sl[0];
+	foreach(x;sl[1..$]) r~="\n    "~x;
+	return r;
+}
+
 bool isNewLine(dchar c){
 	return c=='\u000A'||c=='\u000B'||c=='\u000C'||c=='\u000D'||c=='\u0085'||c=='\u2028'||c=='\u2029';
 }
@@ -219,7 +227,10 @@ template MemoizeTemplate(alias T){
 }
 
 
-
+string _dgliteral(T...)(){string r;foreach(t;T) r~=t.stringof ~ " is"~t.stringof~"(){return null;}"; return r;}
+mixin template DownCastMethods(T...){
+	mixin(_dgliteral!T()); // DMD bug
+}
 
 
 
