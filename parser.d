@@ -36,6 +36,11 @@ private string STCEnum(){
 mixin(STCEnum());
 enum STCbyref = (STCref|STCout);
 enum STCrvalue = (STCenum|STClazy);
+enum STCnonvirtualprotection = (STCprivate|STCpackage);
+enum STCnonvirtual = (STCfinal|STCstatic|STCnonvirtualprotection);
+enum STCmattersforparamoverride = (STCref|STCin|STClazy|STCout|STCscope);
+enum STCinvariantunderoverride = (STCref|STCsynchronized);
+enum STCtypeconstructor = (STCconst|STCimmutable|STCshared|STCinout);
 static assert(storageClasses.length+attributeSTC.length<64);
 alias long STC;
 string STCtoString(STC stc){
@@ -1089,7 +1094,7 @@ private struct Parser{
 		if(isAlias){
 			if(ttype==Tok!"this"){
 				nextToken();
-				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!ThisExp(),Expression.init)); expect(Tok!";"); // alias this
+				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!Identifier("this"),Expression.init)); expect(Tok!";"); // alias this
 			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
 		}else if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type,begin);
 		else d=parseDeclarators(stc,type);
@@ -1200,7 +1205,7 @@ private struct Parser{
 		Parameter[] params;
 		if(ret) goto notspecial; // so that I don't have to test for ret multiple times
 		if(ttype==Tok!"this"){
-			name=New!ThisExp(), name.loc=tok.loc; nextToken();
+			name=New!Identifier("this"), name.loc=tok.loc; nextToken();
 			if(ttype==Tok!"("&&peek().type==Tok!"this"){
 				nextToken(), nextToken(), expect(Tok!")");
 				auto param = New!PostblitParameter(); param.loc=tok.loc;

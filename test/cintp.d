@@ -1,12 +1,11 @@
+
 template CommonType(T...){
 	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }() };
-	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType; // TODO
+	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType;
 	else alias void CommonType;
 }
 
-pragma(msg, CommonType!()," ",CommonType!(int,double,real));
-
-
+pragma(msg, "CommonType: ",CommonType!()," ",CommonType!(int,double,real));
 
 int[] bigInt(string s){ // TODO: in contracts
 	int[] r;
@@ -901,8 +900,6 @@ pragma(msg, "testnested: ",testnested());
 static assert(testnested()==6);
 
 
-
-
 int* aliasinp(int* x){
 	auto y = &x;
 	return x;
@@ -921,8 +918,7 @@ pragma(msg, "testalias: ",testalias());
 
 int* escapestackref(int x){
 	int y = x;
-	//return aliasinp(&*&y); // this crashes DMD :o)
-	return &y;
+	return aliasinp(&*&y);
 }
 int testescape(){
 	int a = 11;
@@ -951,9 +947,8 @@ int tailcalls(int n, int x){
 	return 1?tailcalls(n-1, x+n):10;
 }
 int tcfac(int n){
-	version(DigitalMars) int loop(int x, int a) {return x>n?a: loop(x+1,x*a);} // TODO
-	else mixin(q{int loop(int x, int a) => x>n?a: loop(x+1,x*a);});
-	return loop(1,1); // TODO
+	int loop(int x, int a) => x>n?a: loop(x+1,x*a);
+	return loop(1,1);
 }
 pragma(msg, "tcfac: ", tcfac(10));
 
@@ -1080,6 +1075,18 @@ static assert(testbrkcnt() == 50);
 
 pragma(msg, "testbrkcnt: ", testbrkcnt());
 
+string testimplconv2ptr(){
+	const char* x     = "hello world";
+	immutable char* y = "world hello";
+	immutable(char)* z= " ";
+	return x[0..5]~z[0..1]~y[0..5];
+}
+static assert(testimplconv2ptr()=="hello world");
+pragma(msg, "testimplconv2ptr: ",testimplconv2ptr());
+
+static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // TODO: should this be invalid?
+
+static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO: cast(char[])"123" currently creates an array literal, should probably be invalid during ctfe instead. if directly assigned to an enum, creates an actual reference to read-only memory
 
 bool strchr(immutable(char)* haystack, immutable(char)* needle){
 	if(haystack is null) return needle is null;
@@ -1102,7 +1109,7 @@ pragma(msg, "strchr4: ", strchr(&"1234"[0],&"23"[0]));
 pragma(msg, "strchr5: ", strchr(&"1234"[0],&"023"[0]));
 pragma(msg, "strchr6: ", strchr(&"1234"[0],&"123"[0]));
 pragma(msg, "strchr7: ", strchr(&"123"[0],&""[0])); // TODO: fix?
-pragma(msg, "strchr8: ", strchr(&"\0"[0],&"\0"[0]));
+pragma(msg, "strchr8: ", strchr("",""));
 
 
 int strcmp(immutable(char)[] a, immutable(char)[] b){

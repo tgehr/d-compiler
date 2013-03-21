@@ -119,6 +119,7 @@ abstract class Expression: Node{
 		ArrayLiteralExp,
 		FunctionLiteralExp,
 		TernaryExp,
+		CastExp,
 		Type,
 		Tuple,
 		ExpTuple,
@@ -229,13 +230,15 @@ class ModuleIdentifier: Identifier{
 	mixin Visitors;
 }
 
-// special symbols that can be used like identifiers in some contexts
-class ThisExp: Identifier{
-	this(){ super(q{this}); }
+class ThisExp: CurrentExp{
+	override string toString(){ return "this"; }
+	mixin Visitors;
 }
-class SuperExp: Identifier{
-	this(){ super(q{super}); }
+class SuperExp: CurrentExp{
+	override string toString(){ return "super"; }
+	mixin Visitors;
 }
+// special symbols that are used like identifiers in some contexts
 class TildeThisExp: Identifier{
 	this(){ super(q{~this}); }
 }
@@ -256,6 +259,7 @@ class CastExp: Expression{
 	this(STC ss,Expression tt,Expression exp){stc=ss; ty=tt; e=exp;}
 	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(ty?" ":""):"")~(ty?ty.toString():"")~")"~e.toString());}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class NewExp: Expression{

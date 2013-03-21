@@ -10,7 +10,7 @@ private template NotYetImplemented(T){
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp);
 }
 
 enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
@@ -37,7 +37,7 @@ mixin template Interpret(T) if(is(T==MixinExp) || is(T==IsExp)){
 	override void interpret(Scope sc){assert(0);}
 	override void _interpretFunctionCalls(Scope sc){assert(0);}
 }
-mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
+mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T || is(T==ThisExp)||is(T==SuperExp)){
 	override void interpret(Scope sc){
 		assert(sc, "expression "~toString()~" was assumed to be interpretable");
 		sc.error(format("expression '%s' is not interpretable at compile time yet",toString()),loc);
@@ -467,7 +467,8 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 				}
 			}
 			assert(e2.type.getElementType() &&
-			       e2.type.getElementType().equals(e1.type));
+			       e2.type.getElementType().equals(e1.type),
+			       text(e2.type," ",e1.type));
 			auto ety = e1.type;
 			auto lhs = e1.interpretV();
 			if(ety is Type.get!(immutable(char))())
@@ -2848,10 +2849,25 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			e2.byteCompile(bld);
 			end.here();
 		}else static if(S==Tok!"~"){
-			e1.byteCompile(bld);
+			auto exp1=e1, exp2=e2;
+			// kludge: remove supposedly "unsafe" casts
+			// this only allows valid code, but maybe it will have to be changed
+			// eg. cast(char[])"hello"~cast(char[])"hello" is allowed by this
+			// but not by conservative treatment
+			void removeReinterpretCast(ref Expression exp, Expression other){
+				if(exp.type is other.type.getElementType()) return;
+				if(auto ce=exp.isCastExp()){
+					if(ce.type.getUnqual() is ce.e.type.getUnqual()) 
+						exp = ce.e;	
+				}
+			}
+			removeReinterpretCast(exp1, exp2);
+			removeReinterpretCast(exp2, exp1);
+				
+			exp1.byteCompile(bld);
 			if(e1.type is e2.type.getElementType())
 				emitMakeArray(bld,e2.type,1);
-			e2.byteCompile(bld);
+			exp2.byteCompile(bld);
 			if(e2.type is e1.type.getElementType())
 				emitMakeArray(bld,e1.type,1);
 			bld.emit(I.concata);
@@ -3189,11 +3205,24 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 				break;
 			}
 		}
+
+		if(e.isDirectlyAllocated()) t1 = t1.getUnqual(), t2 = t2.getUnqual();
+
 		// TODO: sanity check for reinterpreted references
 		// TODO: sanity check for array cast alignment
 		auto rcd = t1.refConvertsTo(t2,0);
 		assert(!rcd.dependee); // must have been determined to type check the expression
 		if(rcd.value) return;
+		if(auto dyn=t1.isDynArrTy()){
+			if(auto ptr=t2.isPointerTy()){
+				auto rcd2 = dyn.refConvertsTo(ptr.ty.getDynArr(), 0);
+				assert(!rcd2.dependee);
+				if(rcd2.value){
+					bld.emit(I.ptra);
+					return;
+				}
+			}
+		}
 		//if(t1.isDynArrTy() && t2.isDynArrTy()) return;
 		//if(t1.isPointerTy() && t2.isPointerTy()) return;
 		bld.error(format("cannot interpret cast from '%s' to '%s' at compile time", e.type,type),loc);

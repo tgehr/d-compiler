@@ -5,16 +5,38 @@ class PP{
 class CC: PP{
 	int bar(){
 		ppccfoo();
-		PP.foo(); // TODO: should be ok!
-		return foo(); // TODO: ditto
-		// TODO: need to distinguish the notations
+		PP.foo();
+		CC.foo();
+		super.foo();
+		this.foo();
+		this.bar();
+		super.bar();// error
+		return foo();
 	}
 	static int baz(){
-		ppccfoo();
+		this.foo();// error
+		this.bar();// error
+		super.foo();// error
+/+		ppccfoo();
+		PP.ppccfoo(); // error
+		CC.ppccfoo(); // error
 		PP.foo(); // error
-		return foo(); // error
+		return foo(); // error+/
+	}
+	pragma(msg, typeof(this));
+	pragma(msg, typeof(super));
+	static assert(is(typeof(this)==CC));
+	static assert(is(typeof(super)==PP));
+}
+pragma(msg, typeof(this)); // error
+
+struct NOPP{
+	void foo(){
+		super.foo();//error
 	}
 }
+
+/+
 
 class D{
 	int x;

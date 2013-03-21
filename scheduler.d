@@ -182,8 +182,8 @@ class Scheduler{
 				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
-						assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
-						(cast(Expression)cast(void*)nd).interpret(sc);
+						//assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
+						if(auto exp=nd.isExpression()) exp.interpret(sc);
 					}else remove(nd);
 					continue;
 				}else if(nd.sstate == SemState.error) remove(nd);

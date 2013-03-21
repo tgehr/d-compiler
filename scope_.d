@@ -55,7 +55,7 @@ abstract class Scope{ // SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		auto dd=lookupHere(decl.name,null), d = dd.value, dep = dd.dependee;
+		auto dd=lookupExactlyHere(decl.name,null), d = dd.value, dep = dd.dependee;
 		assert(!dd.dependee||!dd.value);
 		if(!dep&&d){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
@@ -88,7 +88,7 @@ abstract class Scope{ // SCOPE
 	}
 
 	bool inexistent(Identifier ident){
-		auto dd=lookupHere(ident,null), d = dd.value, dep = dd.dependee;
+		auto dd=lookupExactlyHere(ident,null), d = dd.value, dep = dd.dependee;
 		assert(!dd.dependee||!dd.value);
 		if(!dep&&d){
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
@@ -112,8 +112,12 @@ abstract class Scope{ // SCOPE
 		return lookupHere(ident, alt);
 	}
 
+	final Dependent!Declaration lookupExactlyHere(Identifier ident, lazy Declaration alt){
+		return symtab.get(ident.ptr, alt).independent;		
+	}
+
 	Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, alt).independent;
+		return lookupExactlyHere(ident, alt);
 	}
 
 	void potentialInsert(Identifier ident, Declaration decl){
@@ -274,31 +278,40 @@ private:
 	AggregateDecl aggr;
 }
 
+template AggregateParentsInOrderTraversal(string bdy,string raggr="raggr", string parent="parent"){
+	enum AggregateParentsInOrderTraversal = mixin(X!q{
+		static if(is(typeof(return) A : Dependent!T,T)) alias T R;
+		else static assert(0);
+		for(size_t i=0; i<@(raggr).parents.length; i++){
+			@(raggr).findFirstNParents(i+1);
+			if(@(raggr).parents[i].needRetry)
+				return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
+			if(@(raggr).parents[i].sstate==SemState.error)
+				continue;
+			assert(cast(AggregateTy)@(raggr).parents[i]
+			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)@(raggr).parents[i]).decl);
+			auto @(parent) = cast(ReferenceAggregateDecl)cast(void*)
+			(cast(AggregateTy)cast(void*)@(raggr).parents[i]).decl;
+			@(bdy)
+		}
+	});
+}
+
 class InheritScope: AggregateScope{
 	invariant(){ assert(!!cast(ReferenceAggregateDecl)aggr); }
 	@property ref ReferenceAggregateDecl raggr(){ return *cast(ReferenceAggregateDecl*)&aggr; }
 	this(ReferenceAggregateDecl decl) in{assert(!!decl.scope_);}body{ super(decl); }
 
-	// TODO: monads work better in Haskell..., find an elegant way to get rid
-	// of the duplication without running into DMD bugs
-
 	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
 		// dw("looking up ",ident," in ", this);
 		mixin(LookupHere!q{auto d; super, ident, alt});
-		for(size_t i=0; i<raggr.parents.length && d && typeid(d) is typeid(DoesNotExistDecl);i++){
-			raggr.findFirstNParents(i+1);
-			if(raggr.parents[i].needRetry)
-				return Dependee(raggr.parents[i], raggr.scope_).dependent!Declaration;
-			if(raggr.parents[i].sstate==SemState.error)
-				continue;
-			assert(cast(AggregateTy)raggr.parents[i]
-			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)raggr.parents[i]).decl, text(raggr.parents[i], typeid(raggr().parents[i]),raggr.parents[i].needRetry));
-			auto decl = cast(ReferenceAggregateDecl)cast(void*)
-				(cast(AggregateTy)cast(void*)raggr.parents[i]).decl;
-			auto lkup = decl.asc.lookupHere(ident, null);
+		if(d && typeid(d) is typeid(DoesNotExistDecl))
+		mixin(AggregateParentsInOrderTraversal!q{
+			auto lkup = parent.asc.lookupHere(ident, null);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
-		}
+			if(!d || typeid(d) !is typeid(DoesNotExistDecl)) break;
+		});
 		if(!d) d = alt;
 		return d.independent;
 	}
@@ -306,18 +319,9 @@ class InheritScope: AggregateScope{
 	override Dependent!Scope getUnresolved(Identifier ident){
 		mixin(LookupHere!q{auto d; super, ident, null});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
-		for(size_t i=0; i<raggr.parents.length; i++){
-			raggr.findFirstNParents(i+1);
-			if(raggr.parents[i].needRetry)
-				return Dependee(raggr.parents[i], raggr.scope_).dependent!Scope;
-			if(raggr.parents[i].sstate==SemState.error)
-				continue;
-			assert(cast(AggregateTy)raggr.parents[i]
-			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)raggr.parents[i]).decl, text(raggr.parents[i], typeid(raggr().parents[i]),raggr.parents[i].needRetry));
-			auto decl = cast(ReferenceAggregateDecl)cast(void*)
-				(cast(AggregateTy)cast(void*)raggr.parents[i]).decl;
-			if(auto lkup = decl.asc.getUnresolved(ident).prop) return lkup;	
-		}
+		mixin(AggregateParentsInOrderTraversal!q{
+			if(auto lkup = parent.asc.getUnresolved(ident).prop) return lkup;	
+		});
 		// TODO: this is a hack
 		return ident.recursiveLookup?parent.getUnresolved(ident):null.independent!Scope;
 	}

@@ -1,3 +1,194 @@
+class OVIC{
+	mixin(q{int foo()immutable{ return 2; }});
+	int foo()        const    { return 2; }
+}
+class OVIbICSC: OVIC{
+	override int foo()immutable           { return 2; }
+	mixin(q{override int foo()const shared{ return 2; }}); // error
+	override int foo()const               { return 2;}
+	//int foo()inout{ return 2; }
+}
+
+class OVIbCCS: OVIC{
+	mixin(q{override int foo()const{ return 2; }});
+	override int foo()const shared { return 2; }
+}
+
+/+
+int global;
+class Container{
+	int cont;
+	class C{
+		void foo()const{
+			static assert(is(typeof(global)==int));
+			static assert(is(typeof(cont)==const(int)));
+			static assert(is(typeof(d)==const(D)));
+			static assert(is(typeof(d.u)==const(int)));
+			static assert(is(typeof(Container2.y)==int));
+		}
+		void foo()const shared{
+			static assert(is(typeof(global)==int));
+			static assert(is(typeof(cont)==const(shared(int))));
+			static assert(is(typeof(d)==const(D)));
+			static assert(is(typeof(d.u)==shared(const(int))));
+			static assert(is(typeof(Container2.y)==int));
+		}
+		static void foo(){
+			static assert(is(typeof(cont)==int));
+			static assert(is(typeof(d.u)==int));
+		}
+	}
+	class D{
+		int u;
+	}
+	D d;
+}
+class Container2{
+	static int y;
+}
+
+class DisjointDecls{
+	int foo(){ return 2; }
+	int foo()immutable{ return 2;}
+	int bar(){ return 2; }
+	int bar()shared{ return 2; }
+}
+
+class DisjointOverrides: DisjointDecls{
+	override int foo(){ return 2; }
+	override int foo()immutable{ return 2; }
+	override int bar(){ return 2; }
+	override int bar()shared{ return 2; }
+}
+
+class IHazAllFoo{
+	int[] x = [1,2,3];
+	int[] foo(){
+		static assert(is(typeof(this)==IHazAllFoo));
+		static assert(is(typeof(x)==int[]));
+		return x;
+	}
+	const(int[]) foo()const{
+		static assert(is(typeof(this)==const(IHazAllFoo)));
+		static assert(is(typeof(x)==const(int[])));
+		return x;
+	}
+	immutable(int[]) foo()immutable{
+		static assert(is(typeof(this)==immutable(IHazAllFoo)));
+		static assert(is(typeof(x)==immutable(int[])));
+		return x;
+	}
+	shared(int[]) foo()shared{
+		static assert(is(typeof(this)==shared(IHazAllFoo)));
+		static assert(is(typeof(x)==shared(int[])));
+		return x;
+	}
+}
+
+class OverrideAllFoo: IHazAllFoo{
+	override int[] foo(){
+		static assert(is(typeof(super)==IHazAllFoo));
+		static assert(is(typeof(x)==int[]));
+		return super.foo(); // TODO!
+	}
+	override const(int[]) foo()const{
+		static assert(is(typeof(super)==const(IHazAllFoo)));
+		static assert(is(typeof(x)==const(int[])));
+		return super.foo(); // TODO!
+	}
+	override immutable(int[]) foo()immutable{
+		static assert(is(typeof(super)==immutable(IHazAllFoo)));
+		static assert(is(typeof(x)==immutable(int[])));
+		return super.foo(); // TODO!
+	}
+	override shared(int[]) foo()shared{
+		static assert(is(typeof(super)==shared(IHazAllFoo)));
+		static assert(is(typeof(x)==shared(int[])));
+		return super.foo(); // TODO!
+	}
+}
+
+class IHazFoo{
+	final int x(){ return 2;}
+	int foo(){ return x(); }
+}
+class IHazFoo2: IHazFoo{
+	override int foo(){ return super.foo(); }
+	int foo()const{ return x(); }
+}
+
+class ConstOverride: IHazFoo2{
+	override int foo(){ return x(); }
+	override int foo()const{ return x(); }
+}
+
+class ConstOverride2: IHazFoo{
+	override int foo()const{ return x(); }
+}
+
+class ConstOverride3: ConstOverride2{
+	override int foo(){ return x(); } // error
+}
+
+class ConstOverride4: IHazFoo2{
+	override int foo(){ return super.foo(); } // TODO
+	override int foo()inout{ return x(); }
+}
+
+class CircOverride1: CircOverride2{
+	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
+	override int bar(int x){ return x; }// ok (hidden by circular inheritance)
+}
+class CircOverride2: CircOverride1{
+	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
+}
+
+class HasFoo{
+	auto foo(HasFoo x){ return x; }
+}
+class OverridesFoo: HasFoo{
+	override HasFoo foo(HasFoo x){ return this; } // ok
+	override auto foo(HasFoo x){ return this; } // error
+	override void foo(HasFoo x){ } // error
+	override auto foo(OverridesFoo x){ return this; } // error
+	HasFoo foo(HasFoo x){ return this; } // ok, additional overload
+}
+class HidesFoo: HasFoo{
+	final HidesFoo foo(HasFoo x){ return this; } // error
+}
+
+class HasFooOverloads{
+	auto foo(HasFooOverloads x){ return x; }
+	int foo(int x){ return x; }
+}
+class OverridesFoo2: HasFooOverloads{
+	override foo(int x){ return x; } // error
+}
+class OverridesFoo3: HasFooOverloads{
+	final override foo(int x){ return x; } // ok
+	override foo(HasFooOverloads x){ return x; } // ok
+}
+class OverridesFoo4: OverridesFoo3{
+	override foo(int x){ return x; } // error (final in base class)
+	override foo(HasFooOverloads x){ return x; } // error (shadows the final method)
+}
+
+class OverridesFoo5: HasFooOverloads{
+	private int foo(int x){ return x; } // ok (TODO: should private even overload against public?, should functions with the same argument types even be allowed to coexist?)
+	override int foo(int x){ return x; } // ok
+	override auto foo(HasFooOverloads x){ return x; } // ok
+}
+class OverridesFoo6: HasFooOverloads{
+	package int foo(int x){ return x; } // ok
+}
+
+class HasFinalFoo{
+	final int foo(int x) { return x; }
+}
+class HidesFinalFoo: HasFinalFoo{
+	final int foo(int x) { return x; }// ok
+}
+
 
 class GG{ enum gg = "gg"; }
 class HH: GG{ enum hh = "hh"; }
@@ -14,7 +205,7 @@ class PP{
 }
 interface I{
 	enum y = "success!!";
-	enum x = 2; // TODO: should this raise a conflict?
+	enum x = 2;
 }
 class CC : PP,I{
 	pragma(msg, x," ",y);
@@ -115,7 +306,7 @@ void test2(){
 
 	auto b = [cu,cv];
 	pragma(msg, typeof(b));
-	static assert(is(typeof(b)==const(X)[]));
+	static assert(is(typeof(b)==const(X)[])); // TODO!
 }
 
 alias Seq!int P;

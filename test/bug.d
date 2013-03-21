@@ -1,3 +1,19 @@
+/+// TODO: this must work! (need notion of potential indirections to support this)
+pragma(msg, {
+	string x = "123";
+	auto y = ['1','2','3'];
+	return x~=y;
+}());
++/
+
+/+// TODO: better error message
+pragma(msg,{
+		immutable (int)*[] x;
+		int y = 2;
+		x~= cast(float*)&y;
+		return *x[0];
+	}());
++/
 
 /+
 template asdf(){}

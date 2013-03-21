@@ -35,7 +35,7 @@ abstract class ErrorHandler{
 class SimpleErrorHandler: ErrorHandler{
 	override void error(lazy string err, Location loc){
 		if(loc.line == 0){ // just here for robustness
-			stderr.writeln("(bug, location missing): "~err);
+			stderr.writeln("(location missing): "~err);
 			return;
 		}
 		nerrors++;
@@ -55,7 +55,7 @@ class VerboseErrorHandler: ErrorHandler{
 	}
 	private void impl(lazy string err, Location loc, bool isNote){
 		if(loc.line == 0){ // just here for robustness
-			stderr.writeln("(bug, location missing): "~err);
+			stderr.writeln("(location missing): "~err);
 			return;
 		}
 		auto src = loc.source;

@@ -59,7 +59,10 @@ class ErrorDecl: Declaration{
 	this(){super(STC.init, null); sstate=SemState.error;}
 	override ErrorDecl isErrorDecl(){return this;}
 	override string toString(){return "__error ;";}
-
+	static opCall(){
+		static ErrorDecl err;
+		return err?err:(err=New!ErrorDecl);
+	}
 	mixin Visitors;
 }
 
