@@ -1,5 +1,8 @@
-//pragma(msg, 2*2);
+static assert(cast(short)cast(ulong)1e10 == -7168);
 
+
+//pragma(msg, 2*2);
+//static assert(0);
 immutable(int)[] x = [1];
 //immutable(int)[]* p = &x;
 //immutable rp=p;
@@ -14,8 +17,8 @@ int gun(int x){
 }
 
 void main(){
-	enum ass = (assert(0),2);
-
+	enum ass = (assert(0,"foo"),2);
+	pragma(msg, ass);
 	*cast(int*)&x[0] = 2;
 	immutable int x=a;
 	//pragma(msg, x);
@@ -32,6 +35,10 @@ void main(){
 	//enum xxx = ['h','e','l','l','o']<['a','b','c'];
 	//void fooz(bool c)(){}
 	//fooz!(xxx);
+
+	static assert((4+5i)%3i == 1+2i);
+	static assert(cast(cdouble)2i == 2i);
+
 	pragma(msg, zz,zzz,zz!<>zzz);
 	pragma(msg, "hell"=="hello");
 	pragma(msg, [1,2]!<=[1]);
@@ -39,7 +46,7 @@ void main(){
 	static assert(u!<>=u);
 
 	static assert(!is(typeof(mixin(q{mixin(q{mixin(q{mixin})})}))));
-	pragma(msg, fun(10)+10);
+	//pragma(msg, fun(10)+10);
 
 	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d";
 	pragma(msg, idc);

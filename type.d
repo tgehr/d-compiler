@@ -5,6 +5,7 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, util;
 import semantic, scope_, vrange, visitors;
 
+import std.traits : Unqual;
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
 	this(){type = get!void();}
@@ -22,7 +23,6 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		if(uniqueType!(T*)) return uniqueType!(T*);
 		return uniqueType!(T*)=get!T().getPointer();
 	}
-
 	static Type get(T: T[])(){
 		if(uniqueType!(T[])) return uniqueType!(T[]);
 		return uniqueType!(T[])=get!T().getDynArr();
@@ -33,9 +33,9 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!(T[N])=get!T().getArray(N);
 	}
 
-	static Type get(T: const(T))() if(!is(typeof({T x; x=T.init;}))&&!.isBasicType!T){
-		if(uniqueType!(const(T))) return uniqueType!(const(T));
-		return uniqueType!(const(T))=get!T().getConst();		
+	static Type get(T: const(U),U)()if(!is(T==U)){
+		if(uniqueType!T) return uniqueType!T;
+		return uniqueType!T=get!U().getConst();		
 	}
 	static Type get(T: immutable(T))(){
 		if(uniqueType!(immutable(T))) return uniqueType!(immutable(T));
@@ -177,14 +177,17 @@ class TypeofReturnExp: Type{
 	override string toString(){return _brk("typeof(return)");}
 }
 
-enum basicTypes=["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar","float","double","real","ifloat","idouble","ireal","cfloat","cdouble","creal","void"];
+enum integralTypes = ["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar"];
+enum basicTypes = integralTypes~["float","double","real","ifloat","idouble","ireal","cfloat","cdouble","creal","void"];
+
 
 template isBasicType(T){
 	enum isBasicType=canFind(basicTypes,T.stringof);
 }
 
-int integralBitSize(TokenType op){
+int basicTypeBitSize(TokenType op){
 	switch(op){
+		case Tok!"void":
 		case Tok!"bool", Tok!"char", Tok!"byte", Tok!"ubyte":
 			return 8;
 		case Tok!"wchar", Tok!"short", Tok!"ushort":
@@ -193,6 +196,15 @@ int integralBitSize(TokenType op){
 			return 32;
 		case Tok!"long", Tok!"ulong":
 			return 64;
+		case Tok!"float", Tok!"ifloat":
+			return 32;
+		case Tok!"double", Tok!"idouble":
+			return 64;
+		case Tok!"real", Tok!"ireal":
+			return 96; // TODO: this is architecture-dependent
+		case Tok!"cfloat": return 64;
+		case Tok!"cdouble": return 128;
+		case Tok!"creal": return 192; // TODO: verify
 		default: return -1;
 	}
 }

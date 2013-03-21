@@ -1075,7 +1075,10 @@ private struct Parser{
 		return res;
 	}
 	Expression parseCondition(){
-		if(!isDeclaration()) return parseExpression(rbp!(Tok!","));
+		auto save = saveState();
+		bool res=skipDeclaration() && skip(Tok!"="); // requires an initializer
+		restoreState(save);
+		if(!res) return parseExpression(rbp!(Tok!","));
 		else{
 			Location loc=tok.loc;
 			Expression type,init;

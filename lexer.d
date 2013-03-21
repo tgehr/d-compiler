@@ -167,15 +167,16 @@ class Source{
 		sources ~= this;
 	}
 	string getLineOf(string rep)in{assert(this is get(rep));}body{
+		//if(!code.length) return code;
 		string before=code.ptr[0..code.length+4][0..rep.ptr-code.ptr];
 		string after =code.ptr[0..code.length+4][rep.ptr-code.ptr..$];
-		immutable(char)* start=code.ptr, end=&code[$-1]+1;
+		immutable(char)* start=code.ptr, end=code.ptr+code.length;
 		foreach_reverse(ref c; before) if(c=='\n'||c=='\r'){start = &c+1; break;}
 		foreach(ref c; after) if(c=='\n'||c=='\r'){end = &c; break;}
 		return start[0..end-start];
 	}
 	static Source get(string rep){
-		foreach(x; sources) if(rep.ptr>=x.code.ptr &&&rep[$-1]<=&x.code[$-1]+4) return x;
+		foreach(x; sources) if(rep.ptr>=x.code.ptr && rep.ptr+rep.length<=x.code.ptr+x.code.length+4) return x;
 		return null;
 	}
 	void dispose(){
@@ -196,7 +197,7 @@ struct Location{
 	// reference to the source the code belongs to
 	@property Source source()const{
 		auto src = Source.get(rep);
-		assert(src, "source not found!");
+		assert(src, "source for '"~rep~"' not found!");
 		return src;
 	}	// perfectly safe, because location is tail-immutable: TODO: report bug, it should work
 	//ref Location _toMutable()const{return *cast(Location*)&this;}alias _toMutable this;
@@ -963,7 +964,7 @@ private:
 				}
 				while(*p == '0') p++; // eat leading zeros of decimal
 				if(('1' > *p || *p > '9') && *p != '.'){
-					isfloat |= *p == 'f' || *p == 'F' || (*p=='i'||*p=='L'&&p[1]=='i');
+					isfloat |= *p == 'f' || *p == 'F' || *p == 'i' || *p == 'L' && p[1]=='i';
 					leadingzero=0; break;
 				}
 				goto case;
@@ -1035,7 +1036,7 @@ private:
 							break consumedec;
 					}
 				}
-				isfloat |= *p == 'f' || *p == 'F' || *p == 'i';
+				isfloat |= *p == 'f' || *p == 'F' || *p == 'i' || *p == 'L' && p[1] == 'i';
 				if(isfloat){ // compute value of floating point literal (not perfectly accurate)
 					if(dot==-1) dot = dig;
 					if(neg) exp += cast(long) dig - dot - adjexp;

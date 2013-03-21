@@ -267,7 +267,8 @@ struct ValueRange(int size) if(size==32||size==64){
 			return R(nmin, nmax, false);
 		}
 		T diff = min^max;
-		if(cast(S)rhs.min<0||cast(S)rhs.max>size-1||rhs.min&&~((cast(T)1<<size-1>>rhs.min)-1)&diff) return full(true);
+		if(cast(S)rhs.min<0||cast(S)rhs.max>size-1) return full(true);
+		//||rhs.min&&~((cast(T)1<<size-1>>rhs.min)-1)&diff) return full(true);
 		S nmin = cast(S)(min<<rhs.min), nmax = cast(S)(max<<rhs.min);
 		for(auto i=rhs.min, xmin=nmin, xmax=nmax; i<=rhs.max; i++, xmin+=xmin, xmax+=xmax, diff+=diff){
 			if(xmin<nmin) nmin=xmin;

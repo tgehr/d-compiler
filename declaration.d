@@ -5,7 +5,7 @@ import std.array, std.algorithm, std.range, std.conv, std.string;
 import lexer, parser, expression, statement, type, scope_, semantic, visitors, util;
 
 import variant;
-import interpret; // byteCompile
+import interpret, error; // byteCompile
 
 abstract class Declaration: Statement{
 	STC stc;
@@ -287,10 +287,10 @@ class Declarators: Declaration{
 	mixin Visitors;
 }
 
-class Parameter: VarDecl{ // for functions, foreach etc
+class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach usage
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
 	override string toString(){return STCtoString(stc)~(stc&&rtype?" ":"")~(rtype?rtype.toString():"")~
-			(name?(stc||type?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
+			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
 	override @property string kind(){return "parameter";}
 
 	mixin Visitors;

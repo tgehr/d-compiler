@@ -1,4 +1,4 @@
-// Written in the D programming language.
+// Writtenf in the D programming language.
 
 import lexer, operators, expression, type, util;
 
@@ -70,8 +70,13 @@ private struct RTTypeID{
 			r.toExpr = function(ref Variant self){
 				return New!LiteralExp(token!"null");
 			};
-			r.convertTo = cannotConvert;
+			r.convertTo = function(ref Variant self, Type to){
+				if(to is Type.get!(typeof(null))()) return self;
+				if(to.getElementType()) return Variant(cast(Variant[])null).convertTo(to);
+				return cannotConvert(self, to);
+			};
 			r.toString = function(ref Variant self){return "null";};
+			r.toVoidArray = function (ref Variant self) => null;
 		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
 			enum occ = getOccupied!T;
 			r.whichBasicType=Tok!(is(T==string)?"``c":is(T==wstring)?"``w":is(T==dstring)?"``d":assert(0));
@@ -94,6 +99,7 @@ private struct RTTypeID{
 					foreach(i,x;mixin(`self.`~.to!string(occ))) r[i]=Variant(x);
 					return Variant(r);
 				}
+
 				assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
 				return self; // TODO: this is a hack and might break stuff (?)
 			};
@@ -102,6 +108,10 @@ private struct RTTypeID{
 				       is(T==dstring) ? "d" : "";
 			r.toString = function string(ref Variant self){
 				return to!string('"'~escape(mixin(`self.`~to!string(occ)))~'"'~sfx);
+			};
+
+			r.toVoidArray = function void[](ref Variant self){
+				return cast(void[])mixin(`self.`~to!string(occ));
 			};
 		}else static if(isBasicType!T){//
 			alias getOccupied!T occ;
@@ -119,6 +129,7 @@ private struct RTTypeID{
 							case Tok!x:
 							return Variant(mixin(`cast(`~x~`)self.`~.to!string(occ)));
 						}
+						case Tok!"void": return self;
 						default: break;
 					}
 				}
@@ -134,7 +145,16 @@ private struct RTTypeID{
 						   is(T==ireal) ? "Li":"";
 				enum left = is(T==char)||is(T==wchar)||is(T==dchar) ? "'" : "";
 				enum right = left;
+				// remove redundant "i" from imaginary literals
+				enum occ = occ==Occupies.fli80?Occupies.flt80:occ;
+				static if(is(T==ifloat)) alias float T;
+				else static if(is(T==idouble)) alias double T;
+				else static if(is(T==ireal)) alias real T;
+
 				return left~to!string(mixin(`cast(T)self.`~to!string(occ)))~right~sfx;
+			};
+			r.toVoidArray = function void[](ref Variant self){
+				assert(0,"cannot turn basic type into void[]");
 			};
 		}else static if(is(T==Variant[])){
 			r.occupies = Occupies.arr;
@@ -142,6 +162,7 @@ private struct RTTypeID{
 				// TODO: allocation ok?
 				Expression[] lit = new Expression[self.length];
 				foreach(i,ref x;lit) x = self.arr[i].id.toExpr(self.arr[i]);
+				// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
 				return New!ArrayLiteralExp(lit).semantic(null); // TODO: ok?
 			};
 			r.convertTo = function Variant(ref Variant self, Type to){
@@ -163,7 +184,54 @@ private struct RTTypeID{
 				return self;
 			};
 			r.toString = function string(ref Variant self){
-				return to!string(self.arr);
+				import std.algorithm, std.array;
+				return '['~join(map!(to!string)(self.arr),",")~']';
+			};
+			r.toVoidArray = function void[](ref Variant self){
+				import std.typetuple;
+				auto el = self.getType().getElementType();
+				assert(el);
+				if(el.getElementType()){
+					// TODO: this allocates, probably ok
+					auto r = new void[][self.length];
+					foreach(i,ref x;r) x=self.arr[i].get!(void[])();
+					return r;
+				}
+				if(auto bt=el.getUnqual().isBasicType()){
+					if(bt.isIntegral){
+						switch(bt.getSizeof()){
+							foreach(U; TypeTuple!(ubyte, ushort, uint, ulong)){
+								case U.sizeof:
+								auto r=new U[self.length];
+								foreach(i,ref x;r) x=cast(U)self.arr[i].get!ulong();
+								return r;
+							}
+							default: import std.stdio; writeln(self);assert(0);
+						}
+					}
+					foreach(U; TypeTuple!(float, double, real)){
+						if(bt is Type.get!U()){
+							auto r=new U[self.length];
+							foreach(i,ref x;r) x=cast(U)self.arr[i].flt80;
+							return r;
+						}
+					}
+					foreach(U; TypeTuple!(ifloat, idouble, ireal)){
+						if(bt is Type.get!U()){
+							auto r=new U[self.length];
+							foreach(i,ref x;r) x=cast(U)self.arr[i].fli80;
+							return r;
+						}
+					}
+					foreach(U; TypeTuple!(cfloat, cdouble, creal)){
+						if(bt is Type.get!U()){
+							auto r=new U[self.length];
+							foreach(i,ref x;r) x=cast(U)self.arr[i].cmp80;
+							return r;
+						}
+					}
+				}
+				assert(0,"TODO: toVoidArray for "~to!string(self.id.type));
 			};
 		}else{
 			static assert(!isBasicType!T);
@@ -185,6 +253,7 @@ private:
 	Expression function(ref Variant) toExpr;
 	string function(ref Variant) toString;
 	Variant function(ref Variant,Type) convertTo;
+	void[] function(ref Variant) toVoidArray;
 
 	private static Variant function(ref Variant,Type) cannotConvert;
 	static this(){ // meh
@@ -268,11 +337,54 @@ struct Variant{
 		}
 		else static if(is(T==wstring)){assert(id.occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(id.occupies == Occupies.dstr); return dstr;}
+		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(id.occupies == Occupies.int64); return cast(T)int64;}
+		else static if(is(T==float)||is(T==double)||is(T==real)
+			        || is(T==ifloat) || is(T==idouble)||is(T==ireal)){
+			assert(id.occupies == Occupies.flt80 || id.occupies == Occupies.fli80);
+			return flt80;
+		}else static if(is(T==void[])) return id.toVoidArray(this);
 		else static assert(0, "cannot get this field (yet?)");
 	}
 
+	static Variant fromVoidArray(void[] v, Type type)in{assert(type.getElementType);}body{
+		auto tyu=type.getHeadUnqual();
+		import std.typetuple;
+		foreach(T;TypeTuple!(string, wstring, dstring))
+			if(tyu is Type.get!T()) return Variant(cast(T)v);
+		auto el = type.getElementType().getHeadUnqual();
+		if(el.getElementType()){
+			auto from = cast(void[][])v;
+			auto res = new Variant[from.length];
+			foreach(i,ref x; res) x = fromVoidArray(from[i],el);
+			return Variant(res);
+		}
+		if(auto bt = el.isBasicType()){
+		swtch:switch(bt.op){
+				foreach(xx;ToTuple!basicTypes){
+					static if(xx!="void"){
+						alias typeof(mixin(xx~`.init`)) T;
+						case Tok!xx:
+						    auto from = cast(T[])v;
+							auto res = new Variant[from.length];
+							foreach(i, ref x; res) x=Variant(from[i]);
+							return Variant(res);
+					}
+				}
+				default: assert(0);
+			}
+		}else assert(0, "TODO: fromVoidArray for type "~to!string(type));
+	}
+
+	/* returns a type that fully specifies the memory layout
+	   for strings, the relevant type qualifiers are preserved
+	   otherwise, gives no guarantees for type qualifier preservation
+	 */
+
 	Type getType(){
-		assert(id.occupies != Occupies.arr); // TODO: fix this
+		if(id.occupies == Occupies.arr){
+			if(!length) return id.type;
+			return arr[0].getType().getDynArr();
+		}
 		return id.type;
 	}
 
@@ -320,11 +432,13 @@ struct Variant{
 		static if(isShiftOp(Tok!op)){
 			assert(id.occupies == Occupies.int64 && rhs.id.occupies == Occupies.int64);
 		}else{
-			assert(id.occupies == Occupies.arr || id.whichBasicType!=Tok!"" && id.whichBasicType == rhs.id.whichBasicType,
-			       to!string(id.whichBasicType)~"!="~to!string(rhs.id.whichBasicType));
+			//assert(id.occupies == Occupies.arr || id.whichBasicType!=Tok!"" && id.whichBasicType == rhs.id.whichBasicType,
+			//       to!string(id.whichBasicType)~"!="~to!string(rhs.id.whichBasicType));
 			assert(id.occupies==rhs.id.occupies
 			    || id.occupies == Occupies.arr && occString(rhs.id.occupies)
-			    || rhs.id.occupies == Occupies.arr && occString(id.occupies),
+			    || rhs.id.occupies == Occupies.arr && occString(id.occupies)
+			    || op == "%" && id.occupies == Occupies.cmp80 &&
+			       (rhs.id.occupies == Occupies.flt80 || rhs.id.occupies == Occupies.fli80),
 			       to!string(this)~" is incompatible with "~
 			       to!string(rhs)~" in binary '"~op~"' expression");
 		}
@@ -362,12 +476,18 @@ struct Variant{
 				static if(x!="void"){
 					alias typeof(mixin(x~`.init`)) T;
 					alias getOccupied!T occ;
+					static if(occ == Occupies.cmp80 && op == "%")
+						// can do complex modulo real
+						// relies on same representation for flt and fli
+						enum occ2 = Occupies.flt80;
+					else enum occ2 = occ;
 					assert(id.occupies == occ);
-					static if(isShiftOp(Tok!op)) enum cst = ``;
+					assert(rhs.id.occupies == occ2);
+					static if(isShiftOp(Tok!op)|| occ2 != occ) enum cst = ``;
 					else enum cst = q{ cast(T) };
 					enum code = q{
 						Variant(mixin(`cast(T)` ~ to!string(occ) ~ op ~
-						              cst~`rhs.` ~ to!string(occ)))
+						              cst~`rhs.` ~ to!string(occ2)))
 					};
 					static if(is(typeof(mixin(code)))) case Tok!x: return mixin(code);
 				}

@@ -49,10 +49,11 @@ class ErrorExp: Expression{
 }
 
 class StubExp: Expression{
-	this(Type type)in{assert(type.sstate==SemState.completed);}body{this.type = type;}
-	Expression semantic(Scope sc){
-		mixin(SemEplg);
+	this(Type type)in{assert(type.sstate==SemState.completed);}body{
+		sstate = SemState.completed;
+		this.type = type;
 	}
+	Expression semantic(Scope sc){mixin(SemEplg);}
 }
 
 class LiteralExp: Expression{
@@ -185,6 +186,8 @@ class AssertExp: Expression{
 	Expression[] a;
 	this(Expression[] args){a = args;}
 	override string toString(){return _brk("assert("~join(map!(to!string)(a),",")~")");}
+
+	mixin Visitors;
 }
 
 class UnaryExp(TokenType op): Expression{
@@ -209,6 +212,8 @@ class IndexExp: Expression{ //e[a...]
 	override string toString(){return _brk(e.toString()~(a.length?'['~join(map!(to!string)(a),",")~']':"[]"));}
 
 	mixin Visitors;
+	// workaround for DMD bug
+	mixin CTFEInterpretIE!IndexExp;
 }
 class SliceExp: Expression{//e[l..r]
 	Expression e;

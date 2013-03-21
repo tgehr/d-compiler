@@ -44,8 +44,8 @@ template PropErr(string s){ // propagate the 'error' semantic state TODO: maybe 
 
 template PropRetry(string s){
 	enum PropRetry=mixin(X!q{
-		if(@(s).needRetry){
-			needRetry=true;
+		if(auto r=@(s).needRetry){
+			needRetry = r;
 			//import std.stdio; w/riteln("propagated retry from ",@(s).toString()," to ",toString());
 			return this;
 		}
@@ -118,7 +118,8 @@ enum ErrEplg=q{
 bool gRetryAgain = false; // TODO: fix this
 
 enum RetryEplg=q{
-	if(!needRetry) gRetryAgain = true; // TODO: fix this
+	/+if(!needRetry)+/
+	gRetryAgain = true; // TODO: fix this
 	needRetry = true;
 	return this;
 };
@@ -127,9 +128,9 @@ template Semantic(T) if(is(T==Node)){
 	// TODO: needRetry and sstate could be final properties to save one byte of space
 	// profile to see if it is worth it.
 	SemState sstate = SemState.begin;
-	bool needRetry = false;
+	ubyte needRetry = false; // needRetry == 2: unwind stack for circular dep handling
 
-	invariant(){assert(sstate!=SemState.error||!needRetry);}
+	invariant(){assert(sstate!=SemState.error||needRetry!=1, "needRetry and error "~to!string(typeid(this))~" gRetryAgain: "~to!string(gRetryAgain)~" needRetry: "~to!string(needRetry));}
 
 	Node semantic(Scope s)in{assert(sstate>=SemState.begin);}body{
 		s.error("unimplemented feature",loc);
@@ -187,7 +188,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		return interpret(null);
 	}
 
-	Expression isLvalue(){return null;}
+	bool isLvalue(){return false;}
 
 	final bool checkMutate(Scope sc, ref Location l){ // should be const ref location...
 		if(isLvalue()){
@@ -202,12 +203,19 @@ mixin template Semantic(T) if(is(T==Expression)){
 		auto l = type.getHeadUnqual().isIntegral(), r = rhs.getHeadUnqual().isIntegral();
 		if(l && r){
 			// note: r.getLongRange is always valid for basic types
-			if(l.op == Tok!"long" || l.op == Tok!"ulong") return r.getLongRange().contains(getLongRange());
-			return r.getIntRange().contains(this.getIntRange());
+			if(l.op == Tok!"long" || l.op == Tok!"ulong"){
+				auto rng = getLongRange();
+				return r.getLongRange().contains(rng)
+					|| r.flipSigned().getLongRange().contains(rng);
+			}else{
+				auto rng = getIntRange();
+				return r.getIntRange().contains(rng)
+					|| r.flipSigned().getIntRange().contains(rng);
+			}
 		}
 		return false;
 	}
-	final Expression implicitlyConvertTo(Type to)in{assert(to.sstate == SemState.completed);}body{
+	Expression implicitlyConvertTo(Type to)in{assert(to.sstate == SemState.completed);}body{
 		if(type is to) return this;
 		auto r = New!ImplicitCastExp(to,this);
 		r.loc = loc;
@@ -236,6 +244,11 @@ mixin template Semantic(T) if(is(T==Expression)){
 	void matchError(Scope sc, Location loc, Expression[] args){
 		sc.error(format("%s '%s' is not callable",kind,toString()),loc);
 	}
+
+	/* built-in properties
+	 */
+	ulong getSizeof(){return type.getSizeof;}
+
 
 	IntRange getIntRange(){return type.getIntRange();}
 	LongRange getLongRange(){return type.getLongRange();}
@@ -281,69 +294,40 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 
 
 	override IntRange getIntRange(){
-		switch(lit.type){
-			case Tok!"' '":
-				if(lit.int64<128) goto case Tok!"0";
-				goto case Tok!"0U";
-			case Tok!"0", Tok!"true", Tok!"false":
-				return IntRange(cast(int)lit.int64,cast(int)lit.int64,true);
-			case Tok!"0U":
-				return IntRange(cast(uint)lit.int64,cast(uint)lit.int64,false);
-			default: return super.getIntRange();
+		if(auto bt = type.isIntegral()){
+			auto v = value.get!ulong();
+			bool s = bt.isSigned() || bt.bitSize()<32;
+			return IntRange(cast(int)v,cast(int)v,s);
 		}
+		return super.getIntRange();
 	}
 	override LongRange getLongRange(){
-		bool signed=true;
-		switch(lit.type){
-			case Tok!"0LU": signed=false; goto case;
-			case Tok!"' '", Tok!"0", Tok!"0U", Tok!"0L":
-			case Tok!"true", Tok!"false":
-				return LongRange(lit.int64,lit.int64,signed);
-			default: return super.getLongRange();
+		if(auto bt = type.isIntegral()){
+			auto v = value.get!ulong();
+			bool s = bt.isSigned() || bt.bitSize()<64;
+			return LongRange(cast(int)v,cast(int)v,s);
 		}
+		return super.getLongRange();
 	}
 }
-
-enum Match{
-	none,
-	convert,
-	convConst,
-	exact,
-}
-enum InoutRes{
-	none,
-	mutable,
-	immutable_,
-	const_,
-	inout_,
-	inoutConst, // inout(const(T))
-}
-// enum member functions would be nice
-InoutRes mergeIR(InoutRes ir1, InoutRes ir2){
-	if(ir1 == ir2) return ir1;
-	if(ir1 == InoutRes.none) return ir2;
-	if(ir2 == InoutRes.none) return ir1;
-	return InoutRes.const_;
-}
-struct MatchContext{
-	auto inoutRes = InoutRes.none;
-	auto match = Match.exact;
-}
-
 
 mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 	override Expression semantic(Scope sc){
 		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
 		mixin(SemChld!q{lit});
 		auto ty=lit[0].type;
-		foreach(x;lit[1..$]){
+		foreach(i,x;lit[1..$]){
 			if(auto newty=ty.combine(x.type)) ty=newty;
-			else{
+			else if(!x.implicitlyConvertsTo(ty)){ // TODO: is this the right behavior?
+				bool ok = true;
+				foreach(y;lit[0..i+1]) if(!y.implicitlyConvertsTo(x.type)) goto Lerr;
+				ty = x.type;
+				continue;
+			Lerr:
 				sc.error(format("incompatible type '%s' in array of '%s'",x.type,ty),x.loc);
 				mixin(ErrEplg);
 			}
 		}
-		// TODO: implicit casts
 		foreach(ref x; lit) x = x.implicitlyConvertTo(ty);
 		mixin(SemChldPar!q{lit});
 		assert(all!(_=>_.sstate == SemState.completed)(lit));
@@ -358,10 +342,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 
 	override bool implicitlyConvertsTo(Type rhs){
 		if(super.implicitlyConvertsTo(rhs)) return true;
-		Type et = null;
-		rhs = rhs.getHeadUnqual();
-		if(auto da = rhs.isDynArrTy()) et = da.ty;
-		else if(auto ar = rhs.isArrayTy()) et = ar.ty;
+		Type et = rhs.getElementType();
 		if(!et) return false;
 		foreach(x; lit) if(!x.implicitlyConvertsTo(et)) return false;
 		return true;
@@ -391,10 +372,6 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 	override Expression semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChld!q{e,a});
-		if(!isConstant()){
-			e = e.constFold();
-			foreach(ref x; a) x = x.constFold();
-		}
 		if(auto ty=e.isType()){
 			// TODO: TypeTuple slice
 			if(!a.length) return ty.getDynArr();
@@ -454,6 +431,10 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 				}
 			after:;
 			}
+			if(!isConstant()){
+				e = e.constFold();
+				foreach(ref x; a) x = x.constFold();
+			}
 			mixin(SemEplg);
 		}
 	}
@@ -474,9 +455,8 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 		return super.typeSemantic(sc); // TODO: implement
 	}
 
-	override Expression isLvalue(){
-		if(e.isLvalue()) return this;
-		return null;
+	override bool isLvalue(){
+		return e.isLvalue();
 	}
 /+ // TODO (?)
 	static string __dgliteralRng(){
@@ -502,11 +482,6 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 		mixin(SemPrlg);
 		mixin(SemChld!q{e,l,r});
 		// mixin(MaybeFold!q{e,l,r}); // TODO: this is better
-		if(!isConstant()){
-			e = e.constFold();
-			l = l.constFold();
-			r = r.constFold();
-		}
 		if(e.isType()) return super.semantic(sc); // TODO: TypeTuple slice
 		else{
 			auto ty = e.type.getHeadUnqual();
@@ -559,7 +534,11 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 				sc.error("lower bound exceeds upper bound",l.loc.to(r.loc));
 				mixin(ErrEplg);
 			}
-
+			if(!isConstant()){
+				e = e.constFold();
+				l = l.constFold();
+				r = r.constFold();
+			}
 			mixin(SemEplg);
 		}
 	}
@@ -570,6 +549,26 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 	}
 	override bool isConstant(){
 		return e.isConstant() && l.isConstant() && r.isConstant();
+	}
+}
+
+mixin template Semantic(T) if(is(T==AssertExp)){
+	override AssertExp semantic(Scope sc){
+		mixin(SemPrlg);
+		if(a.length<1){
+			sc.error("missing arguments to assert", loc);
+			mixin(ErrEplg);
+		}else if(a.length>2){
+			sc.error("too many arguments to assert", loc);
+			mixin(ErrEplg);
+		}
+		mixin(SemChld!q{a});
+		a[0] = a[0].convertTo(Type.get!bool());
+		if(a.length>1) a[1] = a[1].implicitlyConvertTo(Type.get!(const(char)[])());
+		mixin(SemChld!q{a});
+		type = Type.get!void();
+		foreach(ref x;a) x = x.constFold();
+		mixin(SemEplg);
 	}
 }
 
@@ -589,14 +588,14 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 			mixin(SemEplg);
 		}else static if(S==Tok!"-" || S==Tok!"+" || S==Tok!"~"){
 			auto v = Type.get!void();
-			if(ty.isBasicType() && e !is v){
+			if(ty.isBasicType() && e !is v && ty !is Type.get!bool()){
 				type = e.type;
 				mixin(SemEplg);
 			}
 		}else static if(S==Tok!"++" || S==Tok!"--"){
 			if(e.checkMutate(sc,loc)){
 				auto v = Type.get!void();
-				if((ty.isBasicType() && e !is v)||ty.isPointerTy()){
+				if(ty.isBasicType()&&e !is v&&ty !is Type.get!bool()||ty.isPointerTy()){
 					type = e.type;
 					mixin(SemEplg);
 				}
@@ -635,7 +634,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	}
 
 	static if(S==Tok!"++"||S==Tok!"--"||S==Tok!"*")
-		override Expression isLvalue(){return this;}
+		override bool isLvalue(){return true;}
 
 	private static string __dgliteralRng(){
 		string r;
@@ -680,16 +679,25 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 	override Expression semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChldExp!q{e1,e2});
+		// constant folding done by hijacking the SemEplg macro
 		auto c1 = e1.isConstant(), c2 = e2.isConstant();
-		if(c1^c2){ // if both are constant, then the entire expression will be folded
-			if(c1) e1 = e1.constFold();
-			else e2 = e2.constFold();
-		}
+		enum SemEplg = q{
+			if(c1^c2){ // if both are constant, then the entire expression will be folded
+				if(c1) e1 = e1.constFold();
+				else e2 = e2.constFold();
+			}
+		}~SemEplg;
 		static if(isAssignOp(S)){
-			// TODO: array ops
+			// TODO: array ops \ ~=
 			if(e1.checkMutate(sc,loc)){
 				type = e1.type;
-				e2=e2.implicitlyConvertTo(type); // TODO: optimization: this would not need to check again
+				static if(S==Tok!"~="){
+					if(auto tt=type.isDynArrTy()){
+						auto elt=tt.getElementType();
+						if(e2.implicitlyConvertsTo(elt)) e2=e2.implicitlyConvertTo(elt);
+						else e2=e2.implicitlyConvertTo(type);
+					}
+				}else e2=e2.implicitlyConvertTo(type); // TODO: optimization: this would not need to check again
 				mixin(SemChld!q{e2});
 				e2 = e2.constFold();
 				/+if(e2.implicitlyConvertsTo(type)){
@@ -699,14 +707,21 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					                e1.type.toString(), e2.type.toString()), loc);
 					mixin(ErrEplg);
 				}+/
-				mixin(SemEplg);
+				mixin(.SemEplg); // don't const fold lhs
 			}else mixin(ErrEplg);
 			//sc.error(format("expression '%s' is not assignable",e1.loc.rep),loc);
 		}else static if(S==Tok!"in"||S==Tok!"!in"||S==Tok!"is"||S==Tok!"!is"){
 			type = Type.get!bool();
 			return super.semantic(sc);// TODO: implement
 		}else static if(isRelationalOp(S)){
-			if(auto ty=e1.type.combine(e2.type)){
+			Type ty = null;
+			bool conv1 = e2.implicitlyConvertsTo(e1.type);
+			bool conv2 = e1.implicitlyConvertsTo(e2.type);
+			if(conv1 ^ conv2){
+				if(conv1) ty = e1.type;
+				else ty = e2.type;
+			}else if(auto tt=e1.type.combine(e2.type)) ty=tt;
+			if(ty){
 				auto tyu=ty.getHeadUnqual();
 				if(tyu.isBasicType() || tyu.isPointerTy() || tyu.getElementType()){
 					e1 = e1.implicitlyConvertTo(ty);
@@ -715,26 +730,22 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					assert(e1.sstate == SemState.completed
 					    && e2.sstate == SemState.completed);
 					type = Type.get!bool();
-					static if(S!=Tok!"=="||S!=Tok!"!="){
-						if(!ty.isComplex())	mixin(SemEplg);
-						else{
+					static if(S!=Tok!"=="&&S!=Tok!"!="){
+						if(ty.isComplex()){
 							sc.error("cannot compare complex operands",loc);
 							mixin(ErrEplg);
 						}
 					}
-				}
-			}
-			// TODO:
-			/+else{ // element-wise compare even succeeds when there is no common type
-				Type el1=e1.type.getElementType(),el2=e2.type.getElementType();
-				if(el1 && el2){
-					// TODO: stub exp strategies are inefficient
-					Expression x=New!(BinaryExp!S)(New!StubExp(el1),New!StubExp(el2));
-					type = Type.get!bool();
-					mixin(SemChld!q{x});
+					if(auto el = tyu.getElementType()){
+						// TODO: stub exp strategies are inefficient
+						// TODO: DMD does not do this. report bug.
+						Expression x=New!(BinaryExp!S)(New!StubExp(el),New!StubExp(el));
+						x.loc = loc;
+						mixin(SemChld!q{x});
+					}
 					mixin(SemEplg);
 				}
-			}+/
+			}
 			// TODO: Associative arrays
 			// TODO: operator overloading
 		}else static if(isLogicalOp(S)){
@@ -790,8 +801,22 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					if(bt1 is t1) t1 = e1.type; else t1 = bt1;
 					if(bt2 is t2) t2 = e2.type; else t2 = bt2;
 					if(auto ty=t1.combine(t2)){
-						e1 = e1.implicitlyConvertTo(ty);
-						e2 = e2.implicitlyConvertTo(ty);
+						// conditional should be optimized away completely for S!=Tok!"%"
+						if(S == Tok!"%" && ty.isComplex()){
+							auto bty = ty.isComplex();
+							if(bt2.isIntegral()){
+								if(bty.op == Tok!"cfloat")
+									e2 = e2.convertTo(Type.get!float());
+								else if(bty.op == Tok!"cdouble")
+									e2 = e2.convertTo(Type.get!double());
+								else if(bty.op == Tok!"creal")
+									e2 = e2.convertTo(Type.get!real());
+								else assert(0);
+							}
+						}else{
+							e1 = e1.implicitlyConvertTo(ty);
+							e2 = e2.implicitlyConvertTo(ty);
+						}
 						mixin(SemChld!q{e1,e2});
 						assert(e1.sstate == SemState.completed
 						    && e2.sstate == SemState.completed);
@@ -828,8 +853,8 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						bool conv1 = e2.implicitlyConvertsTo(t1);
 						bool conv2 = e1.implicitlyConvertsTo(t2);
 						if(conv1 ^ conv2){
-							if(conv1 && !conv2) type = el1;
-							else if(conv2 && !conv1) type = el2;
+							if(conv1) type = el1;
+							else type = el2;
 						}else if(auto ty = el1.refCombine(el2, 0)){
 							if(el1 !is el2) type = ty.getHeadUnqual();
 							else type = ty;
@@ -880,6 +905,38 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					mixin(SemChld!q{e1,e2});
 					assert(e1.sstate == SemState.completed
 					    && e2.sstate == SemState.completed);
+					// structural const folding
+					auto al1 = e1.isArrayLiteralExp(),
+						 al2 = e2.isArrayLiteralExp();
+					if(f1 && f2){
+						if(al1 && al2){
+							al1.type = null;
+							al1.sstate = SemState.begin;
+							al1.lit ~= al2.lit;
+							al1.loc = al1.loc.to(al2.loc);
+							mixin(SemChld!q{e1});
+							return e1;
+						}
+					}else if(f1){
+						assert(!f2);
+						if(al1){
+							al1.type = null;
+							al1.sstate = SemState.begin;
+							al1.lit ~= e2;
+							al1.loc = al1.loc.to(e2.loc);
+							mixin(SemChld!q{e1});
+							return e1;
+						}
+					}else if(f2){
+						if(al2){
+							al2.type = null;
+							al2.sstate = SemState.begin;
+							al2.lit = e1~al2.lit;
+							al2.loc = e1.loc.to(al2.loc);
+							mixin(SemChld!q{e2});
+							return e2;
+						}
+					}
 					mixin(SemEplg);
 				}
 			}
@@ -904,15 +961,18 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			// the type qualifiers of the head of the element type are unimportant.
 			// example: if arr1, arr2 are of type int[], then arr1~arr2 implicitly converts to immutable(int)[]
 			// example: if arr is of type int*[] then arr~arr implicitly converts to const(int)*[]
-			Type el1 = null, el2 = null;
-			Type t1 = type.getHeadUnqual(), t2 = rhs.getHeadUnqual();
-			if(auto dy1 = t1.isDynArrTy()) el1=dy1.ty;
-			else if(auto ar1 = t1.isArrayTy()) el1=ar1.ty;
-			if(auto dy2 = t2.isDynArrTy()) el2=dy2.ty;
-			else if(auto ar2 = t2.isArrayTy()) el2=ar2.ty;
-			if(el1&&el2&&el1.getHeadUnqual().refConvertsTo(el2.getHeadUnqual(), 0)) return true;
+			Type ell = type.getElementType(), elr = rhs.getElementType();
+			if(ell&&elr&&ell.getHeadUnqual().refConvertsTo(elr.getHeadUnqual(), 0)) return true;
 			// if both operands implicitly convert to the result type, their concatenation does too.
 			// example: [1,2,3]~[4,5,6] implicitly converts to short[]
+			// example: 2 ~ [3,4,5] implicitly converts to short[]
+			if(auto rel = rhs.getElementType()){
+				auto el1 = e1.type.getElementType(), el2 = e2.type.getElementType();
+				if(el1 && el1.equals(e2.type))      // array ~ element
+					return e1.implicitlyConvertsTo(rhs) && e2.implicitlyConvertsTo(rel);
+				else if(el2 && el2.equals(e1.type)) // element ~ array
+					return e1.implicitlyConvertsTo(rel) && e2.implicitlyConvertsTo(rhs);
+			}
 			return e1.implicitlyConvertsTo(rhs) && e2.implicitlyConvertsTo(rhs);
 		}
 	}
@@ -1009,11 +1069,20 @@ template Semantic(T) if(is(T==TernaryExp)){
 		}
 		mixin(PropErr!q{e1});
 		type=ty;
+		if(!isConstant){
+			e1 = e1.constFold();
+			e2 = e2.constFold();
+			e3 = e3.constFold();
+		}
 		mixin(SemEplg);
 	}
 
 	bool isConstant(){
 		return e1.isConstant() && e2.isConstant() && e3.isConstant();
+	}
+
+	override bool isLvalue(){
+		return e2.isLvalue() && e3.isLvalue();
 	}
 
 	override bool implicitlyConvertsTo(Type rhs){
@@ -1087,7 +1156,14 @@ private:
 class Symbol: Expression{ // semantic node
 	Declaration meaning;
 	protected this(){} // subclass can construct parent lazily
-	this(Declaration m)in{assert(m&&1);}body{meaning = m;}
+	private bool isStrong;// is symbol responsible for semantic analysis of its meaning
+	this(Declaration m, bool strong=false)in{
+		assert(m&&1);
+	}body{
+		meaning = m;
+		isStrong = strong;
+	}
+	void makeStrong(){isStrong = true;}
 
 	// TODO: always display the exact cycle that caused the error
 	private enum CircErrMsg=q{
@@ -1106,17 +1182,21 @@ class Symbol: Expression{ // semantic node
 		scope_=sc;
 		assert(!!meaning);
 
-		if(needRetry){
-			sstate = SemState.begin; // TODO: ok?
-			//needRetry = false;
-		}
+		if(needRetry) sstate = SemState.begin;
 		if(sstate >= SemState.started){
 			sc.error("circular dependencies are illegal",loc);
 			if(!circ) circ = this;
 			sstate = SemState.error;
-			mixin(RetryEplg);
+			needRetry = 2;
+			return this;
 			//mixin(ErrEplg);
 		}else sstate = SemState.started;
+
+		if(isStrong){
+			meaning = meaning.semantic(meaning.scope_);
+			mixin(PropRetry!q{meaning});
+			mixin(PropErr!q{meaning});
+		}
 		// those are not virtual functions because of centralized symbol dependency handling
 		if(auto vd=meaning.isVarDecl()){
 			if(!vd.type || vd.stc & STCenum){
@@ -1164,10 +1244,9 @@ class Symbol: Expression{ // semantic node
 	}+/
 
 	// override Type isType(){...} // TODO.
-	override Expression isLvalue(){
+	override bool isLvalue(){
 		//import std.stdio; wrietln(meaning," ",meaning.stc);
-		if(meaning.isVarDecl() && !(meaning.stc&STCenum)) return this;
-		return null;
+		return meaning.isVarDecl() && !(meaning.stc&STCenum);
 	}
 
 	/* This assumes that the reference to the Symbol is kept unique during SA
@@ -1210,11 +1289,40 @@ class Symbol: Expression{ // semantic node
 
 
 
-	mixin Interpret!Symbol;
-
+	//mixin Interpret!Symbol;
+	mixin Visitors;
 private:
 	Scope scope_;
 }
+
+import visitors;
+
+enum Match{
+	none,
+	convert,
+	convConst,
+	exact,
+}
+enum InoutRes{
+	none,
+	mutable,
+	immutable_,
+	const_,
+	inout_,
+	inoutConst, // inout(const(T))
+}
+// enum member functions would be nice
+InoutRes mergeIR(InoutRes ir1, InoutRes ir2){
+	if(ir1 == ir2) return ir1;
+	if(ir1 == InoutRes.none) return ir2;
+	if(ir2 == InoutRes.none) return ir1;
+	return InoutRes.const_;
+}
+struct MatchContext{
+	auto inoutRes = InoutRes.none;
+	auto match = Match.exact;
+}
+
 // aware of circular dependencies
 mixin template Semantic(T) if(is(T==CallExp)){
 	override Expression semantic(Scope sc){ // TODO: type checking
@@ -1237,11 +1345,20 @@ mixin template Semantic(T) if(is(T==CallExp)){
 				auto pty = x.type.resolveInout(context.inoutRes);
 				args[i]=args[i].implicitlyConvertTo(pty);
 			}
+			if(tt.params.length > args.length){
+				// //  TODO: this allocates rather heavily
+				// args ~= array(map!(_=>_.init.dup)(tt.params[args.length..$]);
+				sc.error("default parameters not implemented",loc);
+				mixin(ErrEplg);
+			}
+			mixin(SemChld!q{args});
 		}else{
 			sc.error("delegate and function pointer invocation unimplemented",loc);
-			type = Type.get!void(); // TODO: fix
+			mixin(ErrEplg);
 		}
 		// TODO: convert arguments types
+		e = e.constFold();
+		foreach(ref x; args) x = x.constFold();
 		mixin(SemEplg);
 	}
 private:
@@ -1277,6 +1394,12 @@ class GaggingScope: Scope{
 
 
 mixin template Semantic(T) if(is(T==CastExp)){
+	protected bool checkConv(Scope sc){
+		if(e.convertsTo(type)) return true;
+		sc.error(format("cannot cast expression '%s' of type '%s' to '%s'",e.loc.rep,e.type,type),e.loc); // TODO: replace toString with actual representation
+		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
+		return false;
+	}
 	override Expression semantic(Scope sc){
 		// TODO: sanity checks etc.
 		mixin(SemPrlg);
@@ -1289,10 +1412,18 @@ mixin template Semantic(T) if(is(T==CastExp)){
 			mixin(PropRetry!q{type});
 			mixin(PropErr!q{type});
 		}
-		if(e.convertsTo(type)){mixin(SemEplg);}
-		sc.error(format("cannot cast expression '%s' of type '%s' to '%s'",e.loc.rep,e.type,type),e.loc); // TODO: replace toString with actual representation
-		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
-		mixin(ErrEplg);
+		if(!checkConv(sc)) mixin(ErrEplg);
+		auto el = type.getElementType();
+		if(el && el.getHeadUnqual() !is Type.get!void()){
+			e = e.constFold();
+			if(auto al = e.isArrayLiteralExp()){
+				al.sstate = SemState.begin;
+				foreach(ref x; al.lit) x = x.convertTo(el);
+				mixin(SemChld!q{e});
+				return e;
+			}
+		}
+		mixin(SemEplg);
 	}
 
 	override bool isConstant(){
@@ -1367,6 +1498,13 @@ mixin template Semantic(T) if(is(T==CastExp)){
 
 class ImplicitCastExp: CastExp{ // semantic node
 	this(Expression tt, Expression exp){super(STC.init, tt, exp);}
+
+	protected override bool checkConv(Scope sc){
+		if(e.implicitlyConvertsTo(type)) return true;
+		sc.error(format("cannot implicitly convert expression '%s' of type '%s' to '%s'",e.loc.rep,e.type,type),e.loc); // TODO: replace toString with actual representation
+		return false;
+	}
+/+
 	override Expression semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChld!q{e});
@@ -1380,6 +1518,18 @@ class ImplicitCastExp: CastExp{ // semantic node
 		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
 		mixin(ErrEplg);
 	}
++/
+	override bool implicitlyConvertsTo(Type rhs){
+		if(super.implicitlyConvertsTo(rhs)) return true;//TODO: does this work out correctly?
+		return e.implicitlyConvertsTo(rhs);
+	}
+
+	override Expression implicitlyConvertTo(Type rhs){
+		if(!super.implicitlyConvertsTo(rhs))
+			return e.implicitlyConvertTo(rhs);
+		return super.implicitlyConvertTo(rhs);
+	}
+
 	override string toString(){return e.toString();}
 }
 
@@ -1400,10 +1550,26 @@ mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 		auto dg=New!FunctionDef(fty,New!Identifier(uniqueIdent("__dgliteral")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
 		dg.sstate = SemState.begin;
 		dg.scope_ = sc; // Symbol will use this scope to reason for analyzing DG
-		auto e=New!Symbol(dg);// TODO: take address
+		auto e=New!Symbol(dg, true);// TODO: take address
 		e.loc=loc;
 		return e.semantic(sc);
 	}
+}
+
+mixin template Semantic(T) if(is(T==ConditionDeclExp)){
+	override Expression semantic(Scope sc){
+		mixin(SemPrlg);
+		if(!decl) decl=New!VarDecl(stc,ty,name,init).semantic(sc);
+		mixin(PropRetry!q{decl});
+		if(!sym) sym = name.semantic(sc);
+		mixin(PropRetry!q{sym});
+		mixin(PropErr!q{sym});
+		type = sym.type;
+		mixin(SemEplg);
+	}
+private:
+	VarDecl decl;
+	Symbol sym;
 }
 
 // types
@@ -1450,6 +1616,7 @@ mixin template Semantic(T) if(is(T==Type)){
 	Type getElementType(){return null;}
 
 	bool isMutable(){return true;}
+
 	/* this alias exists in order to be robust against language changes
 	   involving an additional qualifier that can co-exist with immutable
 	*/
@@ -1553,6 +1720,13 @@ mixin template Semantic(T) if(is(T==Type)){
 		}
 		return null;
 	}
+	
+	/* built-in properties
+	 */
+	override ulong getSizeof(){
+		assert(0, "no size yet for type "~to!string(this));
+	}
+
 
 	/* get the ranges associated with a type. expressions often
 	   allow more specific statements about their range.
@@ -1624,20 +1798,41 @@ mixin template Semantic(T) if(is(T==BasicType)){
 	private static immutable int[] strength=
 		[Tok!"bool":1,Tok!"char":2,Tok!"byte":2,Tok!"ubyte":2,Tok!"wchar":3,Tok!"short":3,Tok!"ushort":3,
 		 Tok!"dchar":4,Tok!"int":4,Tok!"uint":4,Tok!"long":5,Tok!"ulong":5,Tok!"float":6,Tok!"double":6,Tok!"real":6,
-		 Tok!"ifloat":-1,Tok!"idouble":-1,Tok!"ireal":-1,Tok!"cfloat":-2,Tok!"cdouble":-2,Tok!"creal":-2];
+		 Tok!"ifloat":-1,Tok!"idouble":-1,Tok!"ireal":-1,Tok!"cfloat":-2,Tok!"cdouble":-2,Tok!"creal":-2, Tok!"void":0];
 
-	override BasicType isIntegral(){return strength[op]>=0 && strength[op]<=5 ? this : null;}
+	override BasicType isIntegral(){return strength[op]>0 && strength[op]<=5 ? this : null;}
 	override BasicType isComplex(){return strength[op]==-2 ? this : null;}
-	final int bitSize()in{assert(!!isIntegral());}body{
-		return integralBitSize(op);
+
+	final BasicType flipSigned(){
+		switch(op){
+			case Tok!"byte": return Type.get!ubyte();
+			case Tok!"ubyte": return Type.get!byte();
+			case Tok!"short": return Type.get!ushort();
+			case Tok!"ushort": return Type.get!short();
+			case Tok!"int": return Type.get!uint();
+			case Tok!"uint": return Type.get!int();
+			case Tok!"long": return Type.get!ulong();
+			case Tok!"ulong": return Type.get!long();
+			case Tok!"char": return Type.get!byte();
+			case Tok!"wchar": return Type.get!short();
+			case Tok!"dchar": return Type.get!int();
+			default: return this;
+		}
+	}
+
+	final int bitSize(){
+		return basicTypeBitSize(op);
 	}
 	final bool isSigned()in{assert(!!isIntegral());}body{
 		return integralIsSigned(op);
 	}
+
+	override ulong getSizeof(){return basicTypeBitSize(op)>>3;}
+
 	override bool implicitlyConvertsTo(Type rhs){
 		if(auto bt=rhs.getHeadUnqual().isBasicType()){ // transitive closure of TDPL p44
-			if(op == Tok!"void") return false;
-			if(strength[op]>=0 && strength[bt.op]>=0) return strength[op]<=strength[bt.op];
+			if((op == Tok!"void")) return false;
+			if(strength[op]>=0 && strength[bt.op]>0) return strength[op]<=strength[bt.op];
 			if(strength[bt.op]==-2) return true;
 			return strength[op] == -1 && strength[bt.op] == -1; // both must be imaginary
 		}
@@ -1646,8 +1841,8 @@ mixin template Semantic(T) if(is(T==BasicType)){
 
 	override bool convertsTo(Type rhs){
 		if(super.convertsTo(rhs)) return true;
-		// all basic types can be interpreted in a boolean context
-		if(rhs.getUnqual() is Type.get!bool()) return true;
+		// all basic types can be cast to each other
+		if(rhs.getUnqual().isBasicType()) return true;
 		return false;
 	}
 
@@ -1928,6 +2123,8 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		return null;
 	}
 
+	ulong getSizeof(){return ty.getSizeof();}
+
 	override IntRange getIntRange(){return ty.getIntRange();}
 	override LongRange getLongRange(){return ty.getLongRange();}
 
@@ -2098,6 +2295,11 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 
 	// this adds one indirection for pointers and dynamic arrays
 	override bool refConvertsTo(Type rhs, int num){
+		static if(is(T==DynArrTy)||is(T==ArrayTy))
+			if(rhs.getConst() is Type.get!(void[])().getConst())
+				return true;
+		static if(is(T==ArrayTy))
+			if(auto tt = rhs.getElementType()) if(tt.equals(ty)) return true;
 		if(auto c=mixin(`rhs.is`~T.stringof)())
 			return ty.refConvertsTo(c.ty,num+!is(T==ArrayTy));
 		return super.refConvertsTo(rhs,num);
@@ -2156,9 +2358,11 @@ mixin template Semantic(T) if(is(T==TypeofExp)){
 		//}
 		sstate = SemState.started;
 
-		auto f = e.semantic(sc);
+/+		f = f.semantic(sc);
 		mixin(PropRetry!q{f});
-		mixin(PropErr!q{f});
+		mixin(PropErr!q{f});+/
+		if(!f) f = e;
+		mixin(SemChld!q{f});
 		f = f.constFold(); // TODO: should this be done at all?
 		if(f.isType()){
 			sc.error(format("typeof argument '%s' is not an expression",e.loc.rep),e.loc);
@@ -2167,22 +2371,8 @@ mixin template Semantic(T) if(is(T==TypeofExp)){
 		if(!e.type) return Type.get!void();
 		return e.type.semantic(sc);
 	}
-}
-
-mixin template Semantic(T) if(is(T==ConditionDeclExp)){
-	override Expression semantic(Scope sc){
-		mixin(SemPrlg);
-		if(!decl) decl=New!VarDecl(stc,ty,name,init).semantic(sc);
-		mixin(PropRetry!q{decl});
-		if(!sym) sym = name.semantic(sc);
-		mixin(PropRetry!q{sym});
-		mixin(PropErr!q{sym});
-		type = sym.type;
-		mixin(SemEplg);
-	}
 private:
-	VarDecl decl;
-	Symbol sym;
+	Expression f; // semantically analyzed 'e', needed for nice error handling
 }
 
 // statements
@@ -2240,10 +2430,9 @@ mixin template Semantic(T) if(is(T==IfStm)){
 		if(!tsc) tsc = New!BlockScope(sc);
 		auto bl = Type.get!bool();
 		e = e.semantic(tsc); // TODO: get rid of direct call
-		if(e.sstate == SemState.completed) e = e.constFold();
-		mixin(SemChldPar!q{e});
 		mixin(PropRetry!q{e});
 		if(e.sstate == SemState.completed) e = e.convertTo(bl).semantic(tsc); // TODO: ditto
+		if(e.sstate == SemState.completed) e = e.constFold();
 		mixin(PropRetry!q{e});
 		s1 = s1.semantic(tsc); // TODO: ditto
 		mixin(PropRetry!q{s1});
@@ -2265,9 +2454,9 @@ mixin template Semantic(T) if(is(T==WhileStm)){
 		if(!lsc) lsc = New!BlockScope(sc);
 		auto bl = Type.get!bool();
 		e = e.semantic(lsc); // TODO: ditto
-		if(e.sstate == SemState.completed) e = e.constFold();
 		mixin(PropRetry!q{e});
-		if(e.sstate == SemState.completed) e = e.convertTo(bl).semantic(lsc);
+		if(e.sstate == SemState.completed) e = e.convertTo(bl).semantic(lsc); // TODO: ditto
+		if(e.sstate == SemState.completed) e = e.constFold();
 		s = s.semantic(lsc); // TODO: ditto
 		mixin(PropRetry!q{s});
 		mixin(PropErr!q{e,s});
@@ -2286,10 +2475,8 @@ mixin template Semantic(T) if(is(T==DoStm)){
 		mixin(PropRetry!q{s}); // TODO: needed?
 		mixin(SemChldPar!q{e});// TODO: propose SemChld!q{scope=lsc, e}
 		mixin(PropRetry!q{e});
-		if(e.sstate == SemState.completed){
-			e = e.convertTo(bl).semantic(lsc); // TODO: get rid of direct call
-			e = e.constFold();
-		}
+		if(e.sstate == SemState.completed) e = e.convertTo(bl).semantic(lsc); // TODO: get rid of direct call
+		if(e.sstate == SemState.completed) e = e.constFold();
 		mixin(PropErr!q{s,e});
 		mixin(SemEplg);
 	}
@@ -2311,10 +2498,8 @@ mixin template Semantic(T) if(is(T==ForStm)){
 			e1=e1.semantic(lsc); // TODO: ditto
 			mixin(PropRetry!q{e1});
 			auto bl = Type.get!bool();
-			if(e1.sstate == SemState.completed){
-				e1 = e1.convertTo(bl).semantic(lsc);
-				e1=e1.constFold();
-			}
+			if(e1.sstate == SemState.completed) e1 = e1.convertTo(bl).semantic(lsc);
+			if(e1.sstate == SemState.completed) e1 = e1.constFold();
 		}
 		if(e2){
 			e2=e2.semantic(lsc); // TODO: ditto
@@ -2398,11 +2583,10 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 		mixin(SemPrlg);
 		mixin(SemChldPar!q{e});
 		mixin(PropRetry!q{e});
-		// TODO: match with function return type
 		auto fun = sc.getFunction();
 		assert(fun && fun.type);
 		if(fun.type.hasUnresolvedReturn()){
-			if(e.sstate == SemState.completed){
+			if(e.sstate == SemState.completed && fun.sstate != SemState.error){
 				fun.type.resolveReturn(e.type);
 				mixin(RetryEplg);
 			}else{
@@ -2575,6 +2759,7 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 
 mixin template Semantic(T) if(is(T==Parameter)){
 	override VarDecl presemantic(Scope sc){
+		assert(sc.getFunction());
 		if(!name) return this;
 		return super.presemantic(sc);
 	}
@@ -2636,6 +2821,10 @@ class OverloadSet: Declaration{ // purely semantic node
 		auto matches = new Matched[decls.length]; // pointless GC allocation
 		foreach(i,decl; decls) matches[i].decl = decls[i].matchCall(args, matches[i].context);
 
+		// TODO: get rid of this again, only exists to prevent segmentation faults
+		// because some overloadable decls are not yet implemented
+		foreach(i,decl; decls) if(matches[i].decl is null) matches[i].context.match = Match.none;
+
 		auto best = reduce!max(map!(_=>_.context.match)(matches));
 		//auto best = reduce!max(map!((_){return _.context.match;})(matches));
 		if(best == Match.none){
@@ -2683,7 +2872,7 @@ class OverloadSet: Declaration{ // purely semantic node
 	override void matchError(Scope sc, Location loc, scope Expression[] args){
 		if(decls.length == 1) return decls[0].matchError(sc,loc,args);
 		if(altCand==-1){
-			sc.error(format("no matching function for call to '%s'",name), loc);
+			sc.error(format("no matching function for call to '%s(%s)'",name,join(map!"a.type.toString()"(args),",")), loc);
 			foreach(decl; decls) sc.note("candidate function not viable", decl.loc);
 		}else{
 			assert(0 != altCand);
@@ -2794,7 +2983,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		if(sstate == SemState.pre) presemantic(sc); // add self to parent scope
 
 		mixin(SemChldPar!q{type});
-		if(type.sstate == SemState.error) sstate = SemState.error;
+		if(type.sstate == SemState.error) sstate = SemState.error, needRetry=false;
 
 		if(!fsc){
 			fsc = New!FunctionScope(sc, this);
@@ -2802,8 +2991,8 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 			foreach(p; type.params) if(p.name) fsc.insert(p);
 		}
 
-		bdy.semanticNoScope(fsc); // TODO: is this ok?
-		mixin(PropRetry!q{bdy});
+		bdy.semanticNoScope(fsc);
+		if(sstate != SemState.error) mixin(PropRetry!q{bdy}); // TODO: is this ok?
 
 		if(type.hasUnresolvedReturn()) type.resolveReturn(Type.get!void());
 		mixin(PropErr!q{type, bdy});
@@ -2832,12 +3021,15 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					mixin(SemChld!q{args[1..$]});
 					foreach(x; args[1..$]){mixin(PropRetry!q{x});}
 					mixin(PropErr!q{args[1..$]});
-					if(intprt) foreach(ref x; args[1..$]) x = x.interpret(sc);
-					foreach(x; args[1..$]){mixin(PropRetry!q{x});}
-					mixin(PropErr!q{args[1..$]});
+					if(intprt){
+						foreach(ref x; args[1..$])
+							if(!x.isType()) x = x.interpret(sc);
+						foreach(x; args[1..$]){mixin(PropRetry!q{x});}
+						mixin(PropErr!q{args[1..$]});
+					}
 					import std.stdio;
 					foreach(x; args[1..$])
-						if(!x.isType()) stderr.write(x.interpretV().get!string());
+						if(!x.isType() && intprt) stderr.write(x.interpretV().get!string());
 						else stderr.write(x.toString());
 					stderr.writeln();
 					if(bdy) mixin(SemChld!q{bdy});
@@ -2886,7 +3078,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		// TODO: use get!string instead
 		int which;
 		Type[3] types = [Type.get!string(), Type.get!wstring(), Type.get!dstring()];
-		foreach(i,t;types) if(!which && e.implicitlyConvertsTo(t)) which=i+1;
+		foreach(i,t;types) if(!which && e.implicitlyConvertsTo(t)) which=cast(int)i+1;
 		if(!which){
 			sc.error("expected string argument to string mixin", e.loc);
 			mixin(ErrEplg);
@@ -2894,6 +3086,9 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		if(!e.checkInterpret(sc)) mixin(PropErr!q{e});
 		foreach(i,t; types) if(i+1==which) e = e.convertTo(t).semantic(sc);
 		assert(e.sstate == SemState.completed);
+		e = e.interpret(sc);
+		mixin(PropRetry!q{e});
+		mixin(PropErr!q{e});
 		auto str = e.interpretV().get!string();
 		//str~=(is(T==MixinStm)&&str[$-1]!=';'?";":"")~"\0\0\0\0";
 		str~="\0\0\0\0";
@@ -2903,9 +3098,14 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		auto handler = New!StringMixinErrorHandler();
 		auto ohan = sc.handler;
 		sc.handler = handler;
-		static if(is(T==MixinExp)) auto r=parseExpression(src,handler).semantic(sc);
-		else static if(is(T==MixinStm)) auto r=New!BlockStm(parseStatements(src,handler)).semanticNoScope(sc); // TODO: use CompoundStm instead
-		else static if(is(T==MixinDecl)) auto r=New!BlockDecl(STC.init,parseDeclDefs(src,handler)).semantic(sc);
+		static if(is(T==MixinExp)) auto r=parseExpression(src,handler);
+		else static if(is(T==MixinStm)) auto r=New!BlockStm(parseStatements(src,handler)); // TODO: use CompoundStm instead
+		else static if(is(T==MixinDecl)) auto r=New!BlockDecl(STC.init,parseDeclDefs(src,handler));
+		if(!handler.errors.length){
+			static if(is(T==MixinStm)) r=r.semanticNoScope(sc);
+			else r=r.semantic(sc);
+		}
+
 		//ohan.note("mixed in here", loc);
 		// TODO: this is a kludge!
 		sc.handler = ohan;

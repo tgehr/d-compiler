@@ -24,7 +24,21 @@ string bar1(){
 	mixin(foo(1));
 }
 
+auto tbaz4(R)(R function() dg) { static assert(is(R == void)); return 1; }
+auto tbaz4(R)(R delegate() dg) { static assert(is(R == void)); return 2; }
+static assert(0,typeof(tbaz4({})));
+
 void main(){
+	int delegate(int) dg = true ? (x => x) : (x => m*2);
+	byte b;
+	short s = b<<1;
+	b = -1+(b*-1);
+	pragma(__range, -1+(b*-1));
+
+	long n;
+	ubyte bb = n%10;
+	pragma(__range, n%10);
+
 	enum a = "abc";
 	enum b = "def";
 
@@ -44,7 +58,7 @@ void main(){
 	pragma(msg, ("foo"d~"bar"d)[1..5]);
 	pragma(msg, typeof(0.0f&&{}()));
 	pragma(msg, !(is(T==int))^^2);
-	pragma(msg, (){}());
+	pragma(msg, (){return 2.0f;}());
 	pragma(msg, !false);
 	pragma(__p, 1+2+3+4+5+6+true);
 	pragma(__p, [1,2,3][1]);

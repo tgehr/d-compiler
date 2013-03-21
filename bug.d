@@ -1,8 +1,16 @@
-int
+int main(){
+		//float f = float.infinity;
+		int i = 0;
+
+		assert(0 == 0x80000000);
+		return 0;
+	}
+
+//int
 
 /+string toEngNum(uint i){
 	if(i>=1000) return toEngNum(i/1000)~" thousand"~(i%100?" "~toEngNum(i%1000):"");
-}+
+}+/
 /+import std.stdio;
 import std.string, std.algorithm;
 

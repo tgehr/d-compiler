@@ -46,6 +46,8 @@ inout(const(int)[]) foo(inout(const(int)[]) x){
 	auto ww = 1 ? yy : xx;
 	pragma(msg, typeof(ww));
 
+	assert(0 == 0x80000000);
+
 	return x;
 }
 
@@ -147,3 +149,10 @@ extern(C) int printf(const(char)*, ...);
 
 void fill()(){}
 void fill()(){}
+/+
+enum x = [0,y];
+enum y = [0,x];
+
+enum xx = uu;
+enum uu = xx;
++/
