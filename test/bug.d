@@ -1,4 +1,13 @@
 
+struct Foo {
+	int[2] bar;
+}
+const(int[2]) spam() {
+	const Foo* x;
+	return true ? x.bar : [10, 20];
+}
+void main() {}
+/+
 template StaticFilter(alias F, a...){
 	static if(!a.length) alias a StaticFilter;
 	else static if(F!(a[0])) alias TypeTuple!(a[0], Rest) StaticFilter;
@@ -7,9 +16,17 @@ template StaticFilter(alias F, a...){
 }
 
 template Pred(int x){ enum bool Pred = x&1; }
-pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));
+pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));+/
 
-/+
+/+ // ok so far
+
+auto fun(){return "a function";}
+auto fun(T...)(T args){return 1;}
+template fun(a...){auto fun(T...)(T args){return 2;}}
+template fun(a...){template fun(b...){auto fun(T...)(T args){return 3;}}}
+static assert(fun(0)==1);
+static assert(fun()=="a function");
+
 int a;
 struct T{
 	static assert(is(typeof(a) == float));

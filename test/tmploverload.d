@@ -1,3 +1,28 @@
+
+void container(){
+	void proto();
+	void proto(T...)(T args){return proto();}
+	pragma(msg, {proto!()(2);return 1;}()); // error
+}
+
+/+
+//auto fun(alias T)(T args){return 1;}
+auto fun(){return "a function";}
+auto fun(T...)(T args){return 1;}
+template fun(a...){auto fun(T...)(T args){return 2;}}
+template fun(a...){template fun(b...){auto fun(T...)(T args){return 3;}}}
+static assert(fun(0)==1);
+static assert(fun()=="a function");
+//pragma(msg, fun!2);
+
+
+//pragma(msg, fun!2(1,4));
+//pragma(msg, (fun!2));
+
+//template fun(a...){ alias a fun; }
+//pragma(msg, fun!2);
+
+
 template ambiguous(T...){}
 template ambiguous(T...){}
 
@@ -41,3 +66,4 @@ pragma(msg, "uu: ",uu!int(0));
 
 static assert(!is(typeof(uu(cast(const)0)))); // call is ambiguous
 
+// +/

@@ -61,6 +61,14 @@ pragma(msg, "testcps: ", testcps());
 
 /////////
 
+string templatednested(){
+	string r;
+	void write(T)(T arg) { r~=arg; }
+	write("success!!!");
+	return r;
+}
+pragma(msg, "templatednested: ",templatednested());
+static assert(templatednested() == "success!!!");
 
 
 
@@ -1087,7 +1095,7 @@ int[] erathos(int x){
 	return r;
 }
 
-pragma(msg, "erathos: ",erathos(1000));
+pragma(msg, "erathos: ",erathos(40000));
 
 int[] primes(int x){
 	int[] r;

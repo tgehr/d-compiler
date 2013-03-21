@@ -4,7 +4,7 @@ template IsNonASTType(T){
 	enum IsNonASTType =
 		is(T==Symbol)||
 		is(T==TemplateInstanceDecl)||
-		is(T==ExprTuple)||
+		is(T==ExpTuple)||
 		is(T==TypeTuple)||
 		is(T==PtrExp)||
 		is(T==LengthExp);

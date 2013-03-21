@@ -245,7 +245,6 @@ template RevEpoLkup(string e){
 			if(ident.recursiveLookup && typeid(ident) !is typeid(LookupIdentifier)){
 				if(!ident.meaning && ident.sstate != SemState.error){
 					ident.lookup(sc);
-					//mixin(PropRetry!q{@(e)});
 					if(auto nr=ident.needRetry) { needRetry = nr; return; }
 				}
 				if(ident.sstate == SemState.failed){
@@ -423,6 +422,8 @@ mixin template Semantic(T) if(is(T==Expression)){
 			if(me is this) mixin(SemCheck);
 			else mixin(SemProp!q{me});
 		}
+		// the empty tuple is an expression except if a type is requested
+		if(auto et=me.isExpTuple()) if(!et.length) return et.type;
 		sc.error(format("%s '%s' is used as a type",me.kind,me.toString()),loc);
 		mixin(ErrEplg);
 	}
@@ -438,7 +439,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		}
 		if(f.sstate == SemState.completed){
 			if(f.isType()) return errorOut();
-			else if(auto et=f.isExprTuple()){
+			else if(auto et=f.isTuple()){
 				foreach(x; et) if(x.isType()) return errorOut();
 			}
 		}
@@ -874,7 +875,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 			mixin(SemCheck);
 			assert(!!r);
 			mixin(RewEplg!q{r});
-		}else if(auto et=e.isExprTuple()){
+		}else if(auto et=e.isExpTuple()){
 			mixin(SemChldExp!q{a});
 			if(a.length==0){
 				e.loc=loc;
@@ -1483,6 +1484,8 @@ class TemplateInstanceDecl: Declaration{
 		scope_ = parent.scope_;
 		paramScope.parent = parent.scope_;
 		parent.summon(this);
+
+		Scheduler().add(this, scope_);
 	}
 
 	final @property bool isGagged(){ return scope_ !is parent.scope_; }
@@ -1542,22 +1545,12 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		foreach(i,x;resolved){
 			// TODO: don't leak references
-			if(x.isSymbol()||x.isType()||x.isExprTuple()){
-				auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, x, parent.params[i].name, null));
-				al.semantic(paramScope);
-				mixin(PropErr!q{al});
-				debug{
-					mixin(Rewrite!q{al});
+			auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, x, parent.params[i].name, null));
+			al.semantic(paramScope);
+			mixin(PropErr!q{al});
+			debug{
+				mixin(Rewrite!q{al});
 					assert(al.sstate == SemState.completed);
-				}
-			}else{
-				auto en = New!VarDecl(STCenum, null, parent.params[i].name, x);
-				en.semantic(paramScope);
-				mixin(PropErr!q{en});
-				debug{
-					mixin(Rewrite!q{en});
-					assert(en.sstate == SemState.completed);
-				}
 			}
 		}
 	}
@@ -1569,19 +1562,38 @@ class TemplateInstanceDecl: Declaration{
 	}
 
 	private bool startMatching(){
-		resolved = new Expression[parent.params.length];
-
 		auto tuplepos = parent.tuplepos;
 		auto params   = parent.params;
 
+		resolved = new Expression[params.length];
+
+		// resolve non-tuple parameters
 		if(args.length>tuplepos&&tuplepos==params.length) return false;
 		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,$)];
-		if(!checkResolvedValidity) return false;
 
+		// TODO: does this work?
 		if(!paramScope){
 			paramScope = New!TemplateScope(scope_,scope_,this);
 			determineInstanceScope();
 		}
+
+		// this always fills the first tuple parameter
+		// other possible semantics would be to only fill the
+		// first tuple parameter if it is the last template parameter
+		// this would lead to uniform treatment of multiple tuple
+		// parameters in a template parameter list, which is more pure,
+		// but potentially less useful.
+		if(tuplepos<params.length && args.length>tuplepos){
+			Expression[] expr = args[tuplepos..$];
+			Expression et = New!ExpTuple(paramScope.iparent,expr);
+			et.semantic(scope_);
+			mixin(Rewrite!q{et});
+			assert(et.sstate == SemState.completed);
+			resolved[tuplepos]=et;
+		}
+
+
+		if(!checkResolvedValidity) return false;
 
 		if(matchState == MatchState.iftiStart) initializeIFTI();
 
@@ -1631,9 +1643,12 @@ class TemplateInstanceDecl: Declaration{
 		iftiScope = New!NestedScope(scope_);
 
 		foreach(i,p;parent.params){
-			if(p.which != WhichTemplateParameter.type
-			&& p.which != WhichTemplateParameter.tuple) continue;
-			if(!resolved[i]) matcherTypes[i]=New!MatcherTy(p.which);
+			if(!resolved[i]){
+				if(p.which == WhichTemplateParameter.type
+				|| p.which == WhichTemplateParameter.tuple)
+					matcherTypes[i]=New!MatcherTy(p.which);
+				else continue;
+			}
 			auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, resolved[i]?resolved[i]:matcherTypes[i], parent.params[i].name,null));
 			al.semantic(iftiScope);
 			mixin(PropErr!q{al});
@@ -1749,40 +1764,10 @@ class TemplateInstanceDecl: Declaration{
 			                                      Match.convConst       :
 			                                      Match.convert         );
 		}
-		
-		// this always fills the first tuple parameter
-		// other possible semantics would be to only fill the
-		// first tuple parameter if it is the last template parameter
-		// this would lead to uniform treatment of multiple tuple
-		// parameters in a template parameter list, which is more pure,
-		// but potentially less useful.
-		if(tuplepos<params.length && args.length>=tuplepos){
-			if(resolved[tuplepos]){
-				if(args.length>tuplepos){
-					auto tp = resolved[tuplepos].isTuple();
-					assert(!!tp);
-					if(args.length-tuplepos==tp.length){
-						size_t i=0;
-						foreach(x; tp){
-							if(x.templateParameterEquals(args[tuplepos+i++])) continue;
-							resolved[tuplepos]=null;
-							return false;
-						}
-					}else{
-						resolved[tuplepos]=null;
-						return false;
-					}
-				}
-			}else{
-				Expression[] expr = args[tuplepos..$];
-				Expression et = New!ExprTuple(paramScope.iparent,expr);
-				et.semantic(scope_);
-				mixin(Rewrite!q{et});
-				assert(et.sstate == SemState.completed);
-				resolved[tuplepos]=et;
-			}
-		}
-		
+
+		if(tuplepos < params.length && !resolved[tuplepos])
+			resolved[tuplepos]=New!ExpTuple(paramScope.iparent,(Expression[]).init);
+				
 		alias util.any any;
 		if(any!(_=>_ is null)(resolved)) return false;
 
@@ -1807,14 +1792,11 @@ class TemplateInstanceDecl: Declaration{
 		if(instanceScope !is parent.scope_) bdy.stc&=~STCstatic;
 		bdy.presemantic(bdyscope);
 		assert(bdy.scope_ is bdyscope);
-		if(instanceScope !is parent.scope_){
-			auto decl=instanceScope.getDeclaration();
-			assert(!!decl);
-			decl.nestedTemplateInstantiation(this);
-		}
+		auto decl=instanceScope.getDeclaration();
+		if(decl) decl.nestedTemplateInstantiation(this); // TODO: correct?
 		sstate = SemState.begin;
 
-		Scheduler().add(this, scope_); // TODO: ok? (eg. ungag ok?)
+		if(!isGagged) Scheduler().add(this, scope_);
 	}
 
 
@@ -1886,8 +1868,13 @@ class TemplateInstanceDecl: Declaration{
 		}else if(finishedInstantiation) instanceSemantic(sc_);
 	}
 
-	private void instanceSemantic(Scope sc_){
+	private void instanceSemantic(Scope sc_)in{
+		assert(finishedInstantiation);
+	}body{
 		{alias sc_ sc;mixin(SemPrlg);}
+		assert(sstate == SemState.begin);
+		sstate = SemState.started;
+		scope(exit) if(sstate == SemState.started) sstate = SemState.begin;
 		assert(!constraint||constraint.type is Type.get!bool());
 		assert(!constraint||constraint.isConstant() && constraint.interpretV());
 		assert(bdy !is parent.bdy);
@@ -1976,7 +1963,7 @@ interface Tuple{
 		foreach(i,x;a){
 			if(auto tp=x.isTuple()){
 				foreach(y; tp) y.loc=x.loc;
-				if(auto et=x.isExprTuple()){
+				if(auto et=x.isExpTuple()){
 					et.accessCheckSymbols();
 					r~=a[index..i]~et.exprs;
 				}else if(auto tt=x.isTypeTuple())
@@ -2010,7 +1997,7 @@ interface Tuple{
 
 }
 
-class ExprTuple: Expression, Tuple{
+class ExpTuple: Expression, Tuple{
 	/* indexing an expression tuple might create a symbol reference
 	   therefore we need to remember the access check level.
 	 */
@@ -2066,7 +2053,7 @@ class ExprTuple: Expression, Tuple{
 		assert(a<=b && b<=length);
 	}body{
 		assert(sstate == SemState.completed);
-		return New!ExprTuple(sc,exprs[cast(size_t)a..cast(size_t)b]);
+		return New!ExpTuple(sc,exprs[cast(size_t)a..cast(size_t)b]);
 	}
 	@property ulong length(){ return exprs.length;}
 
@@ -2078,7 +2065,8 @@ class ExprTuple: Expression, Tuple{
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		alias util.all all;
-		if(all!(_=>cast(bool)_.isType())(exprs)){
+		// the empty tuple is an expression except if a type is requested
+		if(exprs.length && all!(_=>cast(bool)_.isType())(exprs)){
 			auto r=New!TypeTuple(cast(Type[])exprs);
 			assert(r.sstate == SemState.completed);
 			mixin(RewEplg!q{r});
@@ -2094,7 +2082,7 @@ class ExprTuple: Expression, Tuple{
 		mixin(SemEplg);
 	}
 
-	override ExprTuple clone(Scope sc, const ref Location loc){
+	override ExpTuple clone(Scope sc, const ref Location loc){
 		auto r = ddup();
 		foreach(ref x; r.exprs) x = x.clone(sc,loc);
 		r.loc = loc;
@@ -2120,7 +2108,7 @@ class ExprTuple: Expression, Tuple{
 	override bool templateParameterEquals(Expression rhs){
 		alias util.all all;
 		import std.range;
-		if(auto et = rhs.isExprTuple()){
+		if(auto et = rhs.isExpTuple()){
 			if(et.length != length) return false;
 			return all!(_=>_[0].templateParameterEquals(_[1]))(zip(exprs,et.exprs));
 		}
@@ -2305,7 +2293,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		// the template body. This is required for IFTI and template constraints.
 		// TODO: deal with overloaded eponymous symbols
 		foreach(x; bdy.decls){
-			if(x.name && x.name.name == name.name) eponymousDecl = x;
+			if(x.name && x.name.name is name.name) eponymousDecl = x;
 			break;
 		}
 
@@ -2541,7 +2529,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	override void willCall() { needIFTI=true; }
 
 	private void IFTIsemantic(Scope sc, Expression container, Symbol sym){
-		mixin(SemPrlg);
 		mixin(SemChld!q{e,args});
 		type = type.get!void();
 		// the state will be reset in matchCallHelper
@@ -2552,7 +2539,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] funargs, ref MatchContext context){
 		assert(needIFTI);
 		assert(sstate == SemState.completed);
-
 		sstate = SemState.begin;
 		iftiArgs = funargs;
 
@@ -2569,7 +2555,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		inst = sym.meaning.matchIFTI(sc, loc, args, funargs);
 		if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 
-		mixin(SemProp!q{inst});
+		mixin(SemChld!q{inst});
 		return this;
 	}
 
@@ -2662,7 +2648,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		instantiateResSemantic(sc);
 		if(!rewrite) return;
 		assert(!!cast(Expression)rewrite);
-		auto r=(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
+		rewrite=(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
 		if(!rewrite) mixin(ErrEplg);
 	}
 
@@ -3729,14 +3715,15 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		if(fun is null){
 			fun = e.matchCall(sc, loc, args);
 			if(fun is null) mixin(ErrEplg);
-			mixin(SemProp!q{fun});
 		}
+
 		mixin(SemChld!q{fun});
 
 		mixin(SemProp!q{e}); // catch errors generated in matchCall TODO: still relevant?
 		assert(fun && fun.type);
 		auto tt = fun.type.getFunctionTy();
 		assert(!!tt);
+
 		if(adapted is null)
 		foreach(i,x; tt.params[0..args.length]){
 			if(x.stc & STClazy){
@@ -4167,7 +4154,7 @@ mixin template Semantic(T) if(is(T==ModuleIdentifier)){
 
 mixin template Semantic(T) if(is(T==FieldExp)){
 
-	ExprTuple tuple;
+	ExpTuple tuple;
 	@property Expression member(){ return tuple ? tuple : e2; }
 
 	AccessCheck accessCheck;
@@ -4232,7 +4219,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 
 			}
 		}else if(this_){
-			if(auto et = res.isExprTuple()){
+			if(auto et = res.isExpTuple()){
 				// TODO: integrate this with the rest of the code base
 				tuple = et;
 				type = et.type;
@@ -5922,7 +5909,7 @@ mixin template Semantic(T) if(is(T==AggregateTy)){
 		if(auto nsts=cast(NestedScope)decl.scope_)
 		if(auto tmps=cast(TemplateScope)nsts.parent)
 			tmpl=tmps.tmpl;
-		if(tmpl && decl.name.name==tmpl.name.name)
+		if(tmpl && decl.name.name is tmpl.name.name)
 			return decl.name.name~"!("~join(map!(to!string)(tmpl.args),",")~")";
 		return decl.name.name;
 	}
@@ -6435,16 +6422,16 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			alias tupleContext tc;
 			auto len = tp.length;
 			if(!tc) tc = New!TupleContext();
-			ExprTuple et = null;
+			ExpTuple et = null;
 			if(init){
-				et=init.isExprTuple();
+				et=init.isExpTuple();
 				if(et){
 					if(len!=et.length){
 						sc.error(format("tuple of %d elements cannot be assigned to tuple of %d elements",et.length,len),loc);
 						mixin(ErrEplg);
 					}
 				}else{
-					init = et = New!ExprTuple(sc, len, init);
+					init = et = New!ExpTuple(sc, len, init);
 					mixin(SemChldPar!q{init});
 				}
 			}
@@ -6474,7 +6461,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			}
 			mixin(SemChld!q{tc.syms});
 			if(!tc.tupleAlias){
-				auto stpl = New!ExprTuple(sc,tc.syms); // TODO: can directly transfer ownership
+				auto stpl = New!ExpTuple(sc,tc.syms); // TODO: can directly transfer ownership
 				stpl.loc = loc;
 				tc.tupleAlias = New!AliasDecl(STC.init, newVarDecl(STC.init, stpl, name, null));
 				tc.tupleAlias.sstate = SemState.begin;
@@ -6702,7 +6689,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		aliasee.weakenAccessCheck(AccessCheck.none);
 		mixin(SemChld!q{aliasee});
 		mixin(FinishDeductionProp!q{aliasee}); // TODO: necessary?
-		if(!aliasee.isSymbol() && !aliasee.isType() && !aliasee.isConstant() && !aliasee.isExprTuple()){
+		if(!aliasee.isSymbol() && !aliasee.isType() && !aliasee.isConstant() && !aliasee.isExpTuple()){
 			auto ae = aliasee.isAddressExp();
 			if(!ae||!ae.e.isSymbol()){
 				sc.error("cannot alias an expression",loc);
@@ -6727,7 +6714,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		assert(!aliasee.isSymbol());
 	}body{
 		auto r=aliasee.clone(sc, loc);
-		if(auto et=r.isExprTuple()) et.accessCheck=check;
+		if(auto et=r.isExpTuple()) et.accessCheck=check;
 		return r;
 	}
 
@@ -6864,8 +6851,8 @@ class OverloadSet: Declaration{ // purely semantic node
 	}
 	this(Identifier name){super(STC.init,name);}
 	void add(OverloadableDecl decl)in{
-		assert(!decls.length||decls[0].name.name==decl.name.name);
-		assert(!tdecls.length||tdecls[0].name.name==decl.name.name);
+		assert(!decls.length||decls[0].name.name is decl.name.name);
+		assert(!tdecls.length||tdecls[0].name.name is decl.name.name);
 		debug assert(!_matchedOne, "TODO!"); // TODO:
 	}body{
 		if(auto td=decl.isTemplateDecl()) tdecls~=td;
@@ -7141,7 +7128,10 @@ class FunctionOverloadMatcher: SymbolMatcher{
 
 	UnaryExp!(Tok!"&")[][] literals;
 	Declaration[] iftis;
+	// match the eponymous declaration
+	// if it was not determined by IFTI.
 	Expression[] eponymous;
+
 	size_t[] positions;
 	GaggingScope gscope;
 
@@ -7176,7 +7166,6 @@ class FunctionOverloadMatcher: SymbolMatcher{
 				}
 			}
 		}
-
 		mixin(RetryEplg);
 	}
 
@@ -7223,10 +7212,8 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			if(!inst.finishedInstantiation()) inst.finishInstantiation();
 
 			auto fd = inst.iftiDecl();
-
-			// unlike DMD 2.060, this can match the eponymous declaration even
-			// if it was not determined by IFTI.
 			if(!fd){
+				if(!matchATemplate) continue;
 				if(inst.sstate != SemState.completed && inst.sstate != SemState.started){
 					if(inst.isGagged()) inst.ungag();
 					x.semantic(sc_);
@@ -7246,6 +7233,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			//mixin(PropRetry!q{fd.type});
 			if(auto nr=fd.type.needRetry) { needRetry = nr; return; }
 		}
+
 		// resolve the eponymous declarations that are not determined by IFTI.
 		foreach(ref x; eponymous) if(x){
 				x.semantic(gscope);
@@ -7267,7 +7255,6 @@ class FunctionOverloadMatcher: SymbolMatcher{
 
 		MatchContext tcontext;
 		tmatches=determineTemplateMatches();		
-		
 
 		// TODO: error handling
 		auto t=set.determineMostSpecialized(tmatches, tcontext);
@@ -7340,7 +7327,6 @@ private:
 				fd=fd.matchCall(null, loc, args, tcontext);
 			}
 			if(!fd) continue;
-
 			assert(fd.type.sstate == SemState.completed, text(fd.type.sstate));
 
 			tmatches[i].decl = fd;
@@ -7413,6 +7399,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		if(sstate == SemState.pre) presemantic(sc);
 		propagateSTC();
 		if(type.hasAutoReturn()){
 			sc.error("function body required for return type inference",loc);
@@ -7679,13 +7666,13 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					}
 					mixin(PropErr!q{a});
 					foreach(ref x; a)
-						if(!x.isType() && !x.isExprTuple() && intprt){
+						if(!x.isType() && !x.isExpTuple() && intprt){
 							mixin(IntChld!q{x});
 						}
 
 					import std.stdio;
 					foreach(x; a)
-						if(!x.isType() && !x.isExprTuple() && intprt)
+						if(!x.isType() && !x.isExpTuple() && intprt)
 							stderr.write(x.interpretV().get!string());
 						else stderr.write(x.toString());
 					stderr.writeln();

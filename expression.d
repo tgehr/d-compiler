@@ -47,7 +47,7 @@ abstract class Expression: Node{
 		TernaryExp,
 		Type,
 		Tuple,
-		ExprTuple,
+		ExpTuple,
 		TypeTuple,
 	);
 
