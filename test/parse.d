@@ -14,6 +14,8 @@ bool match(int matches[]); // TODO
 pragma(msg, typeof(match));
 
 void main(){
+	auto d = new A().B();
+
 	//auto x = r"\ ";
 	//import std.stdio;
 	//static assert(2^^2^^3==2^^(2^^3));

@@ -221,7 +221,7 @@ template Divides(int a){
 
 
 template IsPrime(int p){
-	enum IsPrime = StaticFilter!(Divides!p, StaticIota!(1,p+1)).length==2;
+	//enum IsPrime = StaticFilter!(Divides!p, StaticIota!(1,p+1)).length==2;
 	enum IsPrime = {
 		int r;
 		for(int i=1;i<=p;i++) r+=!(p%i);

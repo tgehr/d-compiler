@@ -56,4 +56,4 @@ string nqueens(int n){
 	return r;
 }
 
-pragma(msg, nqueens(11));
+pragma(msg, nqueens(7));

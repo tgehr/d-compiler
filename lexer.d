@@ -23,10 +23,10 @@ string[2][] complexTokens =
 	 ["``w",   "StringLiteralW"            ],
 	 ["``d",   "StringLiteralD"            ],
 	 ["' '",   "CharacterLiteral"          ],
-	 ["0",     "Integer32Literal"          ],
-	 ["0U",    "Unsigned32Literal"         ],
-	 ["0L",    "Integer64Literal"          ],
-	 ["0LU",   "Unsigned64Literal"         ],
+	 ["0",     "IntLiteral"                ],
+	 ["0U",    "UintLiteral"               ],
+	 ["0L",    "LongLiteral"               ],
+	 ["0LU",   "UlongLiteral"              ],
 	 [".0f",   "FloatLiteral"              ],
 	 [".0",    "DoubleLiteral"             ],
 	 [".0L",   "RealLiteral"               ],
@@ -60,9 +60,9 @@ string[2][] simpleTokens =
 	 [">",     "Greater"                   ],
 	 [">=",    "GreaterEqual"              ],
 	 [">>=",   "RightShiftAssign"          ],
-	 [">>>=",  "ArithmeticRightShiftAssign"],
+	 [">>>=",  "LogicalRightShiftAssign"   ],
 	 [">>",    "RightShift"                ],
-	 [">>>",   "ArithmeticRightShift"      ],
+	 [">>>",   "LogicalRightShift"         ],
 	 ["!",     "ExclamationMark"           ],
 	 ["!=",    "NotEqual"                  ],
 	 ["!<>",   "NotLessGreater"            ],
@@ -738,27 +738,29 @@ private:
 					goto lexstringsuffix;
 				// DQString
 				case '"':
+					// appender only used if there is an escape sequence, slice otherwise
+					// TODO: how costly is eager initialization?
 					auto r=appender!string();
-					auto start = p;
+					auto start = s = p;
 					readdqstring: for(;;){
-						s = p;
 						switch(*p){
 							mixin(caseNl);
 							case 0, 0x1A:
 								errors~=tokError("unterminated string literal",(start-1)[0..1]);
 								break readdqstring;
 							case '\\':
-								p++;
+								r.put(s[0..p++-s]);
 								try r.put(readEscapeSeq(p));
 								catch(EscapeSeqException e) if(e.msg) errors~=tokError(e.msg,e.loc); else invCharSeq();
+								s = p;
 								continue;
 							case '"': p++; break readdqstring;
 							default: mixin(skipUnicode);
 						}
-						r.put(s[0..p-s]);
-					}
+					}					
 					res[0].type = Tok!"``";
-					res[0].str = r.data;
+					if(!r.data.length) res[0].str = start[0..p-1-start];
+					else{ r.put(s[0..p-1-s]); res[0].str = r.data; }
 					goto lexstringsuffix;
 					lexstringsuffix:
 					if(*p=='c')      res[0].type = Tok!"``c", p++;

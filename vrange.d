@@ -244,7 +244,9 @@ struct ValueRange(int size) if(size==32||size==64){
 
 	R opBinary(string op:"^^")(R rhs)in{assert(signed==rhs.signed);}body{
 		// TODO: implement
-		assert(0);
+		// assert(0);
+		import std.stdio; writeln("note: value range propagation for ^^ not implemented");
+		return full(signed);
 	}
 	R opBinary(string op:"<<")(R rhs){ // do not care about signedness of rhs!
 		if(!signed){

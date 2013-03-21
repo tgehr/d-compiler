@@ -1,4 +1,11 @@
 
+void ttt(){
+	int y=0;
+	immutable x = [1,y];
+	pragma(msg, x.length); // TODO: should this work?
+}
+
+
 pragma(msg, [1,2,3][0..(()=>$)()]);
 pragma(msg, [1,2,3][(()=>$-1)()..$]);
 pragma(msg, [1,2,3][(()=>$-2)()]);

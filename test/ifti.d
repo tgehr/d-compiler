@@ -1,3 +1,36 @@
+/+
+// TODO: should this work?
+bool queueDG(S,T,R=T)(S x, R delegate(T) delegate(S) dg, T y){
+	return dg(x)(y);
+}
+pragma(msg, "queueDG: ", queueDG(2, a=>b=>b&&a==2,true));+/
+
+
+template FooDg(Z,A,B...) { alias Delegate!(Z,A) delegate(B) FooDg; }
+
+bool instFooDg(S,T,R=T)(S x, FooDg!(T,T,S) dg, T y){ // TODO: why does FooDg!(R,T,S) not work?
+	return dg(x)(y);
+}
+pragma(msg, "instFooDg: ", instFooDg(2, a=>b=>b&&a==2,true));
+
+
+template ElementType(T){ alias typeof({T t; return t[0];}()) ElementType; } // display e
+
+template Seq(T...){ alias T Seq; }
+template Delegate(R,T...){ alias Seq!(R, R)[1] delegate(Seq!T) Delegate; }
+
+void transform(IR,OR,I=ElementType!IR,O)(IR input, OR output, scope Delegate!(O,I) dg){
+//void transform(IR,OR,O)(IR input, OR output, scope O delegate(ElementType!IR) dg){
+	for(auto i = input.length-input.length; i<input.length; i++)
+		output[i] = dg(input[i]);
+}
+	
+pragma(msg, "transform: ",{
+	auto a = [1,2,3];
+	auto r = [0,0,0];
+	transform(a,r,a=>a+1);
+	return r;
+}());
 
 template MAlias(A,B){ alias A delegate(B) MAlias; }
 
@@ -23,7 +56,7 @@ template tmpl(T){
 	}
 	//alias int T;
 }
-pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
+pragma(msg, "tmpl!int: ",tmpl!int(2),"\ntmpl!float: ",tmpl!float(2),"\ntmpl!double",tmpl!double(2),"\ntmpl!real: ",tmpl!real(22));
 
 auto potentiallyambiguous3(R,A...)(R delegate(A) a, R delegate(A) b){}
 pragma(msg, potentiallyambiguous3!()(y=>2.0*y, (long z)=>z/2)); // error (TODO: should it work?)
@@ -93,8 +126,8 @@ static assert(mixin(exec!()((int x,short y,byte z)=>toString(x)~"+"~toString(y)~
 //auto foo()(int a, int b){return a;}
 //pragma(msg, foo!()(1));
 
-
-auto inexistentparamtype(T...)(S arg){// TODO: gag in overloads
+auto inexistentparamtype(T...)(S arg){ }
+auto inexistentparamtype(T...)(S arg) if(T.length){ // TODO: gag
 	return arg.length;
 }
 pragma(msg, inexistentparamtype!()(2));
@@ -152,7 +185,13 @@ R[] map2(T,S,R)(const(T)[] a, S delegate(T) f, R delegate(S) g){
 immutable(float[]) fa = [1,2,3,4];
 pragma(msg, map2!()(fa,x=>cast(int)x*1020304,x=>toString(x)));
 
+/+ TODO: should this work?
+int test(int delegate(int) dg){
+	return dg(2);
+}
+int test2(alias a)(){ return test(&a); }
 
+pragma(msg, test2!(x=>x)());+/
 
 //T idint(T: int)(T arg){ return arg;}
 //pragma(msg, idint!()(1.0); // error

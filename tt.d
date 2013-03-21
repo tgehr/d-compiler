@@ -55,7 +55,6 @@ void main(){
 	//pragma(msg, ([[[[1]]]~[[[2]]]]~[[[[3]]]])[0][0][0][0]);
 
 	pragma(msg, [[1]]<=[[2]]);
-
 	pragma(msg, ("foo"d~"bar"d)[1..5]);
 	pragma(msg, typeof(0.0f&&{}()));
 	pragma(msg, !(is(T==int))^^2);

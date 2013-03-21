@@ -1,12 +1,77 @@
 
-struct Foo {
-	int[2] bar;
+// enum returnVoidArray = delegate void[](){return [2];}();
+// enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
+
+/+
+template Seq(T...){ alias T Seq; }
+int aMatchError(R)(Seq!R delegate(int) dg){ return dg(2); }
+pragma(msg, aMatchError(a=>a)); // TODO: remove reference to matcher type in error message
++/
+
+/+
+pragma(msg, ElementType!(int));
+template ElementType(T=S,S=T){ alias typeof({T t; return t[0];}()) ElementType; } // display error message
++/
+
+// make compile
+auto balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	auto init = 0;
+	template bal(immutable(char)[] s) { auto bal = init; }
+	for(typeof(c.length) i=0;i<c.length;i++){
+		if(c[i]=='(') bal!"("++;
+		else if(c[i]==')') bal!"("--;
+		else if(c[i]=='[') bal!"["++;
+		else if(c[i]==']') bal!"["--;
+		else if(c[i]=='{') bal!"{"++;
+		else if(c[i]=='}') bal!"{"--;
+		if(bal!"("||bal!"["||bal!"{") continue;
+		if(a(c[i],v)) return i;
+	}
+	return -1;
 }
-const(int[2]) spam() {
-	const Foo* x;
-	return true ? x.bar : [10, 20];
+static assert(balancedIndexOf("(,),",',')==3);
+
+/+// make compile
+
+auto indexOf3(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, const V v){
+	for(typeof(c.length) i=0;i<c.length;i++)
+		if(a(c[i],v)) return i;
+	return -1;
 }
-void main() {}
+
+static assert(indexOf3("aba",'b')==1);
+
+auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
+	for(typeof(c.length) i=0;i<c.length;i++)
+		if(c[i]==v) return i;
+	return -1;
+}
+static assert(indexOf2("aba",'b')==1); // spurious error message
++/
+
+/+// improve error messages!
+
+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+
+auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
+auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
+	return (R delegate(B) k)=>me(r=>f(r)(k));
+}
+
+auto callCC(B,R,A,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
+	1=2;
+	return (R delegate(A) k)=>f(a=>_=>k(a), args)(k);
+}
+
+auto testcallCC(){
+	auto f(Cont!(int,int) delegate(int) cont, int x){
+		return cat(x<3?cont(x):ret!int(1),a=>cont(x+a));
+	}
+	assert(callCC(&f,1)(x=>x)==1);
+	assert(callCC(&f,3)(x=>x)==4);
+	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
+}+/
+
 /+
 template StaticFilter(alias F, a...){
 	static if(!a.length) alias a StaticFilter;
@@ -18,7 +83,51 @@ template StaticFilter(alias F, a...){
 template Pred(int x){ enum bool Pred = x&1; }
 pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));+/
 
-/+ // ok so far
+/+// ok now
+
+string nqueens(int n){
+	string r;
+	void write(){}
+	void write(T...)(T args) { r~=args[0]; write(args[1..$]); } // shouldn't show any errors
+
+	write("123");
+	return r;
+}
+
+static assert(nqueens(2)=="123");
+
+
+
+static assert((()=>-1LU)()==-1LU);
+
+int indexOf(alias a=(a,b)=>a==b,T)(const(T)[] c, const(T) v){
+	for(int i=0;i<c.length;i++)
+		if(a(c[i],v)) return i;
+	return -1;
+}
+
+static assert(indexOf!()("aba",'b')==1);
+
+
+static assert(!is(typeof({
+	int delegate(int delegate(int delegate(int)) delegate(int)) arg;
+	return arg(x=>y=>z=>2);
+})));
+
+auto II(T)(T arg){ return arg; }
+static assert(is(typeof(II(cast(const)0))==int));
+
+int* pII;
+static assert(is(typeof(II(cast(const)pII))==const(int)*));
+
+struct Foo {
+	int[2] bar;
+}
+const(int[2]) spam() {
+	const Foo* x;
+	return true ? x.bar : [10, 20];
+}
+void main() {}
 
 auto fun(){return "a function";}
 auto fun(T...)(T args){return 1;}
@@ -83,8 +192,6 @@ static assert(!is(typeof({
 	}
 })));
 
-alias immutable(char)[] string;
-
 auto testtemplatefunclit(alias fun)(){ return fun!int(2); }
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!(x=>2)());
 
@@ -97,3 +204,5 @@ typeof(y) z;
 +/
 
 // +/
+
+alias immutable(char)[] string;

@@ -9,6 +9,7 @@ DMD = dmd -debug -gc -m32
 #DMD = ../dmd/src/dmd -m32 -O -release -inline -noboundscheck
 #DMD = ../dmd/src/dmd -property -gc -m32
 #DMD = gdmd -gc -m32 -L-lgphobos2 -O -release -inline -noboundscheck
+#DMD = gdmd -gc -m32 -L-lgphobos2 -O -inline
 #DMD = gdmd -gc -m32 -L-lgphobos2
 
 

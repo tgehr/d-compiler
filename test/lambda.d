@@ -119,7 +119,7 @@ struct S{
 			s~="enum int a"~toString(i)~"=a"~toString(i-1)~"+"~toString(i*2-1)~";";
 		return s;
 	}());
-	pragma(msg, a5);
+	pragma(msg, a5); // TODO: this should work
 }
 
 void testfunctiondeduction(){

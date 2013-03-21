@@ -90,7 +90,7 @@ private{
 	struct Existing{}       struct DebugCondition{}        struct VersionCondition{}
 	struct CondDeclBody{}   struct OptTemplateConstraint{} struct TemplateParameterList{}
 	struct PTuple{}         struct TypeOrExpression{}      struct Initializer{}
-	struct DeclDef{}        struct Condition{}
+	struct DeclDef{}        struct Condition{}             struct NoScopeStatement{}
 }
 private template TTfromStr(string arg){ // turns "a,b,c,..." into TypeTuple(a,b,c,...)
 	alias TypeTuple!(mixin("TypeTuple!("~arg~")")) TTfromStr;
@@ -672,6 +672,10 @@ private struct Parser{
 	private static template pStm(T...){
 		enum pStm="case Tok!\""~T[0]~"\":\n"~rule!(mixin(T[0][0]+('A'-'a')~T[0][1..$]~"Stm"),"_",T[1..$]);
 	}
+	Statement parseNoScopeStatement(){
+		if(ttype == Tok!"{") return parseCompoundStm();
+		return parseStatement();
+	}
 	Statement parseStatement(){
 		mixin(SetLoc!Statement);
 		bool isfinal = false; //for final switch
@@ -692,7 +696,7 @@ private struct Parser{
 			mixin(pStm!("if","(",Condition,")","NonEmpty",Statement,"OPT"q{"else","NonEmpty",Statement}));
 			mixin(pStm!("while","(",Condition,")","NonEmpty",Statement));
 			mixin(pStm!("do","NonEmpty",Statement,"while","(",Expression,")",";"));
-			mixin(pStm!("for","(",Statement,"OPT",Condition,";","OPT",Expression,")","NonEmpty",Statement));
+			mixin(pStm!("for","(",NoScopeStatement,"OPT",Condition,";","OPT",Expression,")","NonEmpty",Statement));
 			case Tok!"foreach_reverse":
 				isreverse=true;
 			case Tok!"foreach":

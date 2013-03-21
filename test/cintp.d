@@ -1,4 +1,27 @@
 
+int[] bigInt(string s){ // TODO: in contracts
+	int[] r;
+	for(size_t i=0;i<s.length;i++) assert('0'<=s[i] && s[i] <='9');
+	for({size_t i=s.length;while(i>1&&s[--i]=='0'){}};){
+		r~=s[i]-'0';
+		if(!i--) break;
+	}
+	return r;
+}
+
+string biToString(int[] bi){
+	string r;
+	for({size_t i = bi.length;while(i>1&&!bi[--i]){}};){
+		r~=cast(char)(bi[i]+'0');
+		if(!i--) break;
+	}
+	return r;
+}
+
+pragma(msg, biToString(bigInt("00123453388338838")));
+
+
+
 auto memoizer(T,S)(T[] memo, T delegate(T delegate(S), S) formula){
 	bool[] e;
 	e.length = memo.length;
@@ -22,7 +45,6 @@ pragma(msg, "memfactorial: ", map!memfactorial(iota(0,19)));
 pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
 
 // Haskell-Like CPS //
-
 template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
 
 auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
@@ -30,9 +52,16 @@ auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
 	return (R delegate(B) k)=>me(r=>f(r)(k));
 }
 
-auto callCC(B,R,A,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
+// ((A -> (B -> R) -> R) -> (A -> R) -> R) -> (A -> R) -> R
+
+auto callCC(R,A,B,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
 	return (R delegate(A) k)=>f(a=>_=>k(a), args)(k);
 }
+
+/+pragma(msg, typeof(&callCC!(R,A,B)));
+auto testselfapp(){
+	return callCC(&callCC!(),);
+}+/
 
 auto testcallCC(){
 	auto f(Cont!(int,int) delegate(int) cont, int x){
@@ -46,6 +75,41 @@ auto testcallCC(){
 static assert(testcallCC()==5);
 pragma(msg, "testcallCC: ", testcallCC());
 
+pragma(msg, "callCC: ",callCC!(int,int,int)(ret=>ret(2))(x=>callCC!(int,int,int)(ret=>ret(x+1))(x=>x)));
+
+
+auto testcallCC2(){
+	auto f(Cont!(int,int) delegate(int) cont, int x){
+		return cont(1+x);
+	}
+	// pragma(msg, typeof(&f));
+	auto g(Cont!(int,int) delegate(Cont!(int, int) delegate(int)) arg){
+		return callCC(arg);
+	}
+	assert(g(x=>f(x,3))(x=>x) == 4);
+
+	alias Cont!(int,int) delegate(int) R;
+	alias Cont!(int,int) delegate(int) A;
+	alias Cont!(int,int) delegate(int) B;
+
+	Cont!(R,A) callCCBack(Cont!(R,B) delegate(A) arg){
+		//return callCC(arg);
+		//return arg(x=>y=>z=>callCC(&f, x(2)(x=>x)+y(2)(3)(x=>x)+z));
+		//return callCC(arg);
+		return arg(x=>callCC(&f,x));
+	}
+	return callCC(&callCCBack)(x=>x)(1337);
+/+	auto callCCBack(Cont!(Cont!(int, int) delegate(int),int) delegate(Cont!(Cont!(int, int) delegate(int), int) delegate(Cont!(int, int) delegate(int))) arg){
+		//return callCC(arg);
+		return arg(x=>y=>z=>callCC(&f, x(2)(x=>x)+y(2)(3)(x=>x)+z));
+	}
+	return callCC!(int,Cont!(int, int) delegate(int),Cont!(int, int) delegate(int))(&callCCBack);+/
+
+	//return callCC(&f, 4);
+	//return callCC(&g, callCC(&f, 2));
+}
+pragma(msg, "testcallCC2: ", testcallCC2()(x=>x));
+
 auto testcps(){
 	return
 		cat(ret!int(1), a =>
@@ -58,9 +122,221 @@ auto testcps(){
 static assert(testcps()==6);
 pragma(msg, "testcps: ", testcps());
 
+Cont!(int,int) factcps(Cont!(int,int) delegate(int) cont, int n){
+	return 
+		cat!(int,int,int)(n<1 ? cont(1) : ret!int(n-1),
+		                  a => cont(callCC!(int,int,int)((x,y)=>factcps(x,y), a)(x=>x)*n));
+}
+
+pragma(msg, "factcps: ", map!(a=>callCC!(int,int,int)((x,y)=>factcps(x,y),a)((int x)=>x))(iota(1,10)));
+
+alias Seq!(void,bool) vb;
+alias Seq!(void,bool,bool) vbb;
+
+Cont!vb isprimecps(Cont!vb delegate(bool) cont, int p){
+	Cont!vb loop(int i){
+		return
+			cat!vbb(i > p  ? cont(false) : ret!vb(false), a=>
+			        i == p ? cont(true) :
+			        p % i  ? loop(i+1) :
+			        cont(a));
+	}
+	return loop(2);
+}
+
+T escapeCont(T)(Cont!(void, T) cont){
+	T r;
+	// cont((x){r=x;});
+	cont(x=>cast(void)(r=x));
+	return r;
+}
+
+// pragma(msg, escapeCont(callCC!vbb((x,y)=>isprimecps(x,y),4)));
+pragma(msg, "isprimecps: ",filter!(a=>escapeCont(callCC!vbb((x,y)=>isprimecps(x,y),a)))(iota(1,100)));
+
+Cont!(S,T) arrayToCont(S,T)(T[] a){
+	return (S delegate(T) dg){
+		S r;
+		//foreach(x;a) r~=dg(x);
+		for(int i=0;i<a.length;i++)
+			r~=dg(a[i]);
+		return r;
+	};
+}
+
+
+auto cartprodcps(T)(T[] a, T[] b){
+	alias arrayToCont i; alias T[][] R;
+	return cat(i!R(a),x=>cat(i!R(b),y=>ret!R([[x,y]])));
+}
+
+pragma(msg, cartprodcps([1,2,3],[4,5,6])(x=>x));
+
+enum cprod = cartprodcps([1,2,3],[4,5,6])(x=>x);
+enum cprod2 = cartprodcps(cprod,cprod)(x=>x);
+
+//enum cprod3 = cartprodcps(cprod2, cprod2)(x=>x);
+
+pragma(msg, "cartprodcps: ",cprod2);
+//pragma(msg, cartprodcps(cprod2,cprod2)(x=>x));
+
+auto expCps(T)(T[] a, T[] b){
+	alias arrayToCont i;
+	alias Seq!(T[],T,T) iaii;
+	alias Seq!(T[][],T[],T[]) iaaiaia;
+	
+	alias Seq!(T[][],T,T) iaaii;
+	alias Seq!(T[][],T[],T) iaaiai;
+
+	//return cat!iaii(i!T(a),x=>cat!iaii(i!T(b),y=>i!T([x,y])));
+	//return cat!iaaiaia(i!(T[])(a),x=>cat!iaaiaia(i!(T[])(b),y=>i!(T[])([[x,y]])));
+	//return cat!(T[],T,T)(i!(T)(a), x=>ret!(T[])(x*2));
+	//return cat!iaaiaia(i!(T[])([a]), x=>ret!(T[][])(x));
+
+	//return cat!iaaii(i!(T[])(a),x=>cat!iaaii(i!(T[])(b),y=>ret!(T[][])(x)));
+}
+
+size_t indexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	for(size_t i=0;i<c.length;i++)
+		if(a(c[i],v)) return i;
+	return -1;
+}
+static assert(indexOf("abc",'d')==-1LU);
+
+size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	template bal(string s){ size_t bal = 0; }
+	for(size_t i=0;i<c.length;i++){
+		if(!bal!"("&&!bal!"["&&!bal!"{"&&a(c[i],v)) return i;
+
+		if(c[i]=='"') bal!"\""=!bal!"\"";
+		else if(c[i]=='\'') bal!"'"=!bal!"'";
+		else if(!bal!"\""&&!bal!"'"){
+			if(c[i]=='(') bal!"("++;
+			else if(c[i]==')') bal!"("--;
+			else if(c[i]=='[') bal!"["++;
+			else if(c[i]==']') bal!"["--;
+			else if(c[i]=='{') bal!"{"++;
+			else if(c[i]=='}') bal!"{"--;
+		}
+	}
+	return -1;
+}
+
+string[] splitIdent(string str){
+	if('0'<=str[0]&&str[0]<='9') return ["",str];
+	for(int i=0;i<str.length;i++)
+		if(('a'>str[i]||str[i]>'z')&&('A'>str[i]||str[i]>'Z')&&('0'>str[i]||str[i]>'9')&&str[i]!='_')
+			return [str[0..i], str[i..$]];
+	return [str,""];
+}
+
+string trimLeft(string str){
+	while(str.length&&(str[0]==' '||str[0]=='\t'||str[0]=='\v'))
+		str = str[1..$];
+	return str;
+}
+
+private string Ximpl(string x){
+	string r=`"`;
+	//foreach(i;0..x.length){
+	for(size_t i=0;i<x.length;i++){
+		if(x[i]=='@'&&i+1<x.length&&x[i+1]=='('){
+			auto start = i+1;
+			i+=2;
+			auto inc = balancedIndexOf(x[i..$],')');
+			assert(~inc, x[i..$]);
+			i += inc;
+			r~=`"~`~x[start..i+1]~`~"`;
+		}else{
+			if(x[i]=='"'||x[i]=='\\') r~="\\";
+			r~=x[i];
+		}
+	}
+	return r~`"`;
+}
+
+template X(string x){
+	enum X = Ximpl(x);
+}
+
+template compr(string c){
+	auto computeCompr(){
+		auto c=c;
+		c = trimLeft(c);
+		auto barp = balancedIndexOf(c,'|');
+		assert(barp!=-1,"'|' is missing");
+		auto exp = c[0..barp];
+		c=trimLeft(c[barp+1..$]);
+		string[] idents;
+		string[] exprs;
+		string[] conditions;
+		for(;;){
+			auto s = splitIdent(c);
+			if(!s[0].length) goto parseCondition;
+			//assert(s[0].length, "expected identifier at "~s[1]);
+			auto rmd = trimLeft(s[1]);
+			if(rmd.length<2 || rmd[0]!='<' || rmd[1]!='-') goto parseCondition;
+			c = rmd;
+			idents ~= s[0];
+			assert(s[0][0]!='_',"leading underscore identifiers are reserved");
+			//assert(c[0]=='<' && c[1]=='-', c);
+			c=c[2..$];
+			auto cp = balancedIndexOf(c,',');
+			exprs ~= c[0..~cp?cp:$];
+			conditions~="true";
+			c = c[exprs[$-1].length..$];
+			if(!c.length) break;
+			c = trimLeft(c[1..$]);
+			continue;
+		parseCondition:
+			assert(conditions.length>0);
+			cp = balancedIndexOf(c,',');
+			conditions[$-1]~="&&("~c[0..~cp?cp:$]~")";
+			c = c[~cp?cp:$..$];
+				
+			if(!c.length) break;
+			c = trimLeft(c[1..$]);
+		}
+		string[] types = map!(x=>"typeof(_"~x~"[0])")(idents);
+		
+		string rtype = "typeof({";
+		for(size_t i=0;i<idents.length;i++)
+			rtype~=types[i]~" "~idents[i]~";";
+		rtype ~= "return "~exp~";}())[]";
+		return mixin(X!q{
+			//
+			(@({string r;
+				for(size_t i=0;i<idents.length;i++)
+					r~="typeof("~exprs[i]~") _"~idents[i]~", ";
+				return r;
+			}())){
+				alias arrayToCont i; alias @(rtype) R;
+				return @({
+					string r;
+					for(int i=0;i<idents.length;i++)
+						r~="cat(i!R(_"~idents[i]~"),"~idents[i]~"=>!("~conditions[i]~")?ret!(R,R)([]):";
+					r~="ret!R(["~exp~"])";
+					for(int i=0;i<idents.length;i++) r~=')';
+					return r;
+				}());
+				
+			}(@(join(exprs,',')))
+		}~")");
+	}
+	enum compr = mixin(computeCompr())(x=>x);
+}
+
+pragma(msg, "compr: ", compr!q{ [x|1,y] | x <- [1,2,3], y <- [4,5,6], x==y-4});
+
+pragma(msg, "compr2: ", compr!q{ [x<y,y<x] | x <- [1,2,3], y <- [1,2,3], x!=y });
+
+pragma(msg, "compr3: ", compr!q{ join(map!toString([a,b,c]),"o") | a<-[1,2], b<-[2,3], c<-[3,4] });
+
+pragma(msg, "compr4: ", compr!q{ [x,y,z] | x <- [1,2,3], x&1, y <- [1,2,3,4], z <-[1,2,3], x+y+z==7 });
+
+//pragma(msg, callCC!(int,int,int)(k=>k(2))(x=>x));
 
 /////////
-
 string templatednested(){
 	string r;
 	void write(T)(T arg) { r~=arg; }
@@ -185,13 +461,6 @@ bool pred(string s){
 
 //pragma(msg, filter!(pred,string)(map!(toString,int)(iota(0,1000))));
 
-auto filter(alias a,T)(T[] arg) {//if(is(typeof(cast(bool)a(arg[0])):bool)){
-	typeof(arg) r;
-	for(int i=0;i<arg.length;i++)
-		if(a(arg[i])) r~=arg[i];
-	return r;
-}
-
 template binaryFun(alias fun,T){
 	static if(is(typeof(fun)==string))
 		auto binaryFun(T a, T b){
@@ -201,7 +470,6 @@ template binaryFun(alias fun,T){
 }
 
 auto sort(alias p,T)(T[] arg){
-	pragma(__p, p,T);
 	alias binaryFun!(p,T) pred;
 	if(arg.length <= 1) return arg;
 	bool low(T x){return !!pred(x,arg[0]);}
@@ -1184,6 +1452,7 @@ auto dg = (delegate int(int x) => x)(2);+/
 // +/
 // +/
 alias immutable(char)[] string;
+alias typeof({int[] r; return r;}().length) size_t;
 
 auto toString(int i){
 	immutable(char)[] s;
@@ -1198,3 +1467,18 @@ auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0]))[])){
 		r~=a(arg[i]);
 	return r;
 }
+auto filter(alias a,T)(T[] arg) if(is(typeof(cast(bool)a(arg[0])):bool)){
+	typeof(arg) r;
+	for(int i=0;i<arg.length;i++)
+		if(a(arg[i])) r~=arg[i];
+	return r;
+}
+auto join(T,S)(T[] arg, S sep){
+	T r;
+	for(size_t i=0;i+1<arg.length;i++)
+		r~=arg[i]~sep;
+	r~=arg[$-1];
+	return r;
+}
+
+template Seq(T...){alias T Seq;}

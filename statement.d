@@ -47,7 +47,7 @@ class BlockStm: CompoundStm{
 class LabeledStm: Statement{
 	Identifier l;
 	Statement s;
-	this(Identifier label, Statement statement){l=label; s=statement;}
+	this(Identifier label, Statement statement){l=label; s=statement; sstate = SemState.pre;}
 	override string toString(){return l.toString()~": "~s.toString();}
 
 	mixin Visitors;

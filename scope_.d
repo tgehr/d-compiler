@@ -280,7 +280,7 @@ final class FunctionScope: OrderedScope{
 
 	override bool insertLabel(LabeledStm stm){
 		if(auto s = lstmsymtab.get(stm.l.ptr,null)){
-			error(format("rededefinition of label '%s'",stm.l.toString()),stm.l.loc);
+			error(format("redefinition of label '%s'",stm.l.toString()),stm.l.loc);
 			note("previous definition was here",s.l.loc);
 			return false;
 		}
@@ -328,8 +328,7 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 			note("previous declaration is here",confl.name.loc);
 			return false;
 		}
-		super.insert(decl); // overload lookup
-		return true;
+		return super.insert(decl); // overload lookup
 	}
 
 	void setBreakableStm(BreakableStm brk)in{assert(!brokenOne);}body{

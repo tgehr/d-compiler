@@ -2305,7 +2305,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -3058,8 +3058,8 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 		if(auto bt = tu.isBasicType()){
 			if(bt.isIntegral()){
 				bld.emit(Instruction.push);
-				if(bt.isSigned()) bld.emitConstant(cast(int)value.get!ulong());
-				else bld.emitConstant(cast(uint)value.get!ulong());
+				if(bt.isSigned()) bld.emitConstant(cast(long)value.get!ulong());
+				else bld.emitConstant(value.get!ulong());
 				return;
 			}else if(tu is Type.get!float()||type is Type.get!ifloat()){
 				bld.emit(Instruction.push);
@@ -3357,8 +3357,11 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	 */
 
 	private void load(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
-		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init))){
+		void accessError(){
 			bld.error(format("cannot access variable '%s' at compile time", name.toString()), loader.loc);
+		}
+		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init))){
+			accessError();
 			return;
 		}if(stc&STCenum){
 			// TODO: this can be inefficient for immutable variables
@@ -3376,7 +3379,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 					init.byteCompile(bld);
 					return;
 				}
-				bld.error(format("cannot access variable '%s' at compile time", name.toString()),loader.loc);
+				accessError();
 
 				// dw("nope ",this," ",off," ",len," ",cast(void*)this);
 
@@ -3591,7 +3594,9 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 					bld.emitConstant(len);
 				}
 			}
+
 			bdy.byteCompile(bld);
+
 			if(type.ret is Type.get!void()) bld.emit(Instruction.ret);
 			allocc.done();
 			alloca.done();
@@ -3630,7 +3635,9 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		}
 		if(ret.getElementType()) return Variant.fromBCSlice(stack.pop!BCSlice(),ret);
 		else if(ret is Type.get!(typeof(null))) return Variant(null);
-		assert(0,"unsupported return type "~type.ret.toString());
+		// assert(0,"unsupported return type "~type.ret.toString());
+		handler.error(format("return type '%s' not yet supported", type.ret.toString()),loc);
+		throw new Exception("");
 	}
 }
 
@@ -3685,3 +3692,13 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 	}
 }
 
+mixin template CTFEInterpret(T) if(is(T==TemplateInstanceDecl)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		bdy.byteCompile(bld);
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==BlockDecl)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		foreach(decl; decls) decl.byteCompile(bld);
+	}
+}

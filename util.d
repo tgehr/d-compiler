@@ -29,6 +29,16 @@ template ToTuple(alias a){
 
 template Seq(T...) { alias T Seq; }
 
+enum Ternary: ubyte{
+	no = 0,
+	yes = 1,
+	dunno = 2,
+}
+alias Ternary.no no;
+alias Ternary.yes yes;
+alias Ternary.dunno dunno;
+
+
 // escape a string
 S escape(S)(S i,bool isc=false)if(isSomeString!S){ // TODO: COW, replace with std lib one as soon as available
 	S r;
@@ -281,7 +291,7 @@ mixin template DownCastMethod(){
 
 private string Ximpl(string x){
 	string r=`"`;
-	foreach(i;0..x.length){
+	for(size_t i=0;i<x.length;i++){
 		if(x[i]=='@'&&i+1<x.length&&x[i+1]=='('){
 			auto start = ++i, nest=1;
 			while(nest){
