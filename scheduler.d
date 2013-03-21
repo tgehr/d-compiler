@@ -61,8 +61,8 @@ class Scheduler{
 		}
 		
 		void await(Node from, Node to, Scope sc){
-			if(from !in active) return;
 			awaited[to]~=from;
+			if(from !in active) return;
 			if(from in asleep) return;
 
 			asleep[from]=active[from]; // ...
@@ -216,11 +216,11 @@ class Scheduler{
 			Identifier.allowDelay=true;
 			//dw("workingset: ",map!(_=>text(_," ",_.sstate," ",typeid(_)))(workingset.payload.keys));
 			// dw(workingset.payload.length);
+			// dw(workingset.asleep.keys,"\n\n\n",workingset.awaited);
 			if(!workingset.payload.length&&workingset.asleep.length)
 				workingset.awake();
 		}while(workingset.payload.length);
 
-		// dw(workingset.asleep.keys,"\n\n\n",workingset.awaited);
 		// dw(champ," ",champ.cccc);
 	}
 

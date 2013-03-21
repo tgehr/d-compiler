@@ -70,6 +70,30 @@ struct Dependee{
 	bool opCast(T: bool)(){return !!node;}
 }
 
+class MultiDep: Node{
+	Node[] deps;
+	Scope sc;
+	this(Node/+final+/[] dep, Scope sc = null)in{
+		alias util.all all;
+		assert(sc||all!(a=>a.isDeclaration()&&a.isDeclaration().scope_)(dep));
+	}body{
+		deps = dep;
+		Scheduler().add(this, null);
+		if(sc) foreach(d; deps){
+			Scheduler().await(this, d, sc);
+		}else foreach(d; deps){
+			Scheduler().await(this, d, d.isDeclaration().scope_);	
+		}
+		needRetry = true;
+	}
+	void semantic(Scope sc){ mixin(SemEplg); }
+	override void _doAnalyze(scope void delegate(Node) dg){ assert(0); }
+	override inout(Node) ddup()inout{ assert(0); }
+	override string kind(){ return "multi dependency";}
+}
+
+// TODO: this allocation can probably be avoided in many cases
+Dependee multidep(Node[] dep, Scope sc=null){ return Dependee(new MultiDep(dep, sc)); }
 
 
 abstract class Expression: Node{

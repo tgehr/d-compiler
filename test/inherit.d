@@ -1,4 +1,14 @@
 
+
+class PP{
+	enum x = "success!";
+}
+class CC: PP{
+	pragma(msg, x); // TODO!
+}
+
+
+
 //static if(!is(typeof(a))) enum b = 2;
 //static if(!is(typeof(b))) enum a = 2;
 

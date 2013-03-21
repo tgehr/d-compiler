@@ -1,6 +1,15 @@
 
-static if(!is(typeof(ffff))) enum gggg = 2;
-static if(!is(typeof(gggg))) enum ffff = 2;
+static if(!is(typeof(bb))) enum xx = false;
+static if(!is(typeof(xx))) enum bb = true; // error
+static if(!is(typeof(aa))) enum bb = true; // ok
+
+static if(!is(typeof(bbb))) enum xxx = false;
+static if(!is(typeof(aaa))) enum bbb = true; // ok
+static if(!is(typeof(xxx))) enum bbb = true; // error
+
+
+static if(!is(typeof(ffff))) enum gggg = 2; // error
+static if(!is(typeof(gggg))) enum ffff = 2; // error
 
 
 // void bazz(){}
@@ -56,7 +65,7 @@ void main(){
 		int x = 2;
 		x=3;
 		x-=2;
-		pragma(msg, x);
+		pragma(msg, x); // error
 	}
 }
 

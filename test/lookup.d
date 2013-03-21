@@ -1,3 +1,17 @@
+class D{
+	int x;
+	template bar(){
+		int foo(){
+			return x;
+		}
+	}
+	static class C{
+		int foo(){
+			return bar!().foo(); // error
+		}
+	}
+}
+
 int intatmodulescope;
 
 void testmodulescoperesolution(){
@@ -89,15 +103,18 @@ void local(){
 
 template TT(int i){
 	alias Rest V;
-	static if(i) alias TT!(0).V Rest; // TODO: should work
+	static if(i) alias TT!(0).V Rest;
+	else alias thisiszero Rest;
 	static if(i) enum thisisone=true;
+	else enum thisiszero = 2;
 }
 
 pragma(msg, TT!(0).V);
 pragma(msg, TT!(1).V);
 
 template SS(bool i){
-	static if(i) alias int V; // TODO: should work
+	static if(i) alias int V;
+	else alias double V;
 	alias V A;
 }
 

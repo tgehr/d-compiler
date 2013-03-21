@@ -257,6 +257,7 @@ mixin CreateBinderForDependent!("MatchCallHelper","matchCallHelper");
 mixin CreateBinderForDependent!("AtLeastAsSpecialized","atLeastAsSpecialized");
 mixin CreateBinderForDependent!("DetermineMostSpecialized","determineMostSpecialized");
 mixin CreateBinderForDependent!("Lookup","lookup");
+mixin CreateBinderForDependent!("LookupHere","lookupHere");
 
 
 template IntChld(string s) if(!s.canFind(",")){
@@ -4378,10 +4379,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 					if(l.length){
 						needRetry = true;
 						unresolved = null;
-						assert(l[0].sstate!=SemState.completed&&l[0].sstate!=SemState.error);
-						l[0].needRetry = true;
-						// TODO: wait for ANY of them
-						return Dependee(l[0],l[0].scope_).dependent!void;
+						// assert(l[0].sstate!=SemState.completed&&l[0].sstate!=SemState.error);
+						return multidep(cast(Node[])l).dependent!void;
 					}
 					if(!unresolved.inexistent(this)) mixin(ErrEplg);
 					unresolved = null;
@@ -7348,7 +7347,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			if(t) return t;
 		}
 		// TODO: return a dummy that wakes up when ANY parent finishes analysis
-		if(auto x=unresolvedParent()) return Dependee(x, scope_).dependent!bool;
+		if(auto x=unresolvedParent()) return multidep(cast(Node[])parents, scope_).dependent!bool;
 		return false.independent;
 	}
 
