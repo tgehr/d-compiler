@@ -1,3 +1,9 @@
+/+
+template asdf(){}
+template Uninstantiable() if(asdf(2)){}
+template Instantiable() if(Uninstantiable!()){}
+pragma(msg, typeof(Instantiable!())); // show error!
++/
 
 // enum returnVoidArray = delegate void[](){return [2];}();
 // enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
@@ -14,40 +20,23 @@ template ElementType(T=S,S=T){ alias typeof({T t; return t[0];}()) ElementType; 
 +/
 
 // make compile
-auto balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
-	auto init = 0;
-	template bal(immutable(char)[] s) { auto bal = init; }
-	for(typeof(c.length) i=0;i<c.length;i++){
-		if(c[i]=='(') bal!"("++;
-		else if(c[i]==')') bal!"("--;
-		else if(c[i]=='[') bal!"["++;
-		else if(c[i]==']') bal!"["--;
-		else if(c[i]=='{') bal!"{"++;
-		else if(c[i]=='}') bal!"{"--;
-		if(bal!"("||bal!"["||bal!"{") continue;
-		if(a(c[i],v)) return i;
-	}
-	return -1;
-}
-static assert(balancedIndexOf("(,),",',')==3);
-
-/+// make compile
-
+/+
 auto indexOf3(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, const V v){
 	for(typeof(c.length) i=0;i<c.length;i++)
 		if(a(c[i],v)) return i;
 	return -1;
 }
 
-static assert(indexOf3("aba",'b')==1);
-
+static assert(indexOf3("aba", 'b')==1);
++/
+/+
 auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
 	for(typeof(c.length) i=0;i<c.length;i++)
 		if(c[i]==v) return i;
 	return -1;
 }
-static assert(indexOf2("aba",'b')==1); // spurious error message
-+/
+static assert(indexOf2("aba",'b')==1); // spurious error message+/
+
 
 /+// improve error messages!
 
@@ -83,7 +72,27 @@ template StaticFilter(alias F, a...){
 template Pred(int x){ enum bool Pred = x&1; }
 pragma(msg, StaticFilter!(Pred, 1, 2, 3, 4, 5, 6, 7));+/
 
-/+// ok now
+
+
+
+// ok now
+
+auto balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
+	auto init = 0;
+	template bal(immutable(char)[] s) { auto bal = init; }
+	for(typeof(c.length) i=0;i<c.length;i++){
+		if(c[i]=='(') bal!"("++;
+		else if(c[i]==')') bal!"("--;
+		else if(c[i]=='[') bal!"["++;
+		else if(c[i]==']') bal!"["--;
+		else if(c[i]=='{') bal!"{"++;
+		else if(c[i]=='}') bal!"{"--;
+		if(bal!"("||bal!"["||bal!"{") continue;
+		if(a(c[i],v)) return i;
+	}
+	return -1;
+}
+static assert(balancedIndexOf("(,),",',')==3);
 
 string nqueens(int n){
 	string r;
@@ -97,7 +106,6 @@ string nqueens(int n){
 static assert(nqueens(2)=="123");
 
 
-
 static assert((()=>-1LU)()==-1LU);
 
 int indexOf(alias a=(a,b)=>a==b,T)(const(T)[] c, const(T) v){
@@ -107,7 +115,6 @@ int indexOf(alias a=(a,b)=>a==b,T)(const(T)[] c, const(T) v){
 }
 
 static assert(indexOf!()("aba",'b')==1);
-
 
 static assert(!is(typeof({
 	int delegate(int delegate(int delegate(int)) delegate(int)) arg;
@@ -133,7 +140,10 @@ auto fun(){return "a function";}
 auto fun(T...)(T args){return 1;}
 template fun(a...){auto fun(T...)(T args){return 2;}}
 template fun(a...){template fun(b...){auto fun(T...)(T args){return 3;}}}
-static assert(fun(0)==1);
+
+static assert(!is(typeof(fun!()(0))));
+static assert(!is(typeof(fun!()())));
+static assert(!is(typeof(fun(0))));
 static assert(fun()=="a function");
 
 int a;

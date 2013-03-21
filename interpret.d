@@ -1451,7 +1451,7 @@ string toString(ByteCode byteCode){
 
 /* for debugging purposes
  */
-bool _displayByteCode = false;
+bool _displayByteCode = false+1;
 bool _displayByteCodeIntp = false;
 
 import error;
@@ -2305,7 +2305,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -3339,6 +3339,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 				bld.emitConstant(off);
 				setBCLoc(off, len);
 				bld.addStackOffset(len);
+				// dw(this," ",off," ",len);
 				return;
 			}
 
@@ -3537,6 +3538,11 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				// TODO: this is very conservative
 				if(!(self.stc&STCstatic)) self.resetByteCode();
 			}
+
+			void perform(TemplateInstanceDecl self){
+				// TODO: maybe this is too conservative too
+				if(!(self.stc&STCstatic)) self.resetByteCode();
+			}
 		}
 		runAnalysis!HeapContextAnalysis(this);
 
@@ -3692,9 +3698,23 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 	}
 }
 
-mixin template CTFEInterpret(T) if(is(T==TemplateInstanceDecl)){
+mixin template CTFEInterpret(T) if(is(T==TemplateDecl)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		// TODO: local templates are still a little messy!
+		foreach(x; store.instances) x.byteCompile(bld);
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==TemplateInstanceDecl)){
+	private bool alreadyBCCompiled = false;
+
+	void resetByteCode(){
+		alreadyBCCompiled = false;
+	}
+
+	override void byteCompile(ref ByteCodeBuilder bld){
+		if(alreadyBCCompiled) return;
 		bdy.byteCompile(bld);
+		alreadyBCCompiled = true;
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==BlockDecl)){

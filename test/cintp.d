@@ -1,3 +1,12 @@
+template CommonType(T...){
+	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }() };
+	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType;
+	else alias void CommonType;
+}
+
+pragma(msg, CommonType!()," ",CommonType!(int,double,real));
+
+
 
 int[] bigInt(string s){ // TODO: in contracts
 	int[] r;
@@ -206,7 +215,7 @@ static assert(indexOf("abc",'d')==-1LU);
 size_t balancedIndexOf(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, V v){
 	template bal(string s){ size_t bal = 0; }
 	for(size_t i=0;i<c.length;i++){
-		if(!bal!"("&&!bal!"["&&!bal!"{"&&a(c[i],v)) return i;
+		if(!bal!"'"&&!bal!"\""&&!bal!"("&&!bal!"["&&!bal!"{"&&a(c[i],v)) return i;
 
 		if(c[i]=='"') bal!"\""=!bal!"\"";
 		else if(c[i]=='\'') bal!"'"=!bal!"'";
@@ -321,7 +330,7 @@ template compr(string c){
 				}());
 				
 			}(@(join(exprs,',')))
-		}~")");
+		});
 	}
 	enum compr = mixin(computeCompr())(x=>x);
 }
@@ -541,7 +550,7 @@ static assert((()=>InterpretImmutableField.y==22)());
 +/
 
 mixin(`auto foo1="1.0f";`);
-mixin(`float a11=`~foo1~";");
+mixin(`float a11=`~foo1~";"); // error
 
 enum short[] x = rngg();
 int[] rngg(){return [1,2,3,];}
@@ -766,6 +775,18 @@ int casts(){
 }
 pragma(msg, casts());
 
+int threetimes(){
+	auto twiceinterprt()(){
+		int x=3;
+		int foo()(bool b){ return b?x:2;}
+		// pragma(msg, foo(false));
+		static assert(foo(false)==2);
+		return &foo!();
+	}
+	static assert(twiceinterprt()(true)==3);
+	return twiceinterprt()(true)+twiceinterprt()(false);
+}
+static assert(threetimes() == 5);
 
 
 int twiceinterpret(){
@@ -959,7 +980,7 @@ pragma(msg, testfuncall());
 
 
 char invass(char a, char b){
-	return a~=b;
+	return a~=b; // error
 }
 pragma(msg, invass(1,2));
 

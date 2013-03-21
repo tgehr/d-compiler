@@ -784,8 +784,8 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 
 mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 	override void semantic(Scope sc){
-		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
 		mixin(SemChld!q{lit});
+		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
 		auto ty=lit[0].type;
 		foreach(i,x;lit[1..$]){
 			if(!x.implicitlyConvertsTo(ty)){
@@ -1144,7 +1144,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 				rng[0] = l.getLongRange();
 				rng[1] = r.getLongRange();
 			}
-			if(!rng[0].overlaps(LongRange(0,length-1,false))
+			if(!rng[0].overlaps(LongRange(0,length,false))
 			|| !rng[1].overlaps(LongRange(0,length,false))){
 				mixin(ConstFold!q{l}); mixin(ConstFold!q{r});
 				sc.error(format("slice indices [%s..%s] are out of bounds [0%s..%d%s]",l.toString(),r.toString(),Size_t.suffix,length,Size_t.suffix),l.loc.to(r.loc));
@@ -1443,7 +1443,6 @@ class MatcherTy: Type{
 
 class TemplateInstanceDecl: Declaration{
 	TemplateDecl parent;    // template this instance was instantiated from
-	Symbol firstRef = null;
 
 	Expression[] args;      // arguments as given by the instantiation site
 	Expression[] resolved;  // arguments as given to the template body
@@ -1455,7 +1454,7 @@ class TemplateInstanceDecl: Declaration{
 
 	TemplateScope paramScope;
 
-	final @property bool completedMatching(){ return matchState==MatchState.completed; }
+	final @property bool completedMatching(){ return matchState>=MatchState.completed; }
 	final @property bool completedParameterResolution(){
 		return matchState > MatchState.resolvedSemantic;
 	}
@@ -1473,6 +1472,7 @@ class TemplateInstanceDecl: Declaration{
 			checkConstraint,    // check the constraint
 			checkingConstraint, // checking in progress
 			completed,          // matching succeeded
+			analysis,           // analyzing template body
 		}
 
 		MatchState matchState = MatchState.start;
@@ -1776,6 +1776,7 @@ class TemplateInstanceDecl: Declaration{
 		auto params = parent.params;
 
 		foreach(i, p; params){
+			if(!resolved[i]) continue;
 			if(p.which!=WhichTemplateParameter.constant) continue;
 			if(resolved[i].type.equals(p.type)) continue;
 			match = min(match, resolved[i].type.constConvertsTo(p.type) ?
@@ -1797,7 +1798,7 @@ class TemplateInstanceDecl: Declaration{
 
 	final bool finishedInstantiation(){ return bdy !is parent.bdy; }
 
-	void finishInstantiation()in{
+	void finishInstantiation(bool startAnalysis)in{
 		assert(sstate != SemState.error);
 		assert(!finishedInstantiation());
 		assert(parent.sstate == SemState.completed);
@@ -1814,7 +1815,14 @@ class TemplateInstanceDecl: Declaration{
 		auto decl=instanceScope.getDeclaration();
 		if(decl) decl.nestedTemplateInstantiation(this); // TODO: correct?
 		sstate = SemState.begin;
+		if(startAnalysis) this.startAnalysis();
+		else Scheduler().remove(this);
+	}
 
+	void startAnalysis()in{
+		assert(finishedInstantiation);
+	}body{
+		matchState = MatchState.analysis;
 		if(!isGagged) Scheduler().add(this, scope_);
 	}
 
@@ -1843,70 +1851,69 @@ class TemplateInstanceDecl: Declaration{
 	override void semantic(Scope sc_){
 		if(sstate == SemState.error) return; // TODO: why needed?
 		// assert(sstate != SemState.error); // would like to have this
-		if(!completedMatching){
-			alias scope_ sc;
-			needRetry=false;
-			Ldecide:final switch(matchState) with(MatchState){
-				case start, iftiStart:
-					if(!startMatching())
-						mixin(ErrEplg);
-					if(matchState == start){
-						matchState = resolvedSemantic; goto case resolvedSemantic;
-					}else { matchState = iftiPrepare; goto case iftiPrepare; }
-
-				case iftiPrepare, iftiMatching:
-					matchIFTI();
-					mixin(SemCheck);
-					matchState = iftiResolvedSemantic;
-					iftiAgain = false;
-					goto case iftiResolvedSemantic;
-
-				case resolvedSemantic, iftiResolvedSemantic:
-					iftiAgain |=
-						resolveDefault(matchState==iftiResolvedSemantic?iftiScope:scope_);
-					mixin(SemCheck);
-					assert(!needRetry);
-					if(matchState == resolvedSemantic || !iftiAgain){
-					   matchState = checkMatch;
-					   goto case checkMatch;
-					}else{
-					   matchState = iftiPrepare;
-					   goto case iftiPrepare;
-					}
-
-				case checkMatch:
-					if(!checkResolvedValidity()||!finishMatching())
-						mixin(ErrEplg);
-
-					matchState = checkConstraint;
-					// TODO: could maybe re-use orphaned instance
-					auto r = parent.completeMatching(this, isGagged);
-					if(r !is this) mixin(RewEplg!q{r});
-
-					goto case checkConstraint;
-				case checkConstraint:
-					if(constraint){
-						analyzeConstraint();
-						mixin(SemCheck);
-						if(!constraint.interpretV()){
-							// TODO: show exact failing clause
-							if(sc) sc.error("template constraint failed", loc);
-							mixin(ErrEplg);
-						}
-					}
-
-					matchState = completed;
-
-					// give the instance exp a chance to finish the instantiation process
-					Scheduler().remove(this);
-
-					break;
-				case checkingConstraint:
-					if(sc) sc.error("recursive template expansion in template constraint", constraint.loc);
+		alias scope_ sc;
+		needRetry=false;
+		Ldecide:final switch(matchState) with(MatchState){
+			case start, iftiStart:
+				if(!startMatching())
 					mixin(ErrEplg);
-				case completed: assert(0);
-			}
-		}else if(finishedInstantiation) instanceSemantic(sc_);
+				if(matchState == start){
+					matchState = resolvedSemantic; goto case resolvedSemantic;
+				}else { matchState = iftiPrepare; goto case iftiPrepare; }
+				
+			case iftiPrepare, iftiMatching:
+				matchIFTI();
+				mixin(SemCheck);
+				matchState = iftiResolvedSemantic;
+				iftiAgain = false;
+				goto case iftiResolvedSemantic;
+				
+			case resolvedSemantic, iftiResolvedSemantic:
+				iftiAgain |=
+					resolveDefault(matchState==iftiResolvedSemantic?iftiScope:scope_);
+				mixin(SemCheck);
+				assert(!needRetry);
+				if(matchState == resolvedSemantic || !iftiAgain){
+					matchState = checkMatch;
+					goto case checkMatch;
+				}else{
+					matchState = iftiPrepare;
+					goto case iftiPrepare;
+				}
+
+			case checkMatch:
+				if(!checkResolvedValidity()||!finishMatching())
+					mixin(ErrEplg);
+				
+				matchState = checkConstraint;
+
+				auto r = parent.completeMatching(this, isGagged);
+				if(r !is this) mixin(RewEplg!q{r});
+				
+				goto case checkConstraint;
+			case checkConstraint:
+				if(constraint){
+					analyzeConstraint();
+					mixin(SemCheck);
+					if(!constraint.interpretV()){
+						// TODO: show exact failing clause
+						if(sc) sc.error("template constraint failed", loc);
+						mixin(ErrEplg);
+					}
+				}
+				
+				matchState = completed;
+				goto case completed;
+			case checkingConstraint:
+				if(sc) sc.error("recursive template expansion in template constraint", constraint.loc);
+				mixin(ErrEplg);
+				// give the instance exp a chance to finish the instantiation process
+				case completed: Scheduler().remove(this); break;
+				case analysis:
+					assert(finishedInstantiation);
+					instanceSemantic(sc_);
+					break;
+		}
 	}
 
 	private void instanceSemantic(Scope sc_)in{
@@ -1947,14 +1954,13 @@ class TemplateInstanceDecl: Declaration{
 
 	private void analyzeConstraint(){
 		alias constraintScope sc;
-		if(constraint.sstate == SemState.error ||
-		   constraint.sstate == SemState.completed && constraint.isConstant())
+		mixin(PropErr!q{constraint});
+		if(constraint.sstate == SemState.completed && constraint.isConstant())
 			return;
-
 
 		initializeConstraintScope();
 
-		foreach(x; eponymousFunctionParameters){
+		foreach(ref x; eponymousFunctionParameters){
 			mixin(SemChldPar!q{x});
 			if(x.sstate == SemState.error)
 				mixin(SetErr!q{constraint});
@@ -1965,6 +1971,7 @@ class TemplateInstanceDecl: Declaration{
 		scope(exit) matchState = MatchState.checkConstraint;
 
 		constraint.prepareInterpret();
+		constraint.prepareLazyConditionalSemantic();
 		mixin(SemChldExp!q{constraint});
 		mixin(ConvertTo!q{constraint,Type.get!bool()});
 		mixin(IntChld!q{constraint});
@@ -2461,7 +2468,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 private:
 	struct TemplateInstanceStore{
-/+		TemplateInstanceDecl[] instances; // TODO!!: replace with O(#args) lookup!
+/+		TemplateInstanceDecl[] instances; // this was the linear lookup
 		
 		/+
 		static double count = 0;
@@ -2498,11 +2505,8 @@ private:
 			foreach(i;0..a.length) if(!a[i].templateParameterEquals(b[i])) return false;
 			return true;
 		} // equality check
-		static size_t h0(Expression[] a){ return FNVred(a); }      // hash 1
-		static size_t h1(Expression[] b){ return ~FNVred(b); }     // hash 2
+		static size_t h0(Expression[] a){ return FNVred(a); }      // hash
 
-		//private alias Seq!(eq,h0,h1) args;
-		//private CuckooMap!(Expression[],TemplateInstanceDecl, args) instances;
 		private HashMap!(Expression[],TemplateInstanceDecl, eq, h0) instances;
 
 
@@ -2642,7 +2646,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		mixin(PropErr!q{args});
 		// ! changing meaning of 'sym'
 		auto acheck = sym.accessCheck;
-		if(!inst.finishedInstantiation()) inst.finishInstantiation();
+		if(!inst.finishedInstantiation()) inst.finishInstantiation(true); // start analysis
 		if(sc.handler.showsEffect&&inst.isGagged) inst.ungag();
 		sym = New!Symbol(inst);
 		sym.loc = loc;
@@ -3348,7 +3352,7 @@ class Symbol: Expression{ // semantic node
 
 	auto accessCheck = AccessCheck.all;
 	this(Declaration m, bool strong=false, bool isfunlit=false)in{
-		assert(m&&1);
+		assert(!!m);
 	}body{
 		meaning = m;
 		isStrong = strong;
@@ -3688,6 +3692,7 @@ class Symbol: Expression{ // semantic node
 
 
 	override Expression matchCallHelper(Scope sc, const ref Location loc, Expression[] args, ref MatchContext context){
+		assert(!!meaning);
 		if(auto m = meaning.matchCall(sc, loc, args, context)){
 			// resolve the overload in place and then rely on
 			// semantic to catch eventual circular dependencies:
@@ -5576,6 +5581,7 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	}
 
 	override void typeMatch(Type from){
+		assert(!!from);
 		static if(is(T==ConstTy)){
 			if(auto imm = from.isImmutableTy()) from=imm.ty;
 			else if(auto ccc = from.isConstTy()) from=ccc.ty;
@@ -5829,8 +5835,10 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 	}
 
 	override void typeMatch(Type from){
-		if(auto tt = mixin(`from.getHeadUnqual().is`~T.stringof)())
-			mixin(`ty.typeMatch(tt.ty);`);
+		Type tt = from.getHeadUnqual().isPointerTy();
+		// TODO: match static array dimension
+		if(!tt) tt = from.getElementType();
+		if(tt) ty.typeMatch(tt);
 	}
 	override bool hasPseudoTypes(){
 		return ty.hasPseudoTypes();
@@ -6840,8 +6848,6 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 		foreach(ref x; decls){
 			x.pickupSTC(stc);
 			x.presemantic(sc);
-
-			Scheduler().add(x, sc);
 		}
 		sstate = SemState.begin;
 	}
@@ -6858,9 +6864,18 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
+		if(!addedToScheduler){
+			foreach(x; decls)
+				Scheduler().add(x, sc);
+			addedToScheduler = true;
+		}
+
 		mixin(SemChld!q{decls});
 		mixin(SemEplg);
 	}
+
+private:
+	bool addedToScheduler = false;
 }
 mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	public override void findParents(){
@@ -7120,7 +7135,7 @@ class OverloadSet: Declaration{ // purely semantic node
 	private FunctionDecl cand; // TODO: somewhat fragile, maybe better to just recompute
 	private FunctionDecl altCand;
 	final override void matchError(Scope sc, Location loc, Expression[] args){
-		if(decls.length == 1) return decls[0].matchError(sc,loc,args);
+		if(count == 1) return (decls.length?decls[0]:tdecls[0]).matchError(sc,loc,args);
 		if(altCand is null){
 			sc.error(format("no matching function for call to '%s(%s)'",name,join(map!"a.type.toString()"(args),",")), loc);
 			foreach(decl; decls){
@@ -7206,11 +7221,12 @@ class TemplateOverloadMatcher: SymbolMatcher{
 	}
 	override void semantic(Scope sc_){
 		{alias sc_ sc;mixin(SemPrlg);}
-		foreach(x; insts){
+		foreach(ref x; insts){
 			if(!x) continue;
 			{Scope sc=null;mixin(SemChldPar!q{x});}
-			assert(cast(TemplateInstanceDecl)x);
+			assert(!!cast(TemplateInstanceDecl)x);
 			if(x.sstate == SemState.error) x = null;
+			assert(!x||(cast(TemplateInstanceDecl)x).completedMatching);
 		}
 		OverloadSet.eliminateLessSpecializedTemplateInstances(cast(TemplateInstanceDecl[])insts);
 		size_t c = 0;
@@ -7308,6 +7324,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		assert(iftis.length == set.tdecls.length);
 		foreach(i, ref x; iftis){
 			if(!x) continue;
+			if(eponymous.length && eponymous[i]) continue;
 
 			if(!x.isTemplateInstanceDecl()
 			|| !(cast(TemplateInstanceDecl)cast(void*)x).completedMatching){
@@ -7319,19 +7336,17 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			assert(!!cast(TemplateInstanceDecl)x);
 			auto inst = cast(TemplateInstanceDecl)cast(void*)x;
 			assert(!!inst.completedMatching);
-			if(!inst.finishedInstantiation()){
-				inst.finishInstantiation();
-				Scheduler().remove(inst);
-			}
+			if(!inst.finishedInstantiation()) inst.finishInstantiation(false);
 
 			auto fd = inst.iftiDecl();
 			if(!fd){
-				if(!matchATemplate) continue;
+				// if(!matchATemplate) continue; // TODO: do we want this?
 				if(inst.sstate != SemState.completed && inst.sstate != SemState.started){
 					if(inst.isGagged()) inst.ungag();
+					inst.startAnalysis();
 					x.semantic(sc_);
 				}
-				mixin(SemProp!q{sc=sc_;x});
+				mixin(SemProp!q{sc=sc_;x}); // TODO: show where the problem happened
 				fd = inst.iftiDecl();
 				if(!fd){
 					// TODO: gc allocation
@@ -7350,7 +7365,8 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		// resolve the eponymous declarations that are not determined by IFTI.
 		foreach(ref x; eponymous) if(x){
 				x.semantic(gscope);
-				mixin(PropRetry!q{sc=sc_;x});
+				// mixin(PropRetry!q{sc=gscope;x});
+				mixin(SemProp!q{sc=gscope;x});
 				auto sym = x.isSymbol();
 				if(!sym || !sym.meaning.isFunctionDecl()){
 					x=x.matchCall(null, loc, args);
@@ -7375,17 +7391,22 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		auto r=set.determineMostSpecialized(matches, context);
 
 		TemplateInstanceDecl inst;
+
 		if(tcontext.match>context.match && t){
 			r=t;
 			context = tcontext;
 			inst = r.extractTemplateInstance();
-			if(sc_&&sc_.handler.showsEffect&&inst.isGagged) inst.ungag(); // too late?
+			if(sc_&&sc_.handler.showsEffect&&inst.isGagged){
+				inst.ungag();
+				inst.startAnalysis();
+			}
 
 			if(matchATemplate){mixin(RewEplg!q{inst});}
 		}
 		// TODO: could re-use the function literal arguments of the most specialized function
 		if(!r){
-			if(!set.cand && !set.altCand) set.cand = cand, set.altCand = altCand;
+			if(!set.cand && !set.altCand || tcontext.match>context.match)
+				set.cand = cand, set.altCand = altCand;
 			// TODO: more adequate error message in the matchATemplate case
 			if(sc_) set.matchError(sc_, loc, args);
 			mixin(ErrEplg);
@@ -7432,7 +7453,7 @@ private:
 
 			if(!fd){
 				if(eponymous.length<=i || !eponymous[i]) continue;
-				assert(cast(Symbol)eponymous[i]);
+				assert(eponymous[i].sstate == SemState.completed && cast(Symbol)eponymous[i]);
 				auto sym = (cast(Symbol)cast(void*)eponymous[i]);
 				fd = sym.meaning.isFunctionDecl();
 			}else{

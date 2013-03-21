@@ -621,7 +621,7 @@ struct Variant{
 		       || id.occupies == Occupies.wstr || id.occupies == Occupies.dstr);
 	}body{
 		if(id.occupies == Occupies.arr){
-			assert(l.int64<arr.length && r.int64<=arr.length);
+			assert(l.int64<=arr.length && r.int64<=arr.length);
 			assert(l.int64<=r.int64);
 			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64]); // aliasing ok?
 		}else switch(id.occupies){
