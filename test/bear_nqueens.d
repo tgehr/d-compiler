@@ -66,10 +66,11 @@ template Solve(int niv, int dx, alias state=State!()) {
 template MetaNQueens(int dx) {
 	enum ulong MetaNQueens = Solve!(dx - 1, dx).solution;
 }
-static assert(MetaNQueens!(1)==1);
-static assert(MetaNQueens!(2)==0);
-static assert(MetaNQueens!(3)==0);
-//static assert(MetaNQueens!(4)==2);
-//static assert(MetaNQueens!(5)==10);
 
-//pragma(msg, MetaNQueens!(5));
+
+static assert(MetaNQueens!(1)==1);pragma(msg,"1:", MetaNQueens!1);
+static assert(MetaNQueens!(2)==0);pragma(msg,"2:", MetaNQueens!2);
+static assert(MetaNQueens!(3)==0);pragma(msg,"3:", MetaNQueens!3);
+static assert(MetaNQueens!(4)==2);pragma(msg,"4:", MetaNQueens!4);
+//static assert(MetaNQueens!(5)==10);pragma(msg,"5:", MetaNQueens!5);
+

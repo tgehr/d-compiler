@@ -16,11 +16,11 @@ static assert(testcontextded()==8);
 
 void testinex(){
 	void foo(int delegate(int) dg){}
-	foo(x=>y);
+	foo(x=>y); // 'y' is undefined
 }
 
 
-pragma(msg, (int x, int y){}());
+pragma(msg, (int x, int y){}()); // wrong number of parameters
 
 
 auto testdederr()=>(x,y,z,w)=>{return y;}(2,"hello",4,5)(); // deduction failure
@@ -112,7 +112,7 @@ void validconversions(){
 struct S{
 	int a;
 	int foo(){return 2;}
-	pragma(msg, (()=>foo())());
+	pragma(msg, (()=>foo())()); // 'this' is missing
 	mixin({
 		auto s="enum a0=0;";
 		for(int i=1;i<100;i++)
@@ -129,7 +129,7 @@ void testfunctiondeduction(){
 
 void main(){
 	int sjisjis;
-	static pure void main()@safe nothrow pure{sjisjis=2;}
+	static pure void main()@safe nothrow pure{sjisjis=2;} // context not accessible
 	auto x = &main;
 	static assert(is(typeof(&main)==void function()pure nothrow @safe));
 	static assert(!is(typeof(&x): void function()*));

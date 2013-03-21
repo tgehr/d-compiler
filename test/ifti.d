@@ -1,3 +1,21 @@
+
+template MAlias(A,B){ alias A delegate(B) MAlias; }
+
+auto malias(A,B)(MAlias!(A,B) dg, B arg){ return dg(arg); }
+pragma(msg, malias((int x)=>x,3));
+
+
+auto combine(T)(T a, T b, T c){return [a,b,c];}
+
+pragma(msg, "combine: ", combine([],[],[1,2,3]));
+pragma(msg, "typeof(combine): ",typeof(combine([],[],[1,2,3])));
+
+
+auto nomatch(T,S,R)(T t, S s, R r){ return t; }
+pragma(msg, nomatch!int(1.0,2,"3")); // error
+
+
+
 template tmpl(T){
 	static if(is(T==double)){
 		T[] tmpl(T arg){return [arg, 2*arg];}
@@ -7,14 +25,6 @@ template tmpl(T){
 	//alias int T;
 }
 pragma(msg, tmpl!int(2),"\n",tmpl!float(2),"\n",tmpl!double(2),"\n",tmpl!real(22));
-
-
-auto combine(T)(T a, T b, T c){return [a,b,c];}
-
-pragma(msg, typeof(combine([],[],[1,2,3])));
-
-auto nomatch(T,S,R)(T t, S s, R r){ return t; }
-pragma(msg, nomatch!(int)(1.0,2,"3")); // error
 
 auto potentiallyambiguous3(R,A...)(R delegate(A) a, R delegate(A) b){}
 pragma(msg, potentiallyambiguous3!()(y=>2.0*y, (long z)=>z/2)); // error (TODO: should it work?)

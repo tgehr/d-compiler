@@ -1,3 +1,7 @@
+struct S{
+	immutable int x=TT!().SS!().TT;
+	template TT(){ template SS(){ alias x TT; } }
+}
 
 alias immutable(char)[] string;
 

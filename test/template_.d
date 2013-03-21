@@ -260,7 +260,6 @@ template test(){
 }
 void instantiatetest(){test!();}
 
-
 // TODO: currently, recursive templates have high algorithmic complexity
 // TODO: FIX!
 
@@ -268,7 +267,6 @@ template factorial(int n){
 	static if(n<=1) enum factorial = 1.0L;
 	else enum factorial = n*factorial!(n-1);
 }
-
 
 auto gen(){
 	immutable(char)[] r;
@@ -281,6 +279,7 @@ auto gen(){
 //mixin(gen());
 
 pragma(msg, factorial!100);
+
 
 template recu1(int n){
 	static if(n<=1) int V(){return 1;}
@@ -349,7 +348,6 @@ class D{
 		}
 	}
 }
-
 
 
 void main(){
@@ -422,6 +420,8 @@ static assert(!is(typeof(ttt!"-")));
 template tt2(long a : 2){enum tt2=a;}
 pragma(msg, tt2!(2));
 static assert(!is(typeof(tt2!(1))));
++/
+
 
 
 /+struct S{
@@ -436,7 +436,7 @@ auto test(){
 	pragma(msg, foo!bar2());
 	return foo!bar();
 }
-pragma(msg, test());+/
+pragma(msg, test());
 
 
 auto foo(alias a)(){
@@ -450,7 +450,6 @@ auto test2(){
 	return foo!bar();
 }
 pragma(msg, test2());
-
 
 
 auto test3(){
@@ -502,7 +501,7 @@ struct S{
 	pragma(msg, foo(2));
 }
 
-/+
+
 
 
 /+

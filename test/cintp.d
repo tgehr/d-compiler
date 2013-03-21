@@ -1,4 +1,68 @@
 
+auto memoizer(T,S)(T[] memo, T delegate(T delegate(S), S) formula){
+	bool[] e;
+	e.length = memo.length;
+	for(int i=0;i<e.length;i++) e[i]=true;
+
+	T recur(S arg){
+		while(memo.length<=arg) memo.length*=2;
+		e.length = memo.length;
+		if(!e[arg]){
+			memo[arg] = formula(&recur, arg);
+			e[arg] = true;
+		}
+		return memo[arg];
+	}
+	return &recur;
+}
+
+auto memfactorial(int n) => memoizer([1, 1L], (recur, int n) => n*recur(n-1))(n);
+auto memfibonacci(int n) => memoizer([0, 1 ], (recur, int n) => recur(n-2)+recur(n-1))(n);
+pragma(msg, "memfactorial: ", map!memfactorial(iota(0,19)));
+pragma(msg, "memfibonacci: ", map!memfibonacci(iota(0,29)));
+
+// Haskell-Like CPS //
+
+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+
+auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
+auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
+	return (R delegate(B) k)=>me(r=>f(r)(k));
+}
+
+auto callCC(B,R,A,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
+	return (R delegate(A) k)=>f(a=>_=>k(a), args)(k);
+}
+
+auto testcallCC(){
+	auto f(Cont!(int,int) delegate(int) cont, int x){
+		return cat(x<3?cont(x):ret!int(1),a=>cont(x+a));
+	}
+	assert(callCC(&f,1)(x=>x)==1);
+	assert(callCC(&f,3)(x=>x)==4);
+	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
+	//pragma(msg, typeof(&f));
+}
+static assert(testcallCC()==5);
+pragma(msg, "testcallCC: ", testcallCC());
+
+auto testcps(){
+	return
+		cat(ret!int(1), a =>
+		cat(ret!int(2), b =>
+		cat(ret!int(3), c =>
+		ret!int(a+b+c))))
+		(x=>x);
+}
+
+static assert(testcps()==6);
+pragma(msg, "testcps: ", testcps());
+
+
+/////////
+
+
+
 
 /+
 // TODO: do we want deterministic slice aliasing in CTFE?
@@ -23,6 +87,7 @@ auto testsetlength(){
 	x.length=y.length=4;
 	(x.length+=1)++;
 	assert(x.length==6);
+	assert(x[5]==0);
 	x.length=4;
 	assert(x.length==4);
 	return x~y;
@@ -100,16 +165,9 @@ auto testlambda(){
 pragma(msg, "testlambda: ",testlambda());
 
 
-auto map(alias a,T)(T[] arg) {//if(is(typeof(a(arg[0]))[])){
-	typeof(a(arg[0]))[] r;
-	for(int i=0;i<arg.length;i++)
-		r~=a(arg[i]);
-	return r;
-}
 pragma(msg, typeof(map!(toString,int)));
 
 
-int[] iota(int a, int b){ int[] r; for(int i=a;i<b;i++) r~=i; return r; }
 
 bool pred(string s){
 	int c=0;
@@ -1124,4 +1182,12 @@ auto toString(int i){
 	immutable(char)[] s;
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
+}
+T[] iota(T)(T a, T b){ T[] r; for(T i=a;i<b;i++) r~=i; return r; }
+
+auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0]))[])){
+	typeof(a(arg[0]))[] r;
+	for(int i=0;i<arg.length;i++)
+		r~=a(arg[i]);
+	return r;
 }

@@ -1,13 +1,25 @@
+template Alias(T){ alias T Alias; }
+
+template TypeTuple(T...){ alias T TypeTuple; }
 
 alias TypeTuple Seq;
 
+auto seqparm(A,B,C...)(Seq!(A,B,C) args){
+	return args[0]+args[1]+args[2]+args[$-1];
+}
+static assert(seqparm(1,2,3.0,4,5)==11.0);
+pragma(msg, "seqparm: ",seqparm(1,2,3.0,4,5));
+
 auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
-//auto seqtak(){auto x = seqret(1,2); return x[0];}
-//pragma(msg, seqtak());
-//pragma(msg, seqret(1,2));
 
 
 /+ // TODO: make work
+
+auto seqtak(){auto x = seqret(1,2); return x[0];}
+pragma(msg, seqtak());
+pragma(msg, seqret(1,2));
+
+
 struct Tpl{
 	TypeTuple!(int, double) foo;
 	int a,b;
@@ -22,10 +34,7 @@ void checkTpl(){
 	t.foo[0]=2;
 }+/
 
-template Alias(T){ alias T Alias; }
-
-template TypeTuple(T...){ alias T TypeTuple; }
-// template TypeTuple(T...){ alias T TypeTuple; } // TODO!
+// template TypeTuple(T...){ alias T TypeTuple; } // TODO: ambiguity error
 
 
 pragma(msg, TypeTuple!(1,2,3,4)[1..3]);

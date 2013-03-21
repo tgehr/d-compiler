@@ -1,6 +1,8 @@
 
 static assert(!is(int[2]: int[1]),"TODO"); // TODO!
 
+static assert(is(typeof([1,1L])==long[]));
+
 //byte b = 0b11110000; // TODO: find a case to prove inconsistency of DMD
 
 enum x = 2i*1;
@@ -27,3 +29,5 @@ int[][] a = [[]];
 immutable int[][] b = [[]];
 
 pragma(msg, typeof(a~b));
+
+// +/
