@@ -399,7 +399,7 @@ struct Lexer{
 					res[0].type = Tok!"''";
 					if(*p=='\\'){
 						try p++, res[0].int64 = cast(ulong)readEscapeSeq(p);
-						catch(EscapeSeqException e) e.msg?errors~=tokError(e.msg,e.loc):invCharSeq();
+						catch(EscapeSeqException e) if(e.msg) errors~=tokError(e.msg,e.loc); else invCharSeq();
 					}else{
 						try{
 							len=0;
@@ -623,7 +623,7 @@ struct Lexer{
 							case '\\':
 								p++;
 								try r.put(readEscapeSeq(p));
-								catch(EscapeSeqException e) e.msg?errors~=tokError(e.msg,e.loc):invCharSeq();
+								catch(EscapeSeqException e) if(e.msg) errors~=tokError(e.msg,e.loc); else invCharSeq();
 								continue;
 							case '"': p++; break readdqstring;
 							default: mixin(skipUnicode);

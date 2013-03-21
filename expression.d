@@ -1,7 +1,7 @@
 import std.array, std.algorithm, std.range, std.conv;
 
 import lexer, parser, declaration, statement, type;
-import scope_;
+import scope_, semantic;
 
 
 enum SemState{
@@ -15,7 +15,7 @@ enum SemState{
 abstract class Node{
 	Location loc;
 	SemState sstate = SemState.begin;
-	Node semantic(Scope s)in{assert(sstate>=SemState.begin);}body{ s.error("unimplemented feature",loc); return this;}
+	Node semantic(Scope s)in{assert(sstate>=SemState.begin);}body{ s.error("unimplemented feature",loc); sstate = SemState.completed; return this;}
 }
 
 class Expression: Node{ // empty expression if instanced
@@ -96,24 +96,13 @@ class ArrayLiteralExp: Expression{
 
 class FunctionLiteralExp: Expression{
 	FunctionType type;
-	CompoundStm bdy;
+	BlockStm bdy;
 	bool isStatic;
-	this(FunctionType ft, CompoundStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
+	this(FunctionType ft, BlockStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
 	override string toString(){return _brk((isStatic?"function"~(type&&type.ret?" ":""):type&&type.ret?"delegate ":"")~(type?type.toString():"")~bdy.toString());}
 }
 
-class Symbol: Expression{ // semantic node
-	Declaration meaning;
-	this(Declaration meaning){
-		this.meaning = meaning;
-	}
-	override Symbol semantic(Scope sc){
-		sstate = meaning.sstate;
-		return this;
-	}
-}
-
-class Identifier: Expression{
+class Identifier: Symbol{
 	string name;
 	alias name this;
 	this(string name){ // TODO: make more efficient, this is a bottleneck!
@@ -123,13 +112,9 @@ class Identifier: Expression{
 		else this.name = uniq[name] = name;
 	}
 	override string toString(){return _brk(name);}
-	override Expression semantic(Scope sc){
-		assert(sstate == SemState.begin, "identifier in advanced semantic state"); // Identifiers never outlive the first semantic state
-		auto meaning=sc.lookup(this);
-		meaning.loc=loc;
-		auto sym=New!Symbol(meaning);
-		sym.loc=loc;
-		return sym.semantic(sc);
+	override Symbol semantic(Scope sc){
+		meaning=sc.lookup(this);
+		return super.semantic(sc);
 	}
 }
 

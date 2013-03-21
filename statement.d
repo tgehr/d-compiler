@@ -1,8 +1,7 @@
 
 import std.array, std.algorithm, std.range, std.conv;
 
-import lexer, parser, expression, scope_, util;
-
+import lexer, parser, expression, scope_, semantic, util;
 
 class Statement: Node{ // empty statement if instanced
 	override string toString(){return ";";}
@@ -13,21 +12,11 @@ class ErrorStm: Statement{
 	override string toString(){return "__error;";}
 }
 
-class CompoundStm: Statement{
+class BlockStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
-
-	CompoundStm semantic(Scope sc){
-		if(sstate == SemState.completed) return this;
-		auto newstate = SemState.completed;
-		foreach(ref x;s){
-			x=x.semantic(sc);
-			newstate = min(newstate, x.sstate);
-		}
-		sstate = newstate;
-		return this;
-	}
+	mixin Semantic!(typeof(this));
 }
 
 class LabeledStm: Statement{
@@ -54,7 +43,7 @@ class ExpressionStm: Statement{
 class IfStm: Statement{
 	Expression e; Statement s1,s2;
 	this(Expression cond, Statement left, Statement right){e=cond, s1=left, s2=right;}
-	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(CompoundStm)s1?"":"\n")~"else "~s2.toString:"");}
+	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(BlockStm)s1?"":"\n")~"else "~s2.toString:"");}
 }
 class WhileStm: Statement{
 	Expression e; Statement s;
@@ -71,6 +60,8 @@ class ForStm: Statement{
 	Statement s2;
 	this(Statement init, Expression cond, Expression next, Statement statement){s1=init; e1=cond; e2=next; s2=statement;}
 	override string toString(){return "for("~s1.toString()~(e1?e1.toString():"")~";"~(e2?e2.toString:"")~") "~s2.toString();}
+
+	mixin Semantic!(typeof(this));
 }
 class ForeachStm: Statement{
 	Parameter[] vars;

@@ -67,7 +67,7 @@ class VersionDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e)in{assert(c!is null);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"version("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class DebugSpecDecl: Declaration{
 	Expression spec;
@@ -78,13 +78,13 @@ class DebugDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e){cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"debug"~(cond?"("~cond.toString()~") ":"")~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticIfDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b,Statement e)in{assert(c&&b);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"static if("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticAssertDecl: Declaration{
 	Expression[] a;
@@ -107,7 +107,7 @@ class TypedefDecl: Declaration{
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"typedef "~decl.toString();}
 }
-class CompoundDecl: Declaration{
+class BlockDecl: Declaration{
 	Declaration[] decls;
 	this(STC s,Declaration[] declarations){stc=s; decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(stc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
@@ -136,8 +136,8 @@ class TemplateDecl: Declaration{
 	bool ismixin;
 	TemplateParameter[] params;
 	Expression constraint;
-	CompoundDecl bdy;
-	this(bool m,STC stc,Identifier name, TemplateParameter[] prm, Expression c, CompoundDecl b){
+	BlockDecl bdy;
+	this(bool m,STC stc,Identifier name, TemplateParameter[] prm, Expression c, BlockDecl b){
 		ismixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
 	}
 	override string toString(){
@@ -153,15 +153,15 @@ class TemplateMixinDecl: Declaration{
 }
 
 abstract class AggregateDecl: Declaration{
-	CompoundDecl bdy;
-	this(STC stc, Identifier name, CompoundDecl b){bdy=b; super(stc,name);}
+	BlockDecl bdy;
+	this(STC stc, Identifier name, BlockDecl b){bdy=b; super(stc,name);}
 }
 class StructDecl: AggregateDecl{
-	this(STC stc,Identifier name, CompoundDecl b){super(stc,name,b);}
+	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"struct"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 }
 class UnionDecl: AggregateDecl{
-	this(STC stc,Identifier name, CompoundDecl b){super(stc,name,b);}
+	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"union"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 }
 struct ParentListEntry{
@@ -171,13 +171,13 @@ struct ParentListEntry{
 }
 class ClassDecl: AggregateDecl{
 	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, CompoundDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"class"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
 }
 class InterfaceDecl: AggregateDecl{
 	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, CompoundDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"interface"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
 }
@@ -251,9 +251,9 @@ class PostblitParameter: Parameter{
 }
 class FunctionDecl: Declaration{
 	FunctionType type;
-	CompoundStm pre,post;
+	BlockStm pre,post;
 	Identifier postres;
-	this(FunctionType type,Identifier name,CompoundStm pr,CompoundStm po,Identifier pres){
+	this(FunctionType type,Identifier name,BlockStm pr,BlockStm po,Identifier pres){
 		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
 	}
 	override string toString(){
@@ -263,8 +263,8 @@ class FunctionDecl: Declaration{
 }
 
 class FunctionDef: FunctionDecl{
-	CompoundStm bdy;
-	this(FunctionType type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody){
+	BlockStm bdy;
+	this(FunctionType type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
 		super(type,name, precondition, postcondition, pres); bdy=fbody;}
 	override string toString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
@@ -273,8 +273,8 @@ class FunctionDef: FunctionDecl{
 }
 
 class UnitTestDecl: Declaration{
-	CompoundStm bdy;
-	this(STC stc,CompoundStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
+	BlockStm bdy;
+	this(STC stc,BlockStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"unittest"~bdy.toString();}
 }
 
@@ -407,9 +407,9 @@ class ArrayLiteralExp: Expression{
 
 class FunctionLiteralExp: Expression{
 	FunctionType type;
-	CompoundStm bdy;
+	BlockStm bdy;
 	bool isStatic;
-	this(FunctionType ft, CompoundStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
+	this(FunctionType ft, BlockStm b, bool s=false){ type=ft; bdy=b; isStatic=s;}
 	override string toString(){return _brk((isStatic?"function"~(type&&type.ret?" ":""):type&&type.ret?"delegate ":"")~(type?type.toString():"")~bdy.toString());}
 }
 // special symbols that can be used like identifiers in some contexts
@@ -593,7 +593,7 @@ class ErrorStm: Statement{
 	override string toString(){return "__error;";}
 }
 
-class CompoundStm: Statement{
+class BlockStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
@@ -625,7 +625,7 @@ class ConditionDeclExp: Expression{
 class IfStm: Statement{
 	Expression e; Statement s1,s2;
 	this(Expression cond, Statement left, Statement right){e=cond, s1=left, s2=right;}
-	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(CompoundStm)s1?"":"\n")~"else "~s2.toString:"");}
+	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(BlockStm)s1?"":"\n")~"else "~s2.toString:"");}
 }
 class WhileStm: Statement{
 	Expression e; Statement s;

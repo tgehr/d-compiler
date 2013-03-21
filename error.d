@@ -17,6 +17,7 @@ abstract class ErrorHandler{
 	void error(string err, Location loc){nerrors++;}   // in{assert(loc.rep);}body
 	void note(string note, Location loc)in{assert(loc.rep);}body{};
 	this(string s, string c){
+		tabsize=getTabSize();
 		_lines=null;
 		source=s;
 		code=c;
@@ -56,7 +57,21 @@ class VerboseErrorHandler: ErrorHandler{
 			foreach(i;0..column-1) stderr.write(" ");
 			stderr.write("^");
 			loc.rep.popFront();
-			foreach(x;loc.rep) stderr.write("~");
+			foreach(x;loc.rep){if(isNewLine(x)) break; stderr.write("~");};
+			stderr.writeln();
+		}
+	}
+	override void note(string err, Location loc){
+		if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
+		auto column=getColumn(loc);
+		stderr.writeln(source,':',loc.line,":",column,": note: ",err);
+		if(loc.rep[0]){
+			stderr.writeln(lines[loc.line-1]);
+			foreach(i;0..column-1) stderr.write(" ");
+			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
+			stderr.write("^");
+			loc.rep.popFront();
+			foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");}
 			stderr.writeln();
 		}
 	}
@@ -84,7 +99,6 @@ class FormattingErrorHandler: VerboseErrorHandler{
 	}
 	override void note(string err, Location loc){
 		if(isATTy(stderr)){
-			nerrors++;
 			if(loc.rep.ptr<lines[loc.line-1].ptr) loc.rep=loc.rep[lines[loc.line-1].ptr-loc.rep.ptr..$];
 			auto column=getColumn(loc);
 			stderr.writeln(BOLD,source,':',loc.line,":",column,": ",BLACK,"note:",RESET,BOLD," ",err,RESET);

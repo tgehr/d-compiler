@@ -2,8 +2,6 @@ import std.array, std.algorithm, std.range, std.conv;
 
 import lexer, parser, util;
 
-alias GCAlloc.New New;
-
 class Type: Expression{ //Types can be part of Expressions and vice-versa
 	override string toString(){return "Type";}
 

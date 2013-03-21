@@ -165,7 +165,7 @@ private template doParseImpl(bool d,T...){
 					return `nonEmpty!"`~what~`"();`"\n"~doParseImpl!(d,T[1..$]);
 				case "OPT":
 				static if(T[0]=="OPT")
-					return (d?"auto ":"")~T[2]~" = ttype==Tok!\""~T[3]~"\" || ttype==Tok!\")\" ? null : "~
+						return (d?"auto ":"")~T[2]~" = "~(T[3]!=")"?"ttype==Tok!\""~T[3]~"\" || ":"")~"ttype==Tok!\")\" ? null : "~
 						getParseProc!(T[1..$]).prc~";\n"~doParseImpl!(d,T[1+getParseProc!T.off..$]);
 				default: return "expect(Tok!\""~T[0]~"\");\n"~doParseImpl!(d,T[1..$]);;
 			}
@@ -183,7 +183,7 @@ private template parseDefOnly(T...){
 		static if(T[0]=="OPT") alias parseDefOnly!(T[1..$]) parseDefOnly;
 		else alias parseDefOnly!(T[1..$]) parseDefOnly;
 	}else static if(is(T[0]==Existing)) alias parseDefOnly!(T[2..$]) parseDefOnly;
-	else enum parseDefOnly="typeof("~getParseProc!T.prc~") "~T[1]~"=null;\n"~parseDefOnly!(T[2..$]);
+	else enum parseDefOnly="typeof("~getParseProc!T.prc~") "~T[1]~"=cast(typeof("~getParseProc!T.prc~"))null;\n"~parseDefOnly!(T[2..$]);
 }
 private template doOptParse(T...){
 	static assert(is(typeof(T[0]):string));
@@ -241,7 +241,8 @@ private template SetLoc(T: Node){
 
 
 alias Lexer Code;
-alias ChunkGCAlloc Alloc;
+private alias ChunkGCAlloc Alloc;
+//private alias GCAlloc Alloc;
 
 private struct Parser{
 	alias Alloc.New New;
@@ -309,16 +310,19 @@ private struct Parser{
 			loc.rep=(loc.rep.ptr+loc.rep.length)[0..utf.stride(loc.rep.ptr[loc.rep.length..loc.rep.length+4],0)];
 		}
 		if(!isClosingToken(ttype) || isClosingToken(type)){
-			auto tt=tok;
-			nextToken();
-			if(ttype!=Tok!"i"&&ttype==type){
-				error("stray '"~tt.toString()~"' in program",tt.loc);
-				nextToken();
+			auto tt=peek().type;
+			if(tt!=Tok!"i"&&tt==type){
+				error("stray '"~tok.toString()~"' in program",tok.loc);
+				nextToken(); nextToken();
 				return;
 			}
 		}
 		if(rd||ttype==Tok!"__error") error("expected '"~TokenTypeToString(type)~"'",loc);
 		else error("found '" ~ tok.toString() ~ "' when expecting '" ~ TokenTypeToString(type) ~"'",loc);
+		if(type!=Tok!";" && type!=Tok!"}"){
+			while(ttype != Tok!";" && ttype != Tok!"}" && ttype != Tok!"EOF") nextToken();
+			if(ttype == Tok!";") nextToken();
+		}
 	}
 	void expectErr(string what)(){
 		if(ttype==Tok!"__error") error("expected "~what,tok.loc);
@@ -454,7 +458,7 @@ private struct Parser{
 	Expression nud() {
 		mixin(SetLoc!Expression);
 		switch(ttype){
-			case Tok!"i",Tok!".": return parseIdentifierList();
+			case Tok!"i",Tok!".": return parseIdentifierList(); // TODO: instance.new Class(...);
 			case Tok!"``", Tok!"``c", Tok!"``w", Tok!"``d": // adjacent string tokens get concatenated
 				Token t=tok;
 				for(nextToken();ttype==t.type||ttype==Tok!"``";nextToken()){
@@ -608,7 +612,7 @@ private struct Parser{
 				return r;
 			}());
 			//pragma(msg,TokenTypeToString(cast(TokenType)61));
-			mixin({string r; // TODO: location
+			mixin({string r;
 				foreach(x;postfixOps)
 					if(x!="(" && x!="[")
 						r~=q{case Tok!}`"`~x~`":`q{nextToken();return res=New!(PostfixExp!(Tok!}`"`~x~`"`q{))(left);};
@@ -672,7 +676,7 @@ private struct Parser{
 		switch(ttype){
 			case Tok!";": mixin(rule!(Statement,"_"));
 		    case Tok!"{":
-				auto r=parseCompoundStm();
+				auto r=parseBlockStm();
 				if(ttype!=Tok!"(") return r;
 				else{
 					auto e=parseExpression2(New!FunctionLiteralExp(cast(FunctionType)null,r));
@@ -778,8 +782,20 @@ private struct Parser{
 				auto catches=appender!(CatchStm[])();
 				do{ // TODO: abstract loop away, as soon as compile memory usage is better
 					Location loc=tok.loc;
-					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
-					auto c=New!CatchStm(type,ident,s); loc=loc.to(ptok.loc);
+					//mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
+					//pragma(msg,doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
+					expect(Tok!"catch");
+					typeof(parseType()) type=null;
+					typeof(parseIdentifier()) ident;//=null; //DMD BUG: if the initializer is specified, DMD generates wrong code that results in segfault
+					if(ttype==Tok!"("){
+						nextToken();
+						type = parseType();
+						ident = ttype==Tok!")" || ttype==Tok!")" ? null : parseIdentifier();
+						expect(Tok!")");
+					}
+					nonEmpty!"statement"();
+					auto s = parseStatement();
+					auto c=New!CatchStm(type,ident,s); c.loc=loc.to(ptok.loc);
 					catches.put(c);
 					if(!type) break; // this really should work as loop condition!
 				}while(ttype==Tok!"catch");
@@ -1003,15 +1019,15 @@ private struct Parser{
 		}
 		return ret;
 	}
-	CompoundStm parseCompoundStm(){
-		mixin(SetLoc!CompoundStm);
+	BlockStm parseBlockStm(){
+		mixin(SetLoc!BlockStm);
 		expect(Tok!"{");
 		auto s=appender!(Statement[])();
 		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			s.put(parseStatement());
 		}
 		expect(Tok!"}");
-		return res=New!CompoundStm(s.data);
+		return res=New!BlockStm(s.data);
 	}
 	Declaration parseDeclaration(STC stc=STC.init){ // Helper function for parseDeclDef.
 		Expression type;
@@ -1091,7 +1107,7 @@ private struct Parser{
 		expect(Tok!")");
 		return params.data;
 	}
-	void parsePostcondition(out CompoundStm post,out Identifier pres){ // out(pres){...}
+	void parsePostcondition(out BlockStm post,out Identifier pres){ // out(pres){...}
 		Location loc=tok.loc;
 		expect(Tok!"out");
 		if(ttype==Tok!"("){
@@ -1099,7 +1115,7 @@ private struct Parser{
 			pres=parseIdentifier();
 			expect(Tok!")");
 		}
-		post=parseCompoundStm(); post.loc=loc.to(post.loc);
+		post=parseBlockStm(); post.loc=loc.to(post.loc);
 	}
 	Declaration parseFunctionDeclaration(STC stc, Expression ret){
 		Identifier name;
@@ -1127,20 +1143,20 @@ private struct Parser{
 		isspecial:
 		stc|=parseSTC!functionSTC();
 		if(isTemplate) constr=parseOptTemplateConstraint();
-		CompoundStm pre, post, bdy;
+		BlockStm pre, post, bdy;
 		Identifier pres;
 		if(ttype==Tok!"in"){
-			Location loc=tok.loc; nextToken(); pre=parseCompoundStm(); pre.loc=loc.to(pre.loc);
+			Location loc=tok.loc; nextToken(); pre=parseBlockStm(); pre.loc=loc.to(pre.loc);
 			if(ttype==Tok!"out") parsePostcondition(post,pres);
 		}else if(ttype==Tok!"out"){
 			parsePostcondition(post,pres);
-			if(ttype==Tok!"in"){Location loc=tok.loc; nextToken(); pre=parseCompoundStm(); pre.loc=loc.to(pre.loc);}
+			if(ttype==Tok!"in"){Location loc=tok.loc; nextToken(); pre=parseBlockStm(); pre.loc=loc.to(pre.loc);}
 		}
 		FunctionDecl r;
 		if(ttype==Tok!"{"||ttype==Tok!"body"){
 			if(pre||post) expect(Tok!"body");
 			else if(ttype==Tok!"body") nextToken();
-			bdy=parseCompoundStm();
+			bdy=parseBlockStm();
 			r=New!FunctionDef(New!FunctionType(stc,ret,params,vararg),name,pre,post,pres,bdy);
 		}else{
 			if(!pre&&!post) expect(Tok!";");
@@ -1165,7 +1181,7 @@ private struct Parser{
 			goto readp;
 		}
 		if(ttype==Tok!"(") readp: params=parseParameterList(vararg), stc|=parseSTC!functionSTC(), hastype=true;
-		auto bdy=parseCompoundStm();
+		auto bdy=parseBlockStm();
 		return res=New!FunctionLiteralExp(hastype?New!FunctionType(stc,ret,params,vararg):null,bdy,isStatic);
 	}
 	Declaration parseDeclarators(STC stc, Expression type){
@@ -1200,7 +1216,7 @@ private struct Parser{
 		expect(Tok!";");
 		return New!CArrayDecl(stc,type,name,pfix,init);
 	}
-	Declaration parseImportDecl(STC stc=STC.init){
+	Declaration parseImportDecl(STC stc=STC.init){ // TODO: IdentifierList is not restictive enough
 		expect(Tok!"import");
 		auto symbols=appender!(Expression[])();
 		auto bind=appender!(Expression[])();
@@ -1209,7 +1225,8 @@ private struct Parser{
 			Expression s=parseIdentifierList();
 			if(ttype==Tok!"=") nextToken(), s=New!(BinaryExp!(Tok!"="))(s,parseIdentifierList());
 			else if(!isBindings&&ttype==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
-			(isBindings?bind:symbols).put(s);
+			if(isBindings) bind.put(s); 			//(isBindings?bind:symbols).put(s); TODO: report bug!
+			else symbols.put(s);
 			if(ttype==Tok!",") nextToken();
 			else break;
 		}
@@ -1302,7 +1319,7 @@ private struct Parser{
 			}
 			if(!parents.length) expectErr!"base class or interface"();
 		}
-		auto bdy=anonclass||ttype!=Tok!";" ? parseCompoundDecl() : (nextToken(),null);
+		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : (nextToken(),null);
 		auto r=
 			type==Struct    ? New!StructDecl(stc,name,bdy)           :
 			type==Union     ? New!UnionDecl(stc,name,bdy)            :
@@ -1333,7 +1350,7 @@ private struct Parser{
 		switch(ttype){
 			case Tok!";": nextToken(); return res=New!Declaration(STC.init,cast(Identifier)null);
 			case Tok!"module":
-				mixin(rule!(ModuleDecl,Existing,"stc","_",IdentifierList,";"));
+				mixin(rule!(ModuleDecl,Existing,"stc","_",IdentifierList,";")); // TODO: disallow ! operator
 			case Tok!"static":
 				nextToken();
 				auto tt=ttype;
@@ -1361,9 +1378,9 @@ private struct Parser{
 				if(ttype==Tok!"template"){isMix=true; goto case;}
 				mixin(rule!(TemplateMixinDecl,Existing,"stc",IdentifierList,"OPT",Identifier,";"));
 			case Tok!"template":
-				mixin(rule!(TemplateDecl,Existing,"isMix",Existing,"stc","_",Identifier,"(",TemplateParameterList,")",OptTemplateConstraint,CompoundDecl));
+				mixin(rule!(TemplateDecl,Existing,"isMix",Existing,"stc","_",Identifier,"(",TemplateParameterList,")",OptTemplateConstraint,BlockDecl));
 			case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface": return res=parseAggregateDecl(stc);
-			case Tok!"unittest": return nextToken(), res=New!UnitTestDecl(stc,parseCompoundStm());
+			case Tok!"unittest": return nextToken(), res=New!UnitTestDecl(stc,parseBlockStm());
 			case Tok!"align":
 				nextToken();
 				if(ttype!=Tok!"("){stc|=STCalign;goto dispatch;}
@@ -1397,10 +1414,10 @@ private struct Parser{
 				STC nstc; // parseSTC might parse nothing in case it is actually a type constructor
 				enum STCs={string[] r; foreach(x;toplevelSTC) if(x!="align"&&x!="enum"&&x!="extern"&&x!="static") r~=x;return r;}();
 				stc|=nstc=parseSTC!STCs();
-				if(ttype==Tok!"{") return res=parseCompoundDecl(stc);
+				if(ttype==Tok!"{") return res=parseBlockDecl(stc);
 				else if(nstc) goto dispatch;
 				else goto default;
-			case Tok!"{": if(!stc&&!(flags&allowcompound)) goto default; return res=parseCompoundDecl(stc);
+			case Tok!"{": if(!stc&&!(flags&allowcompound)) goto default; return res=parseBlockDecl(stc);
 			case Tok!":": if(!stc&&!(flags&allowcompound)) goto default; nextToken(); return res=New!AttributeDecl(stc,parseDeclDefs());
 			default:
 				if(!(flags&tryonly)) return res=parseDeclaration(stc);
@@ -1408,14 +1425,14 @@ private struct Parser{
 		}
 	}
 
-	CompoundDecl parseCompoundDecl(STC stc=STC.init){
+	BlockDecl parseBlockDecl(STC stc=STC.init){
 		expect(Tok!"{");
 		auto r=appender!(Declaration[])();
 		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			r.put(parseDeclDef());
 		}
 		expect(Tok!"}");
-		return New!CompoundDecl(stc,r.data);
+		return New!BlockDecl(stc,r.data);
 	}
 
 	Declaration[] parseDeclDefs(){

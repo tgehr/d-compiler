@@ -114,6 +114,8 @@ auto noOpAppender(T)(size_t initial=1){
 	return NoOpAppender!T.create(initial);
 }
 
+alias GCAlloc.New New; // transparently replace allocator
+
 struct GCAlloc{
 	static:
 	auto New(T,A...)(A args){return new T(args);}
@@ -154,9 +156,11 @@ struct ChunkGCAlloc{
 			return r;
 		}
 		void put(T x){
-			if(len<initsize) _data[len]=x;
-			else _data~=x;
-			len++;
+			//if(len<initsize) _data[len]=x;
+			//else _data~=x; // this results in memory corruption under GDC!
+			//len++;
+			if(len>=_data.length) _data.length=_data.length*2;
+			_data[len++]=x;
 		}
 		static if(is(Unqual!T==char)){ // hack to allow appending dchar to a string
 			void put(const(dchar) x){
@@ -171,13 +175,21 @@ struct ChunkGCAlloc{
 			len+=x.length;
 		}
 		@property auto length(){return len;}
-		@property auto data(){return cast(T[])(_data.length==len?_data:_data[0..len]);}
+		@property auto data(){return cast(T[])_data[0..len];}
 	private:
 		enum initsize=8;
 		Unqual!T[] _data;
 		size_t len;
 	}
 	auto appender(T)(){return Appender!T.create();}
+	// TODO: FIX BUUG
+	/+
+	 struct AppWrap(T){
+		std.array.Appender!T pl;
+		auto length(){return pl.data.length;}
+		alias pl this;
+	}
+	auto appender(T)(){return AppWrap!T(std.array.appender!T());}+/
 }
 
 string toEngNum(uint i){

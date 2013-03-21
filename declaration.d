@@ -1,8 +1,7 @@
 
 import std.array, std.algorithm, std.range, std.conv;
 
-import lexer, parser, expression, statement, type, scope_, util;
-
+import lexer, parser, expression, statement, type, scope_, semantic, util;
 
 class Declaration: Statement{ // empty declaration if instanced
 	STC stc;
@@ -13,26 +12,30 @@ class Declaration: Statement{ // empty declaration if instanced
 		sstate = SemState.pre;
 	}
 	override string toString(){return ";";}
-	
-	Declaration presemantic(Scope sc){ // insert into symbol table, but don't do the heavy processing yet
+		Declaration presemantic(Scope sc){ // insert into symbol table, but don't do the heavy processing yet
+		sstate = SemState.begin;
 		if(!name){sc.error("unimplemented feature",loc); return this;} // TODO: obvious
 		sc.insert(this);
-		sstate = SemState.begin;
 		return this;
 	}
 	override Declaration semantic(Scope sc){
-		if(sstate==SemState.pre) return presemantic(sc).semantic(sc);
+		if(sstate==SemState.pre){
+			auto ps=presemantic(sc);
+			if(ps!is this) return ps.semantic(sc);
+		}
 		sstate = SemState.completed;
 		return this;
 	}
-
 	mixin DownCastMethods!(
 	    FunctionDecl,
 	    // purely semantic nodes
+	    OverloadableDecl,
 	    OverloadSet,
 	    FwdRef,
 	    MutableAliasRef,
 	);
+
+	@property string kind(){return "declaration";}
 }
 
 class ErrorDecl: Declaration{
@@ -79,7 +82,7 @@ class VersionDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e)in{assert(c!is null);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"version("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class DebugSpecDecl: Declaration{
 	Expression spec;
@@ -90,13 +93,13 @@ class DebugDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e){cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"debug"~(cond?"("~cond.toString()~") ":"")~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticIfDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b,Statement e)in{assert(c&&b);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"static if("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(CompoundStm)bdy||cast(CompoundDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticAssertDecl: Declaration{
 	Expression[] a;
@@ -119,7 +122,7 @@ class TypedefDecl: Declaration{
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"typedef "~decl.toString();}
 }
-class CompoundDecl: Declaration{
+class BlockDecl: Declaration{
 	Declaration[] decls;
 	this(STC s,Declaration[] declarations){stc=s; decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(stc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
@@ -144,12 +147,12 @@ class TemplateParameter: Node{
 	}
 }
 
-class TemplateDecl: Declaration{
+class TemplateDecl: OverloadableDecl{
 	bool ismixin;
 	TemplateParameter[] params;
 	Expression constraint;
-	CompoundDecl bdy;
-	this(bool m,STC stc,Identifier name, TemplateParameter[] prm, Expression c, CompoundDecl b){
+	BlockDecl bdy;
+	this(bool m,STC stc,Identifier name, TemplateParameter[] prm, Expression c, BlockDecl b){
 		ismixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
 	}
 	override string toString(){
@@ -165,15 +168,15 @@ class TemplateMixinDecl: Declaration{
 }
 
 abstract class AggregateDecl: Declaration{
-	CompoundDecl bdy;
-	this(STC stc, Identifier name, CompoundDecl b){bdy=b; super(stc,name);}
+	BlockDecl bdy;
+	this(STC stc, Identifier name, BlockDecl b){bdy=b; super(stc,name);}
 }
 class StructDecl: AggregateDecl{
-	this(STC stc,Identifier name, CompoundDecl b){super(stc,name,b);}
+	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"struct"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 }
 class UnionDecl: AggregateDecl{
-	this(STC stc,Identifier name, CompoundDecl b){super(stc,name,b);}
+	this(STC stc,Identifier name, BlockDecl b){super(stc,name,b);}
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"union"~(name?" "~name.toString():"")~(bdy?bdy.toString():";");}
 }
 struct ParentListEntry{
@@ -183,13 +186,13 @@ struct ParentListEntry{
 }
 class ClassDecl: AggregateDecl{
 	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, CompoundDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"class"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
 }
 class InterfaceDecl: AggregateDecl{
 	ParentListEntry[] parents;
-	this(STC stc,Identifier name, ParentListEntry[] p, CompoundDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, ParentListEntry[] p, BlockDecl b){ parents=p; super(stc,name,b); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"interface"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
 }
@@ -209,7 +212,7 @@ class TemplateAggregateDecl: Declaration{
 	}
 }
 
-class TemplateFunctionDecl: Declaration{
+class TemplateFunctionDecl: OverloadableDecl{
 	TemplateParameter[] params;
 	Expression constraint;
 	FunctionDecl fdecl;
@@ -240,6 +243,7 @@ class VarDecl: Declaration{
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~(type?type.toString()~" ":"")~name.toString()~(init?"="~init.toString():"")~";";}
 	VarDecl presemantic(Scope sc){return cast(VarDecl)cast(void*)Declaration.presemantic(sc);}
 	VarDecl semantic(Scope sc){return cast(VarDecl)cast(void*)Declaration.semantic(sc);}
+	override @property string kind(){return "variable";}
 }
 class Declarators: Declaration{
 	VarDecl[] decls;
@@ -274,17 +278,18 @@ class Parameter: VarDecl{ // for functions, foreach etc
 	this(STC stc, Expression type, Identifier name, Expression initializer){super(stc,type,name,initializer);}
 	override string toString(){return STCtoString(stc)~(stc&&type?" ":"")~(type?type.toString():"")~
 			(name?(stc||type?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
+	//override @property string kind(){return "parameter";}
 }
 class PostblitParameter: Parameter{
 	this(){super(STC.init,null,null,null);}
 	override string toString(){return "this";}
 }
 
-class FunctionDecl: Declaration{
+class FunctionDecl: OverloadableDecl{
 	FunctionType type;
-	CompoundStm pre,post;
+	BlockStm pre,post;
 	Identifier postres;
-	this(FunctionType type,Identifier name,CompoundStm pr,CompoundStm po,Identifier pres){
+	this(FunctionType type,Identifier name,BlockStm pr,BlockStm po,Identifier pres){
 		this.type=type; pre=pr, post=po; postres=pres; super(type.stc, name);
 	}
 	override string toString(){
@@ -295,8 +300,8 @@ class FunctionDecl: Declaration{
 }
 
 class FunctionDef: FunctionDecl{
-	CompoundStm bdy;
-	this(FunctionType type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody){
+	BlockStm bdy;
+	this(FunctionType type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody){
 		super(type,name, precondition, postcondition, pres); bdy=fbody;}
 	override string toString(){
 		return (type.stc?STCtoString(type.stc)~" ":"")~(type.ret?type.ret.toString()~" ":"")~name.toString()~type.pListToString()~
@@ -304,21 +309,22 @@ class FunctionDef: FunctionDecl{
 	}
 	override FunctionDef semantic(Scope sc){
 		if(sstate == SemState.completed) return this;
-		Scope fsc = new FunctionScope(sc);
-		foreach(p; type.params) p.presemantic(fsc); // add parameters to scope
+		Scope fsc = New!FunctionScope(sc);
+		if(sstate == SemState.pre) presemantic(sc); // add self to parent scope
+		foreach(p; type.params) p.presemantic(fsc); // add parameters to function scope
 		foreach(p; type.params){
 			p.semantic(fsc);
 			sstate = min(sstate, p.sstate);
 		}
-		bdy.semantic(fsc);
+		bdy.semanticNoScope(fsc);
 		sstate = min(sstate, bdy.sstate);
 		return this;
 	}
 }
 
 class UnitTestDecl: Declaration{
-	CompoundStm bdy;
-	this(STC stc,CompoundStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
+	BlockStm bdy;
+	this(STC stc,BlockStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
 	override string toString(){return (stc?STCtoString(stc)~" ":"")~"unittest"~bdy.toString();}
 }
 
