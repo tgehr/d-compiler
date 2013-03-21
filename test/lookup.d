@@ -1,3 +1,21 @@
+int ppccfoo(){ return 1; }
+class PP{
+	int foo(){ return 2; }
+}
+class CC: PP{
+	int bar(){
+		ppccfoo();
+		PP.foo(); // TODO: should be ok!
+		return foo(); // TODO: ditto
+		// TODO: need to distinguish the notations
+	}
+	static int baz(){
+		ppccfoo();
+		PP.foo(); // error
+		return foo(); // error
+	}
+}
+
 class D{
 	int x;
 	template bar(){

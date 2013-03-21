@@ -258,6 +258,7 @@ mixin CreateBinderForDependent!("AtLeastAsSpecialized","atLeastAsSpecialized");
 mixin CreateBinderForDependent!("DetermineMostSpecialized","determineMostSpecialized");
 mixin CreateBinderForDependent!("Lookup","lookup");
 mixin CreateBinderForDependent!("LookupHere","lookupHere");
+mixin CreateBinderForDependent!("GetUnresolved","getUnresolved");
 
 
 template IntChld(string s) if(!s.canFind(",")){
@@ -3750,10 +3751,10 @@ class Symbol: Expression{ // semantic node
 				// TODO: better error message?
 				if(meaning.scope_.getDeclaration().isFunctionDef())
 					scope_.error(format("cannot access the context in which '%s' is stored", loc.rep),loc);
-				else
+				else{
 					// error message duplicated in FieldExp.semantic
 					scope_.error(format("need 'this' to access %s '%s'",kind,loc.rep),loc);
-
+				}
 				scope_.note(format("%s was declared here",kind),meaning.loc);
 				mixin(ErrEplg);
 			}
@@ -4031,14 +4032,14 @@ class GaggingScope: NestedScope{
 	override void note(lazy string, Location){ /* do nothing */ }
 
 	// forward other members:
-	override Declaration lookup(Identifier ident, lazy Declaration alt){
+	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
 		return parent.lookup(ident,alt);
 	}
-	override Declaration lookupHere(Identifier ident, lazy Declaration alt){
+	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
 		return parent.lookupHere(ident, alt);
 	}
 
-	override Scope getUnresolved(Identifier ident){
+	override Dependent!Scope getUnresolved(Identifier ident){
 		return parent.getUnresolved(ident);
 	}
 
@@ -4363,23 +4364,24 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		assert(!meaning && sstate != SemState.error && sstate != SemState.failed, text(meaning," ",sstate));
 	}out{
 		if(!needRetry && sstate != SemState.error && sstate != SemState.failed)
-			assert(!!meaning && !!meaning.scope_);
+			assert(meaning && meaning.scope_);
 	}body{
 		enum SemRet = q{ return indepvoid; };
-		needRetry = false;
+		//needRetry = false; // TODO: why was this here?
+		needRetry = true;
 		if(allowDelay){
 			sstate=SemState.begin; // reset
 
-			meaning=recursiveLookup?lkup.lookup(this, null):lkup.lookupHere(this, null);
+			//meaning=recursiveLookup?lkup.lookup(this, null):lkup.lookupHere(this, null);
+			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this, null});
+			else mixin(LookupHere!q{meaning; lkup, this, null});
 
 			if(!meaning){
 				if(unresolved){
-					// dw("but...",unresolved.potentialLookup(this));
-					auto l=unresolved.potentialLookup(this);
+					auto l = unresolved.potentialLookup(this);
 					if(l.length){
 						needRetry = true;
 						unresolved = null;
-						// assert(l[0].sstate!=SemState.completed&&l[0].sstate!=SemState.error);
 						return multidep(cast(Node[])l).dependent!void;
 					}
 					if(!unresolved.inexistent(this)) mixin(ErrEplg);
@@ -4394,11 +4396,16 @@ mixin template Semantic(T) if(is(T==Identifier)){
 				sstate = SemState.failed;
 			}else{
 				needRetry=false;
-				Identifier.tryAgain = true;
+				tryAgain = true;
+				unresolved = null;
 				return indepvoid;
 			}
 		}else{
-			if(sstate == SemState.started) unresolved=lkup.getUnresolved(this);
+			if(sstate == SemState.started){
+				needRetry = true;
+				tryAgain = true;
+				mixin(GetUnresolved!q{unresolved;lkup,this});
+			}
 			sstate = SemState.begin;
 			mixin(RetryEplg);
 		}
@@ -4432,7 +4439,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 
 	override void noHope(Scope sc){
 		if(meaning) return;
-		auto unresolved = sc.getUnresolved(this);
+		// TODO: there must be a better way to react when the scope is unavailable
+		mixin(GetUnresolved!q{auto unresolved; sc, this});
 		if(!unresolved.inexistent(this))
 			mixin(ErrEplg);
 	}
@@ -4590,7 +4598,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	void noHope(){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
-			auto unresolved = e1.getMemberScope().getUnresolved(i);
+			mixin(GetUnresolved!q{auto unresolved; e1.getMemberScope(), i});
 			if(!unresolved.inexistent(i))
 				mixin(ErrEplg);
 		}
@@ -6731,7 +6739,7 @@ mixin template Semantic(T) if(is(T==Declaration)){
 	}
 
 	// TODO: make OO instead of functional?
-	bool isDeclAccessible(Declaration decl)in{
+	final bool isDeclAccessible(Declaration decl)in{
 		assert(decl.sstate != SemState.pre);
 	}body{
 		// TODO: this check might be redundant
@@ -7240,15 +7248,24 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	final override void findParents(){
 		findFirstNParents(parents.length);
 	}
-
-	private final void findFirstNParents(size_t n)in{assert(n<=parents.length);}body{
-		if(!parents.length) return;
+	private size_t knownParents = 0;
+	invariant(){ assert(knownParents<=parents.length); }
+	private void updateKnownParents(){
+		foreach(x; parents[knownParents..$]){
+			if((x.sstate != SemState.completed||x.needRetry) && x.sstate != SemState.error)
+				break;
+			knownParents++;
+		}
+	}
+	// scopes need access to this. (maybe those should be moved here instead)
+	public final void findFirstNParents(size_t n)in{assert(n<=parents.length);}body{
+		if(n<=knownParents) return;
 		alias scope_ sc;
 		if(!rparents) rparents = parents.map!(a=>a.ddup).array; // uncontrolled gc allocation
-		foreach(i,ref x; parents[0..n]){
-			if(x.sstate == SemState.error||x.sstate == SemState.completed) continue;
+		foreach(ref x; parents[knownParents..n]){
 			auto ty=x.typeSemantic(sc);
 			mixin(Rewrite!q{x});
+			if(x.sstate == SemState.error||x.sstate == SemState.completed) continue;
 			if(ty){
 				void check(Type ty){
 					auto agg = ty.isAggregateTy();
@@ -7262,13 +7279,18 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			}
 		}
 		parents = Tuple.expand(parents, rparents);
+		updateKnownParents(); // valid because only prior unknown parents can cause expansion
 		assert(parents.length==rparents.length,text(parents," ",rparents));
-
 	}
 
-	final override Expression unresolvedParent(){
-		foreach(x;parents) if(x.needRetry) return x;		
-		return null;
+	final override Expression unresolvedParent()out(x){
+		assert(!x||x.needRetry);
+	}body{
+		updateKnownParents();
+		if(knownParents == parents.length) return null;
+		return parents[knownParents];
+/+		foreach(x;parents) if(x.needRetry) return x;		
+		return null;+/
 	}
 
 	/* Check validity of parents
@@ -7331,7 +7353,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		findParents();
 		foreach(i,ref x;parents){
 			if(x.sstate != SemState.completed || rparents[i].sstate == SemState.error) continue;
-			assert(!!cast(AggregateTy)x&&cast(ReferenceAggregateDecl)(cast(AggregateTy)x).decl);
+			assert(!!cast(AggregateTy)x&&cast(ReferenceAggregateDecl)(cast(AggregateTy)x).decl,text(typeid(x)," ",x.sstate));
 			auto rad =
 				cast(ReferenceAggregateDecl)cast(void*)
 				(cast(AggregateTy)cast(void*)x)
@@ -7455,7 +7477,10 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 		super.presemantic(sc);
 
 		scope_ = sc;
-		if(!asc) asc = New!AggregateScope(this);
+		// this is not a factory method because of a DMD bug.
+		if(!asc) asc = isReferenceAggregateDecl()?
+			         New!InheritScope(cast(ReferenceAggregateDecl)cast(void*)this) :
+			         New!AggregateScope(this);
 
 		if(bdy) bdy.presemantic(asc);
 	}

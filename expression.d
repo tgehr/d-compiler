@@ -35,14 +35,14 @@ template Dependent(T){
 	struct DependentOrTrue{
 		Dependent!T dep;
 		alias dep this;
-		bool opCast(T: bool)(){return !!dep.dependee || dep.value;}					
+		bool opCast(T: bool)(){ return dep.dependee || dep.value; }
 	}
 	struct Dependent{
 		private alias Dependent D;
 		Dependee dependee;
 		static if(!is(T==void)) T value;
 		DependentOrTrue prop()(){ return DependentOrTrue(this); }
-		
+
 		static if(is(T==bool)){
 		// for use in if(auto t = someExpression.prop) return t;
 			D not(){ return D(dependee, !value); }
@@ -82,7 +82,7 @@ class MultiDep: Node{
 		if(sc) foreach(d; deps){
 			Scheduler().await(this, d, sc);
 		}else foreach(d; deps){
-			Scheduler().await(this, d, d.isDeclaration().scope_);	
+			Scheduler().await(this, d, d.isDeclaration().scope_);
 		}
 		needRetry = true;
 	}
@@ -93,7 +93,15 @@ class MultiDep: Node{
 }
 
 // TODO: this allocation can probably be avoided in many cases
-Dependee multidep(Node[] dep, Scope sc=null){ return Dependee(new MultiDep(dep, sc)); }
+Dependee multidep(Node[] dep, Scope sc=null)in{assert(dep.length);}body{
+	if(dep.length>1) return Dependee(new MultiDep(dep, sc));
+	dep[0].needRetry = true; // TODO: ok?
+	assert(sc||dep[0].isDeclaration());
+	if(!sc) sc = dep[0].isDeclaration().scope_;
+	assert(!!sc);
+	return Dependee(dep[0],sc);
+}
+
 
 
 abstract class Expression: Node{
@@ -120,7 +128,7 @@ abstract class Expression: Node{
 	mixin DownCastMethod;
 
 	// UnaryExp!(Tok!"&") isAddressExp(){ return null; } // TODO: reduce bug
-	
+
 	mixin Visitors;
 }
 

@@ -120,7 +120,7 @@ class Scheduler{
 
 			foreach(n,_; asleep) if(n !in info) tarjan(n);
 			auto nodes = asleep.keys;
-/+			foreach(i;0..component){
+			/+foreach(i;0..component){
 				write("component ",i,": [");
 				foreach(x;nodes)
 					if(info[x].component==i) write(x,",");
@@ -136,6 +136,7 @@ class Scheduler{
 				}
 			}
 			Node[] toRemove;
+			// TODO: only awaken those nodes that reside inside is-expressions if there are any
 			foreach(nd,sc; asleep){
 				if(bad[info[nd].component]) continue;
 				active[nd]=sc;

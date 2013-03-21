@@ -46,7 +46,7 @@ abstract class Scope{ // SCOPE
 	private void potentialAmbiguity(Identifier decl, Identifier lookup){
 		//error(format("declaration of '%s' results in potential ambiguity", decl), decl.loc);
 		// note("offending symbol lookup", lookup.loc);
-		error(format("declaration of '%s' smells fishy", decl), decl.loc);
+		error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
 		note("this lookup should have succeeded if it was valid", lookup.loc);
 	}
 
@@ -55,7 +55,9 @@ abstract class Scope{ // SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		if(auto d=lookupHere(decl.name,null)){
+		auto dd=lookupHere(decl.name,null), d = dd.value, dep = dd.dependee;
+		assert(!dd.dependee||!dd.value);
+		if(!dep&&d){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(decl.name, d.name);
 				mixin(SetErr!q{d.name});
@@ -86,7 +88,9 @@ abstract class Scope{ // SCOPE
 	}
 
 	bool inexistent(Identifier ident){
-		if(auto d = lookupHere(ident, null)){
+		auto dd=lookupHere(ident,null), d = dd.value, dep = dd.dependee;
+		assert(!dd.dependee||!dd.value);
+		if(!dep&&d){
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(d.name, ident);
 				mixin(SetErr!q{ident});
@@ -97,16 +101,19 @@ abstract class Scope{ // SCOPE
 	}
 
 	// scope where the identifier will be resolved next
-	Scope getUnresolved(Identifier ident){
-		return this;
+	Dependent!Scope getUnresolved(Identifier ident){
+		mixin(LookupHere!q{auto d; this, ident, null});
+		if(d && typeid(d) is typeid(DoesNotExistDecl))
+			return null.independent!Scope;
+		return this.independent!Scope;
 	}
 
-	Declaration lookup(Identifier ident, lazy Declaration alt){
+	Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
 		return lookupHere(ident, alt);
 	}
 
-	Declaration lookupHere(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, alt);
+	Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
+		return symtab.get(ident.ptr, alt).independent;
 	}
 
 	void potentialInsert(Identifier ident, Declaration decl){
@@ -182,8 +189,8 @@ class ModuleScope: Scope{
 		this._handler=handler;
 		this.module_=module_;
 	}
-	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		if(!ident.name.length) return module_;
+	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
+		if(!ident.name.length) return module_.independent!Declaration;
 		return super.lookup(ident, alt);
 	}
 	override Module getModule(){return module_;}
@@ -197,18 +204,18 @@ class NestedScope: Scope{
 		this.parent=parent;
 	}
 
-	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		auto r=super.lookupHere(ident, null);
-		if(!r) return null;
+	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
+		mixin(LookupHere!q{auto r; this, ident, null});
+		if(!r) return null.independent!Declaration;
 		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookup(ident, alt);
-		return r;
+		return r.independent;
 	}
 
-	override Scope getUnresolved(Identifier ident){
-		if(auto d=lookupHere(ident, null))
-			if(typeid(d) is typeid(DoesNotExistDecl))
-				return parent.getUnresolved(ident);
-		return this;
+	override Dependent!Scope getUnresolved(Identifier ident){
+		mixin(LookupHere!q{auto d; this, ident, null});
+		if(d && typeid(d) is typeid(DoesNotExistDecl))
+			return parent.getUnresolved(ident);
+		return this.independent!Scope;
 	}
 
 	override bool insertLabel(LabeledStm stm){
@@ -267,6 +274,56 @@ private:
 	AggregateDecl aggr;
 }
 
+class InheritScope: AggregateScope{
+	invariant(){ assert(!!cast(ReferenceAggregateDecl)aggr); }
+	@property ref ReferenceAggregateDecl raggr(){ return *cast(ReferenceAggregateDecl*)&aggr; }
+	this(ReferenceAggregateDecl decl) in{assert(!!decl.scope_);}body{ super(decl); }
+
+	// TODO: monads work better in Haskell..., find an elegant way to get rid
+	// of the duplication without running into DMD bugs
+
+	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
+		// dw("looking up ",ident," in ", this);
+		mixin(LookupHere!q{auto d; super, ident, alt});
+		for(size_t i=0; i<raggr.parents.length && d && typeid(d) is typeid(DoesNotExistDecl);i++){
+			raggr.findFirstNParents(i+1);
+			if(raggr.parents[i].needRetry)
+				return Dependee(raggr.parents[i], raggr.scope_).dependent!Declaration;
+			if(raggr.parents[i].sstate==SemState.error)
+				continue;
+			assert(cast(AggregateTy)raggr.parents[i]
+			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)raggr.parents[i]).decl, text(raggr.parents[i], typeid(raggr().parents[i]),raggr.parents[i].needRetry));
+			auto decl = cast(ReferenceAggregateDecl)cast(void*)
+				(cast(AggregateTy)cast(void*)raggr.parents[i]).decl;
+			auto lkup = decl.asc.lookupHere(ident, null);
+			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
+			d = lkup.value;
+		}
+		if(!d) d = alt;
+		return d.independent;
+	}
+	
+	override Dependent!Scope getUnresolved(Identifier ident){
+		mixin(LookupHere!q{auto d; super, ident, null});
+		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
+		for(size_t i=0; i<raggr.parents.length; i++){
+			raggr.findFirstNParents(i+1);
+			if(raggr.parents[i].needRetry)
+				return Dependee(raggr.parents[i], raggr.scope_).dependent!Scope;
+			if(raggr.parents[i].sstate==SemState.error)
+				continue;
+			assert(cast(AggregateTy)raggr.parents[i]
+			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)raggr.parents[i]).decl, text(raggr.parents[i], typeid(raggr().parents[i]),raggr.parents[i].needRetry));
+			auto decl = cast(ReferenceAggregateDecl)cast(void*)
+				(cast(AggregateTy)cast(void*)raggr.parents[i]).decl;
+			if(auto lkup = decl.asc.getUnresolved(ident).prop) return lkup;	
+		}
+		// TODO: this is a hack
+		return ident.recursiveLookup?parent.getUnresolved(ident):null.independent!Scope;
+	}
+}
+
+
 class TemplateScope: NestedScope{
 	// inherits Scope parent; // parent scope of the template declaration
 	Scope iparent; // parent scope of the instance
@@ -287,17 +344,20 @@ class TemplateScope: NestedScope{
 }
 
 class OrderedScope: NestedScope{ // Forward references don't get resolved
+	invariant(){ foreach(d; symtab) assert(d&&typeid(d) !is typeid(DoesNotExistDecl)); }
+
 	this(Scope parent){super(parent);}
-	override Declaration lookup(Identifier ident, lazy Declaration alt){
-		return lookupHere(ident, parent.lookup(ident, alt));
+	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
+		// this is valid because OrderedScopes never contain any DoesNotExistDecl's
+		if(auto t=lookupHere(ident, null).prop) return t;
+		return parent.lookup(ident, alt);
 	}
 	override bool inexistent(Identifier ident){
 		return parent.inexistent(ident);
 	}
-	override Scope getUnresolved(Identifier ident){
+	override Dependent!Scope getUnresolved(Identifier ident){
 		return parent.getUnresolved(ident);
 	}
-
 }
 
 final class FunctionScope: OrderedScope{
@@ -350,7 +410,7 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 
 	override bool insert(Declaration decl){
 		if(!parent.canDeclareNested(decl)){
-			auto confl=parent.lookup(decl.name, null);
+			auto confl=parent.lookup(decl.name, null).value;
 			assert(!!confl);
 			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);

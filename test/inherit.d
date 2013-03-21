@@ -1,12 +1,43 @@
 
+class GG{ enum gg = "gg"; }
+class HH: GG{ enum hh = "hh"; }
+class II: HH{ enum ii = "ii"; }
+class IIHH:II{ enum iihh = ii~hh; }
+class GGHH:HH{ enum gghh = gg~hh; }
+class GGHHII: II{ enum gghhii = gg~hh~ii; }
+pragma(msg, GG.gg,HH.hh,HH.gg,II.ii,II.hh,II.gg,IIHH.iihh,IIHH.ii,IIHH.hh,IIHH.gg,GGHH.gghh,GGHH.gg,GGHH.hh,GGHHII.gghhii,GGHHII.gg,GGHHII.hh,GGHHII.ii);
+static assert(GG.gg~HH.hh~HH.gg~II.ii~II.hh~II.gg~IIHH.iihh~IIHH.ii~IIHH.hh~IIHH.gg~GGHH.gghh~GGHH.gg~GGHH.hh~GGHHII.gghhii~GGHHII.gg~GGHHII.hh~GGHHII.ii=="gghhggiihhggiihhiihhgggghhgghhgghhiigghhii");
+
 
 class PP{
 	enum x = "success!";
 }
-class CC: PP{
-	pragma(msg, x); // TODO!
+interface I{
+	enum y = "success!!";
+	enum x = 2; // TODO: should this raise a conflict?
+}
+class CC : PP,I{
+	pragma(msg, x," ",y);
+	static assert(x=="success!"&&y=="success!!");
 }
 
+interface HasX{ int x(); }
+
+// (TODO: traits getMember)
+template IfDoesNotHaveMemberX(alias from, alias A){
+	static if(is(typeof(from.x))) alias Seq!() IfDoesNotHaveMemberX;
+	else alias A IfDoesNotHaveMemberX;
+}
+template IfDoesNotHaveMemberY(alias from, alias A){
+	static if(is(typeof(from.y))) alias Seq!() IfDoesNotHaveMemberY;
+	else alias A IfDoesNotHaveMemberY;
+}
+
+//class NoContradict2: IfDoesNotHaveMemberY!(NoContradict2, HasX){} // TODO: should this work?
+
+static assert(!is(typeof({
+	class Contradict2: IfDoesNotHaveMemberX!(Contradict2, HasX){}
+})));
 
 
 //static if(!is(typeof(a))) enum b = 2;
@@ -150,3 +181,4 @@ class E: D!E{
 // +/
 
 template Seq(T...){alias T Seq;}
+alias immutable(char)[] string;

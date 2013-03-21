@@ -142,7 +142,7 @@ private struct RTTypeID{
 					return Variant(r);
 				}
 
-				assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
+				// assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
 				return self; // TODO: this is a hack and might break stuff (?)
 			};
 			enum sfx = is(T==string)  ? "c" :

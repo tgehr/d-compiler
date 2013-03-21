@@ -28,6 +28,9 @@ d: $(SRCFILES) makefile
 dgdc:
 	gdmd -m32 -L-lgphobos2 -O -release -inline -noboundscheck -J. $(SRCFILES) -ofdgdc
 
+dldc:
+	ldmd2 -m32 -O -release -inline -noboundscheck -J. $(SRCFILES) -ofdldc
+
 #$(DMD) $(OBJFILES) -ofttt
 clean:
 	rm *.o d tt
