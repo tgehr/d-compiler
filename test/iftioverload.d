@@ -53,7 +53,7 @@ pragma(msg, is(typeof(sfinae2(1))));
 T foo(T)(T x){return x;}
 T foo()(int x){return x;} // sfinae kicks in
 int foo(int x){return x+1;}
-auto foo(S...)(S args)if(!is(typeof(args[0])==double)){return args[0];}
+auto foo(S...)(S args)if(!is(typeof(args[0])==idouble)){return args[0];}
 
 pragma(msg, foo(2.0));
 pragma(msg, foo(2));

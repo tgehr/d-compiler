@@ -109,7 +109,7 @@ class VersionDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e)in{assert(c!is null);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"version("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(CompoundStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class DebugSpecDecl: Declaration{
 	Expression spec;
@@ -120,13 +120,13 @@ class DebugDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b, Statement e){cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"debug"~(cond?"("~cond.toString()~") ":"")~bdy.toString()~
-			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(CompoundStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 }
 class StaticIfDecl: ConditionalDecl{
 	Expression cond;
 	this(STC stc,Expression c,Statement b,Statement e)in{assert(c&&b);}body{cond=c; super(stc,b,e);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"static if("~cond.toString()~") "~bdy.toString()~
-			(els?(cast(BlockStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
+			(els?(cast(CompoundStm)bdy||cast(BlockDecl)bdy?"":"\n")~"else "~els.toString():"");}
 
 	mixin Visitors;
 }
@@ -391,9 +391,9 @@ class PostblitParameter: Parameter{
 
 class FunctionDecl: OverloadableDecl{
 	FunctionTy type;
-	BlockStm pre,post;
+	CompoundStm pre,post;
 	Identifier postres;
-	this(STC stc, FunctionTy type,Identifier name,BlockStm pr,BlockStm po,Identifier pres)in{assert(type&&1);}body{
+	this(STC stc, FunctionTy type,Identifier name,CompoundStm pr,CompoundStm po,Identifier pres)in{assert(type&&1);}body{
 		this.type=type; pre=pr, post=po; postres=pres; super(stc, name);
 	}
 	final string signatureString(){
@@ -410,8 +410,8 @@ class FunctionDecl: OverloadableDecl{
 }
 
 class FunctionDef: FunctionDecl{
-	BlockStm bdy;
-	this(STC stc, FunctionTy type,Identifier name, BlockStm precondition,BlockStm postcondition,Identifier pres,BlockStm fbody,bool deduceStatic=false){
+	CompoundStm bdy;
+	this(STC stc, FunctionTy type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody,bool deduceStatic=false){
 		super(stc, type, name, precondition, postcondition, pres); bdy=fbody;
 		this.deduceStatic = deduceStatic;
 	}
@@ -425,8 +425,8 @@ class FunctionDef: FunctionDecl{
 }
 
 class UnitTestDecl: Declaration{
-	BlockStm bdy;
-	this(STC stc,BlockStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
+	CompoundStm bdy;
+	this(STC stc,CompoundStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"unittest"~bdy.toString();}
 }
 

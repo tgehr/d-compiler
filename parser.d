@@ -575,7 +575,7 @@ private struct Parser{
 				auto e = parseExpression(rbp!(Tok!","));
 				auto r = New!ReturnStm(e);
 				r.loc=e.loc;
-				auto b = New!BlockStm([cast(Statement)r]);
+				auto b = New!CompoundStm([cast(Statement)r]);
 				b.loc=e.loc;
 				return res=New!FunctionLiteralExp(ftype,b,FunctionLiteralExp.Kind.none);
 				break;
@@ -1047,15 +1047,22 @@ private struct Parser{
 		}
 		return ret;
 	}
-	BlockStm parseBlockStm(){
-		mixin(SetLoc!BlockStm);
+	Statement[] parseCompoundStmHelper(){
 		expect(Tok!"{");
 		auto s=appender!(Statement[])();
 		while(ttype!=Tok!"}" && ttype!=Tok!"EOF"){
 			s.put(parseStatement());
 		}
 		expect(Tok!"}");
-		return res=New!BlockStm(s.data);
+		return s.data;
+	}
+	CompoundStm parseCompoundStm(){
+		mixin(SetLoc!CompoundStm);
+		return res=New!CompoundStm(parseCompoundStmHelper());
+	}
+	BlockStm parseBlockStm(){
+		mixin(SetLoc!BlockStm);
+		return res=New!BlockStm(parseCompoundStmHelper());
 	}
 	// @BUG!: Cannot parse alias to a function type or alias to extern(C) type
 	Declaration parseDeclaration(const ref Location begin,STC stc=STC.init){ // Helper function for parseDeclDef.
@@ -1165,7 +1172,7 @@ private struct Parser{
 		expect(Tok!")");
 		return params.data;
 	}
-	void parsePostcondition(out BlockStm post,out Identifier pres){ // out(pres){...}
+	void parsePostcondition(out CompoundStm post,out Identifier pres){ // out(pres){...}
 		Location loc=tok.loc;
 		expect(Tok!"out");
 		if(ttype==Tok!"("){
@@ -1173,7 +1180,7 @@ private struct Parser{
 			pres=parseIdentifier();
 			expect(Tok!")");
 		}
-		post=parseBlockStm(); post.loc=loc.to(post.loc);
+		post=parseCompoundStm(); post.loc=loc.to(post.loc);
 	}
 	Declaration parseFunctionDeclaration(STC stc, Expression ret, const ref Location begin){
 		Identifier name;
@@ -1211,27 +1218,27 @@ private struct Parser{
 		isspecial:
 		stc|=parseSTC!functionSTC();
 		if(isTemplate) constr=parseOptTemplateConstraint();
-		BlockStm pre, post, bdy;
+		CompoundStm pre, post, bdy;
 		Identifier pres;
 		if(ttype==Tok!"in"){
-			Location loc=tok.loc; nextToken(); pre=parseBlockStm(); pre.loc=loc.to(pre.loc);
+			Location loc=tok.loc; nextToken(); pre=parseCompoundStm(); pre.loc=loc.to(pre.loc);
 			if(ttype==Tok!"out") parsePostcondition(post,pres);
 		}else if(ttype==Tok!"out"){
 			parsePostcondition(post,pres);
-			if(ttype==Tok!"in"){Location loc=tok.loc; nextToken(); pre=parseBlockStm(); pre.loc=loc.to(pre.loc);}
+			if(ttype==Tok!"in"){Location loc=tok.loc; nextToken(); pre=parseCompoundStm(); pre.loc=loc.to(pre.loc);}
 		}
 		FunctionDecl r;
 		if(ttype==Tok!"{"||ttype==Tok!"body"||ttype==Tok!"=>"){
 			if(pre||post) expect(Tok!"body");
 			else if(ttype==Tok!"body") nextToken();
-			if(ttype!=Tok!"=>")	bdy=parseBlockStm();
+			if(ttype!=Tok!"=>")	bdy=parseCompoundStm();
 			else{ // EXTENSION
 				nextToken();
 				auto e = parseExpression(rbp!(Tok!","));
 				expect(Tok!";");
 				auto b = New!ReturnStm(e);
 				e.loc=e.loc;
-				bdy=New!BlockStm([cast(Statement)b]);
+				bdy=New!CompoundStm([cast(Statement)b]);
 				bdy.loc=e.loc;
 			}
 			r=New!FunctionDef(stc,New!FunctionTy(STC.init,ret,params,vararg),name,pre,post,pres,bdy);
@@ -1267,14 +1274,14 @@ private struct Parser{
 			if(ttype!=Tok!"(" && ttype!=Tok!"{") ret=parseType();
 		}
 		if(ttype==Tok!"(") params=parseParameterList(vararg,true), stc|=parseSTC!functionSTC();
-		BlockStm bdy;
-		if(ttype != Tok!"=>") bdy=parseBlockStm();
+		CompoundStm bdy;
+		if(ttype != Tok!"=>") bdy=parseCompoundStm();
 		else{
 			nextToken();
 			auto e = parseExpression(rbp!(Tok!","));
 			auto r = New!ReturnStm(e);
 			e.loc=e.loc;
-			bdy=New!BlockStm([cast(Statement)r]);
+			bdy=New!CompoundStm([cast(Statement)r]);
 			bdy.loc=e.loc;
 		}
 		return res=New!FunctionLiteralExp(New!FunctionTy(stc,ret,params,vararg),bdy,kind);
@@ -1505,7 +1512,7 @@ private struct Parser{
 			case Tok!"template":
 				mixin(rule!(TemplateDecl,Existing,"isMix",Existing,"stc","_",Identifier,"(",TemplateParameterList,")",OptTemplateConstraint,BlockDecl));
 			case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface": return res=parseAggregateDecl(stc);
-			case Tok!"unittest": return nextToken(), res=New!UnitTestDecl(stc,parseBlockStm());
+			case Tok!"unittest": return nextToken(), res=New!UnitTestDecl(stc,parseCompoundStm());
 			case Tok!"align":
 				nextToken();
 				if(ttype!=Tok!"("){stc|=STCalign;goto dispatch;}

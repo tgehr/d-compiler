@@ -5,7 +5,6 @@ class C: D{ }
 class D: C{ }
 
 
-/+
 immutable int u = v;
 immutable int v = u;
 

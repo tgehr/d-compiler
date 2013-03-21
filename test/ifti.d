@@ -4,7 +4,6 @@ template MAlias(A,B){ alias A delegate(B) MAlias; }
 auto malias(A,B)(MAlias!(A,B) dg, B arg){ return dg(arg); }
 pragma(msg, malias((int x)=>x,3));
 
-
 auto combine(T)(T a, T b, T c){return [a,b,c];}
 
 pragma(msg, "combine: ", combine([],[],[1,2,3]));

@@ -13,7 +13,6 @@ void foo(){
 	//CC.x=2;
 }
 
-
 struct A{
 	struct B{
 		A* c;

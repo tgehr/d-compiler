@@ -1,4 +1,45 @@
-alias immutable(char)[] string;
+// TODO: currently, recursive templates have high algorithmic complexity
+// TODO: FIX!
+
+template factorial(int n){
+	static if(n<=1) enum factorial = 1.0L;
+	else enum factorial = n*factorial!(n-1);
+}
+pragma(msg, factorial!50);
+
+/+
+
+auto gen(){
+	immutable(char)[] r;
+	//for(int i=0;i<=130;i++) r~=`enum e`~toString(i)~`=factorial!`~toString(i)~".V;\n";
+	for(int i=0;i<=100;i++) r~=`pragma(msg,factorial!`~toString(i)~");\n";
+	return r;
+}
+
+//pragma(msg, gen());
+//mixin(gen());
+
+
+template recu1(int n){
+	static if(n<=1) int V(){return 1;}
+	else int V(){return recu1!(n-1).V();}
+}
+
+pragma(msg, "recu1: ",recu1!20.V());
+
+template recu2(int n){
+	static if(n<=1) int recu2(){return 1;}
+	else auto recu2(){return recu2!(n-1)()+1;}
+}
+
+pragma(msg, "recu2: ",recu2!20());+/
+
+
+//pragma(msg, factorial!130.V);
+
+
+
+/+
 auto testtemplatefunclit(fun...)(){
 	static if(!fun.length) return "";
 	else{
@@ -47,13 +88,6 @@ template redefinedparam(T)if(is(typeof(t)==int)){
 }
 pragma(msg, redefinedparam!int);
 
-
-
-auto toString(int i){
-	immutable(char)[] s;
-	do s=(i%10+'0')~s, i/=10; while(i);
-	return s;
-}
 
 template CircularInstantiation(int x){
 	enum A = CircularInstantiation!x;
@@ -265,44 +299,6 @@ template test(){
 	}
 }
 void instantiatetest(){test!();}
-
-// TODO: currently, recursive templates have high algorithmic complexity
-// TODO: FIX!
-
-template factorial(int n){
-	static if(n<=1) enum factorial = 1.0L;
-	else enum factorial = n*factorial!(n-1);
-}
-
-auto gen(){
-	immutable(char)[] r;
-	//for(int i=0;i<=130;i++) r~=`enum e`~toString(i)~`=factorial!`~toString(i)~".V;\n";
-	for(int i=0;i<=100;i++) r~=`pragma(msg,factorial!`~toString(i)~");\n";
-	return r;
-}
-
-//pragma(msg, gen());
-//mixin(gen());
-
-pragma(msg, factorial!100);
-
-
-template recu1(int n){
-	static if(n<=1) int V(){return 1;}
-	else int V(){return recu1!(n-1).V();}
-}
-
-pragma(msg, "recu1: ",recu1!20.V());
-
-template recu2(int n){
-	static if(n<=1) int recu2(){return 1;}
-	else auto recu2(){return recu2!(n-1)()+1;}
-}
-
-pragma(msg, "recu2: ",recu2!20());
-
-
-//pragma(msg, factorial!130.V);
 
 
 
@@ -570,3 +566,11 @@ void main(){
 // +/
 // +/
 // +/
+
+alias immutable(char)[] string;
+auto toString(int i){
+	immutable(char)[] s;
+	do s=(i%10+'0')~s, i/=10; while(i);
+	return s;
+}
+

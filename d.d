@@ -57,7 +57,8 @@ int main(string[] args){
 	foreach(x; args){
 		// TODO: add to module repository
 		auto m=new Module(x);
-		m.semantic();
+		Scheduler().addRoot(m, null);
+		Scheduler().run();
 		if(m.sstate == SemState.error) sstate = SemState.error;
 	}
 	import semantic;

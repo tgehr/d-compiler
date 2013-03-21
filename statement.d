@@ -10,7 +10,6 @@ abstract class Statement: Node{
 	override @property string kind(){return "statement";}
 
 	mixin DownCastMethods!(
-		BlockStm,
 		BreakableStm,
 		LoopingStm,
 	);
@@ -31,12 +30,17 @@ class ErrorStm: Statement{
 	mixin Visitors;
 }
 
-class BlockStm: Statement{
+class CompoundStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
-	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
 
-	mixin DownCastMethod;
+	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
+	mixin Visitors;
+}
+
+class BlockStm: CompoundStm{
+	this(Statement[] ss){super(ss);}
+
 	mixin Visitors;
 }
 

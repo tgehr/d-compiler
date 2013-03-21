@@ -108,6 +108,7 @@ abstract class Scope{ // SCOPE
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
 	Declaration getDeclaration(){return null;}
+	TemplateInstanceDecl getTemplateInstance(){return null;}
 	Module getModule(){return null;}
 	// control flow structures:
 	BreakableStm getBreakableStm(){return null;}
@@ -202,6 +203,7 @@ class NestedScope: Scope{
 	override FunctionDef getFunction(){return parent.getFunction();}
 	override AggregateDecl getAggregate(){return parent.getAggregate();}
 	override Declaration getDeclaration(){return parent.getDeclaration();}
+	override TemplateInstanceDecl getTemplateInstance(){return parent.getTemplateInstance();}
 	override Module getModule(){return parent.getModule();}
 }
 
@@ -253,6 +255,7 @@ class TemplateScope: NestedScope{
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
 	override Declaration getDeclaration(){return iparent.getDeclaration();}	
+	override TemplateInstanceDecl getTemplateInstance(){ return tmpl; }
 }
 
 class OrderedScope: NestedScope{ // Forward references don't get resolved

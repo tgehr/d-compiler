@@ -1,3 +1,4 @@
+
 template Alias(T){ alias T Alias; }
 
 template TypeTuple(T...){ alias T TypeTuple; }
@@ -7,13 +8,14 @@ alias TypeTuple Seq;
 auto seqparm(A,B,C...)(Seq!(A,B,C) args){
 	return args[0]+args[1]+args[2]+args[$-1];
 }
+
 static assert(seqparm(1,2,3.0,4,5)==11.0);
 pragma(msg, "seqparm: ",seqparm(1,2,3.0,4,5));
 
-auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
 
 
 /+ // TODO: make work
+auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
 
 auto seqtak(){auto x = seqret(1,2); return x[0];}
 pragma(msg, seqtak());
@@ -249,7 +251,7 @@ template ListPrimes(int upper){
 	template H(int lower){
 		enum H = "";
 		static if(lower <= upper){
-			static if(IsPrime!lower) pragma(msg, lower,H!(lower+1));
+			static if(IsPrime!lower){pragma(msg, lower,H!(lower+1));}
 			else enum next=H!(lower+1);
 		}
 	}

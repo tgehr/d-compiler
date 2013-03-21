@@ -29,52 +29,31 @@ class Module: Declaration{
 		if(sc.handler.nerrors) sstate = SemState.error;
 	}
 
-	override void buildInterface(){
-		mixin(Configure!q{Identifier.tryAgain = true});
-		mixin(Configure!q{Identifier.allowDelay = true});
-		if(sstate == SemState.pre) foreach(ref x;decls){
-			x.stc|=STCstatic;
-			x.presemantic(sc); // add all to symbol table
-			scope_=sc;
+	override void presemantic(Scope=null){
+		if(sstate == SemState.pre){
+			foreach(ref x;decls){
+				x.stc|=STCstatic;
+				x.presemantic(sc); // add all to symbol table
+				Scheduler().addRoot(x, sc);
+			}
+			scope_ = sc;
 			sstate = SemState.begin;
 		}
-		while(Identifier.tryAgain){
-			while(Identifier.tryAgain){
-				while(Identifier.tryAgain){
-					Identifier.tryAgain = false;
-					foreach(ref x;decls){x.buildInterface();mixin(Rewrite!q{x});}
-					foreach(x;templateDecls) x.instancesBuildInterface();
-				}
-				Identifier.allowDelay = false;
-				foreach(ref x;decls){x.buildInterface(); mixin(Rewrite!q{x});}
-				foreach(x;templateDecls) x.instancesBuildInterface();
-				Identifier.allowDelay = true;
-			}
-		}
 	}
+
+	override void buildInterface(){
+		mixin(SemPrlg);
+		if(sstate == SemState.pre) presemantic();
+		foreach(ref x;decls){x.buildInterface();mixin(Rewrite!q{x});}
+	}
+
 	override void semantic(Scope=null){
 		mixin(SemPrlg);
-		mixin(Configure!q{Identifier.tryAgain = true});
-		mixin(Configure!q{Identifier.allowDelay = true});
-		buildInterface();
-		foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
-		foreach(x;templateDecls) x.instancesSemantic();
-		int num = 0;
-		while(Identifier.tryAgain){
-			buildInterface();
-			while(Identifier.tryAgain){
-				Identifier.tryAgain = false;
-				foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
-				foreach(x;templateDecls) x.instancesSemantic();
-			}
-
-			Identifier.allowDelay=false;
-			foreach(ref x;decls){x.semantic(sc); mixin(Rewrite!q{x});}
-			foreach(x;templateDecls) x.instancesSemantic();
-			Identifier.allowDelay=true;
-		}
+		if(sstate == SemState.pre) presemantic();
+		foreach(ref x; decls){x.semantic(sc); mixin(Rewrite!q{x});}
+		foreach(x; decls) mixin(PropRetry!q{x});
 		mixin(PropErr!q{decls});
-		assert(sstate==SemState.error||{foreach(x; decls) assert(!x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
+		assert(sstate==SemState.error||{foreach(x; decls) assert(x.sstate == SemState.completed && !x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(SemEplg);
 	}
 

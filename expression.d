@@ -9,7 +9,10 @@ import analyze;
 
 import variant;
 
+// Node champ;
+
 abstract class Node{
+	// debug auto cccc=0;
 	Location loc;
 
 	abstract @property string kind();
@@ -111,14 +114,14 @@ class ArrayLiteralExp: Expression{
 
 class FunctionLiteralExp: Expression{
 	FunctionTy fty;
-	BlockStm bdy;
+	CompoundStm bdy;
 	enum Kind{
 		none,
 		function_,
 		delegate_,
 	}
 	Kind which;
-	this(FunctionTy ft, BlockStm b, Kind w=Kind.none){ fty=ft; bdy=b; which=w;}
+	this(FunctionTy ft, CompoundStm b, Kind w=Kind.none){ fty=ft; bdy=b; which=w;}
 	override string toString(){return _brk((which==Kind.function_?"function"~(fty&&fty.rret?" ":""):which==Kind.delegate_?fty&&fty.rret?"delegate ":"":"")~(fty?fty.toString():"")~bdy.toString());}
 
 	mixin DownCastMethod;
