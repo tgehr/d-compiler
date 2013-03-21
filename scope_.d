@@ -104,6 +104,29 @@ abstract class Scope{ // SCOPE
 		return symtab.get(ident.ptr, alt);
 	}
 
+	void potentialInsert(Identifier ident, Declaration decl){
+		auto ptr = ident.ptr in psymtab;
+		if(!ptr) psymtab[ident.ptr]~=decl;
+		else if((*ptr).find(decl).empty) (*ptr)~=decl;
+	}
+
+	void potentialRemove(Identifier ident, Declaration decl){
+		auto ptr = ident.ptr in psymtab;
+		if(!ptr) return;
+		foreach(i,x;*ptr)
+			if(x is decl){
+				(*ptr)[i]=move((*ptr)[$-1]);	
+				(*ptr)=(*ptr)[0..$-1];
+				(*ptr).assumeSafeAppend();
+				break;
+			}
+	}
+
+	Declaration/+final+/[] potentialLookup(Identifier ident){
+		return psymtab.get(ident.ptr,[]);
+	}
+
+
 	VarDecl getDollar(){return null;}
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
@@ -143,7 +166,7 @@ protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
 private:
 	Declaration[const(char)*] symtab;
-	//FwdRef[] FwdRefs; // TODO: maybe use more efficient datastructure
+	Declaration[][const(char)*] psymtab;
 }
 
 class ModuleScope: Scope{

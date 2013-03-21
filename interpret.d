@@ -622,7 +622,7 @@ enum Instruction : uint{
 	poprkvn,                    // like poprn, but keep value on stack
 	poprkrn,                    // like poprn, but keep stack reference on stack
 	pushcn,                     // push n consecutive heap stack locations given by top
-	popcn,                      // pop to n consecutive heap stack locations given by top
+	popcn,                      // pop n consecutive heap stack locations given by top
 	popckvn,                    // like popcn, but keep value on stack
 	popckrn,                    // like popcn, but keep heap stack location on stack
 	pushccn,                    // ltop: n, top: number of heap stacks to traverse

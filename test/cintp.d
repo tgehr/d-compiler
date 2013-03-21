@@ -1,6 +1,6 @@
-template CommonType(T...){
+/+template CommonType(T...){
 	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }() };
-	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType;
+	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType; // TODO
 	else alias void CommonType;
 }
 
@@ -398,7 +398,7 @@ pragma(msg, "testdollarclosure: ",testdollarclosure());
 
 auto testnulldelegate(){
 	int delegate() dg; // =null; // TODO!
-	return dg();
+	return dg(); // error
 }
 
 auto testnullfunpointer(){
@@ -471,10 +471,10 @@ bool pred(string s){
 
 template binaryFun(alias fun,T){
 	static if(is(typeof(fun)==string))
-		auto binaryFun(T a, T b){
+		auto binaryFun(T a, T b){ // TODO
 			return mixin(fun);
 		}
-	else alias fun binaryFun;
+	else alias fun binaryFun; //TODO
 }
 
 auto sort(alias p,T)(T[] arg){
@@ -532,12 +532,12 @@ static assert([] == null); // TODO!
 
 immutable a = "hallo";
 immutable b = a;
-pragma(msg, a is b);
+pragma(msg, a is b); // TODO (?)
 //pragma(msg, (()=>a is b)());
 //pragma(msg, ((immutable(char)[] a, immutable(char)[] b)=>a is b)(a,b));
 
 int retzero(){return 0;}
-enum divby0 = 1/retzero();
+enum divby0 = 1/retzero(); // error
 
 /+
 // TODO: should this be legal code?
@@ -686,7 +686,7 @@ pragma(msg, "testaddr: ", testaddr());
 
 void testlocal1(){ // (should not compile)
 	int x = 2;
-	immutable y = x;
+	immutable y = x; // error
 	bool tt(){return 2==y;}
 	static assert(tt());
 }
@@ -722,7 +722,24 @@ ref int testrefret(){
 }
 pragma(msg, "testrefret: ",testrefret());
 static assert(testrefret()==8);
-
++/
+ref int testrefret2(){
+	//auto x = delegate(ref int x)ref{ return x; };
+	//auto y = delegate(ref int y)ref{ return x(y); };
+	//auto z = delegate(ref int z)ref{ return x(y(z)); };
+	ref int x(ref int x){ return x; }
+	ref int y(ref int y){ return x(y); }
+	ref int z(ref int z){ return x(y(z)); }
+	int i;
+	x(i)++;
+	y(i)+=++z(i);
+	assert(i==3); // DMD disagrees, but strict left-to-right evaluation results in this
+	x(x(y(y(z(z(i))))))++;
+	return x(y(z(i)));
+}
+static assert(testrefret2()==4);
+pragma(msg, testrefret2());
+/+
 int testrefoutlazy(){
 	int x=1;
 	void testout(out int x){
@@ -746,9 +763,8 @@ int testrefoutlazy(){
 	return x;
 }
 pragma(msg, "testrefoutlazy: ",testrefoutlazy());
+
 static assert(testrefoutlazy()==8);
-
-
 
 int[] createclosure(){
 	int[] x;
@@ -767,7 +783,7 @@ pragma(msg, "createclosure: ",createclosure());
 
 int casts(){
 	int[] a = null;
-	immutable(int)[] b = cast(immutable)a; // disallow unsafe cast
+	immutable(int)[] b = cast(immutable)a; // error: disallow unsafe cast
 	a[0]=2;
 	//int* x = &a[0];
 	return 0;
@@ -804,7 +820,7 @@ void invtest(){
 	bool ttt(){return foo();}
 	static assert(ttt());
 }
-static assert({invtest(); return true;}());
+static assert({invtest(); return true;}()); // error
 
 
 
@@ -935,9 +951,9 @@ int tailcalls(int n, int x){
 	return 1?tailcalls(n-1, x+n):10;
 }
 int tcfac(int n){
-	version(DigitalMars) int loop(int x, int a) {return x>n?a: loop(x+1,x*a);}
+	version(DigitalMars) int loop(int x, int a) {return x>n?a: loop(x+1,x*a);} // TODO
 	else mixin(q{int loop(int x, int a) => x>n?a: loop(x+1,x*a);});
-	return loop(1,1);
+	return loop(1,1); // TODO
 }
 pragma(msg, "tcfac: ", tcfac(10));
 
@@ -1117,9 +1133,11 @@ long testvoid(){
 	b || {a++;}();
 	a && function(long*b){++*b;}(&b);
 	a && {b+=2;}();
+	1 ? {a+=4;}() : ({b+=8;}(),(()=>2)());
+	0 ? ({a+=16;}(),(()=>2)()) : {b+=32;}();
 	return a+b;
 }
-static assert(testvoid()==5);
+static assert(testvoid()==41);
 pragma(msg, "testvoid: ", testvoid());
 
 
@@ -1201,20 +1219,20 @@ pragma(msg, "ptr: ", ptr([1,2,3,4,5,6,7,8,9,10]));
 
 
 immutable(char[]) acast(immutable(char)[] a){
-	auto b = cast(char[])a;
+	auto b = cast(char[])a; // error
 	b[0] = 'b'; // TODO: should this be allowed or not?
 	return cast(immutable)b;
 }
 pragma(msg, "acast: ", acast(`string`));
 
 
-int div(int a, int b){ return a/b; }
+int div(int a, int b){ return a/b; } // error
 pragma(msg, "div: ", div(1,0));
 
-int index(int[] a, int b){ return a[b]; }
+int index(int[] a, int b){ return a[b]; } // error
 pragma(msg, "index: ", index([1,2,3],4));
 
-ulong shl(long a, int b){ return a<<b; }
+ulong shl(long a, int b){ return a<<b; } // error
 pragma(msg, "shl: ", shl(1,32*2));
 
 

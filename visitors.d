@@ -52,6 +52,7 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 						mixin("if(res."~x~" !is null) res."~x~"=res."~x~".ddup();");
 					}else static if(is(typeof(*mixin("&res."~x)):const(Node)[])){
 						mixin("res."~x~"=res."~x~".dup;");
+						static if((!is(T==ReferenceAggregateDecl)||x!="parents"))
 						foreach(ref e;mixin("res."~x)) if(e!is null) e=e.ddup();
 					}
 				}

@@ -1,3 +1,13 @@
+
+auto exec(T)(T arg){
+	pragma(msg, T);
+	return arg();
+}
+pragma(msg, exec((int x=2)=>x));
+pragma(msg, exec((int x=3)=>x));
+
+/+
+
 /+
 // TODO: should this work?
 bool queueDG(S,T,R=T)(S x, R delegate(T) delegate(S) dg, T y){

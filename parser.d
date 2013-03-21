@@ -977,13 +977,17 @@ private struct Parser{
 		else{
 			auto save=saveState();
 			nextToken();
-			for(int nest=1;nest;nextToken()){
+			for(int cnest=1,pnest=0,anest=0;cnest;nextToken()){
 				switch(ttype){
-					case Tok!"{": nest++; continue;
-					case Tok!"}": nest--; continue;
+					case Tok!"{": cnest++; continue;
+					case Tok!"}": cnest--; continue;
+					case Tok!"(": pnest++; continue;
+					case Tok!")": if(pnest) pnest--; continue;
+					case Tok!"[": anest++; continue;
+					case Tok!"]": if(anest) anest--; continue;
 					case Tok!";", Tok!"return", Tok!"if", Tok!"while", Tok!"do", Tok!"for", Tok!"foreach",
-						 Tok!"switch", Tok!"with", Tok!"synchronized", Tok!"try", Tok!"scope", Tok!"asm", Tok!"pragma": // TODO: complete!
-						if(nest!=1) continue; // DMD bug: it lacks this
+						Tok!"switch", Tok!"with", Tok!"synchronized", Tok!"try", Tok!"scope", Tok!"asm", Tok!"pragma", Tok!"class", Tok!"struct", Tok!"interface": // TODO: complete
+						if(cnest!=1||pnest||anest) continue; // DMD bug: it lacks this.
 						goto isdglit;// if it contains return or ;, or it is a delegate literal
 					case Tok!"EOF": break;
 					default: continue;
@@ -1414,6 +1418,7 @@ private struct Parser{
 	}
 	Declaration parseAggregateDecl(STC stc=STC.init, bool anonclass=false)in{assert(anonclass||ttype==Tok!"struct"||ttype==Tok!"union"||ttype==Tok!"class"||ttype==Tok!"interface");}body{
 		enum{Struct,Union,Class,Interface}
+		Location sloc = tok.loc;
 		int type;
 		Identifier name;
 		TemplateParameter[] params; Expression constraint; bool isTemplate=false;
@@ -1447,17 +1452,25 @@ private struct Parser{
 				else expectErr!"base interfaces"();
 			}
 		}
-		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : (nextToken(),null);
-		auto r=
+		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : null;
+		if(!bdy){
+			if(type>=Class){expectErr!"members"(); return New!ErrorDecl();}
+			nextToken();
+		}
+		Declaration r=
 			type==Struct    ? New!StructDecl(stc,name,bdy)           :
 			type==Union     ? New!UnionDecl(stc,name,bdy)            :
 			type==Class     ? New!ClassDecl(stc,name,parents.data,bdy)    :
 			                  New!InterfaceDecl(stc,name,parents.data,bdy);
+		r.loc = sloc.to(tok.loc);
 		if(isTemplate){
 			// uncontrolled allocation ahead
 			auto tmplname = New!Identifier(r.name.name);
 			tmplname.loc = name.loc;
-			return New!TemplateDecl(false, stc, tmplname,params, constraint, New!BlockDecl(stc,[cast(Declaration)r]));
+			auto b = New!BlockDecl(stc,[r]);
+			b.loc = r.loc;
+			r=New!TemplateDecl(false, stc, tmplname,params, constraint, b);
+			r.loc = b.loc;
 		}
 		return r;
 		//return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;

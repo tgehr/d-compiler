@@ -50,7 +50,11 @@ class Module: Declaration{
 	override void semantic(Scope=null){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic();
-		mixin(SemChld!q{decls});
+		foreach(ref x; decls){
+			x.semantic(sc);
+			mixin(Rewrite!q{x});
+		}
+		foreach(x; decls) mixin(SemProp!q{x});
 		assert(sstate==SemState.error||{foreach(x; decls) assert(x.sstate == SemState.completed && !x.needRetry, x.toString()~" "~to!string(x.needRetry));return 1;}());
 		mixin(SemEplg);
 	}

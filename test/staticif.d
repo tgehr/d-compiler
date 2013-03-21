@@ -1,3 +1,8 @@
+
+static if(!is(typeof(a))) enum b = 2;
+static if(!is(typeof(b))) enum a = 2;
+
+
 // void bazz(){}
 // static if(!is(typeof(bazz(2)))) void bazz(int){} // TODO!
 
@@ -79,3 +84,4 @@ void main(){
 }
 
 +/
+// +/

@@ -74,8 +74,7 @@ class Scheduler{
 		void update(){
 			// dw("active: ",active.keys);
 			// dw("asleep: ",asleep.keys);
-
-
+			
 			foreach(nd,sc; active){
 				if(nd.sstate == SemState.completed && !nd.needRetry
 				|| nd.sstate == SemState.error)
@@ -94,8 +93,16 @@ class Scheduler{
 			assert(0); // TODO!
 		}
 		void semantic(){
+			// dw(payload);
 			foreach(nd,sc; payload){
-				//dw("analyzing ",nd);
+				// TODO: kludgy
+				auto tmpl = sc?sc.getTemplateInstance():null;
+				if(tmpl){
+					if(tmpl.sstate == SemState.begin) tmpl.sstate = SemState.started;
+					else tmpl = null;
+				}
+				scope(exit) if(tmpl) tmpl.sstate = SemState.begin;
+				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
 						assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
@@ -104,6 +111,7 @@ class Scheduler{
 					continue;
 				}else if(nd.sstate == SemState.error) remove(nd);
 				nd.semantic(sc);
+				assert(nd.needRetry != 2,nd.toString());
 				//dw("done with ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 			}
 			update();

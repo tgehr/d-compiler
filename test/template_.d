@@ -1,3 +1,5 @@
+
+
 template factorial(int n){
 	static if(n<=1) enum factorial = 1.0L;
 	else enum factorial = n*factorial!(n-1);
@@ -561,6 +563,13 @@ void main(){
 // +/
 // +/
 // +/
+
+/+template Sort(Pred,T...){
+	template PredC(alias A){ template PredC(alias B){ alias Pred!(A,B) PredC; } }
+	static if(!T.length) alias T Sort;
+	else alias TypeTuple!(Sort!(Pred,staticFilter!(PredC!(T[0]),T[1..$/2+1])),T[0],Sort!(Pred,staticFilter!(PredC!(T[0]),T[$/2+1..$]))) Sort;
+}+/
+
 
 alias immutable(char)[] string;
 auto toString(int i){

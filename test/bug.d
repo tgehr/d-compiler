@@ -1,3 +1,5 @@
+
+
 /+
 template asdf(){}
 template Uninstantiable() if(asdf(2)){}
@@ -205,6 +207,18 @@ static assert(!is(typeof({
 auto testtemplatefunclit(alias fun)(){ return fun!int(2); }
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!(x=>2)());
 
+int testlazy(){
+	int x;
+	void testl(lazy int y){
+		assert(y==1&&y==2);
+		assert(x==2);
+	}
+	testl(++x);
+	return x;
+}
+static assert(testlazy()==2);
+
+
 /+
 int k;
 
@@ -212,6 +226,8 @@ typeof(z) x;
 typeof(x) y;
 typeof(y) z;
 +/
+
+static assert(is(typeof({int delegate(int) dg = x=>2;})));
 
 // +/
 

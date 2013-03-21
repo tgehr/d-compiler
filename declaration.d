@@ -99,6 +99,8 @@ abstract class ConditionalDecl: GenerativeDecl{
 	Statement bdy;
 	Statement els;
 	this(STC stc,Statement b,Statement e)in{assert(b&&1);}body{bdy=b; els=e; super(stc,null);}
+
+	mixin Visitors;
 }
 class VersionSpecDecl: Declaration{
 	Expression spec;
@@ -253,7 +255,10 @@ abstract class ValueAggregateDecl: AggregateDecl{
 
 abstract class ReferenceAggregateDecl: AggregateDecl{
 	Expression[] parents;
-	this(STC stc, Identifier name, BlockDecl b){super(stc,name,b);}
+
+	this(STC stc, Identifier name, Expression[] p, BlockDecl b){
+		parents=p; super(stc,name,b);
+	}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -274,17 +279,21 @@ class UnionDecl: ValueAggregateDecl{
 	mixin DownCastMethod;
 }
 class ClassDecl: ReferenceAggregateDecl{
-	this(STC stc,Identifier name, Expression[] p, BlockDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b)in{assert(!!b);}body{
+		super(stc,name,p,b);
+	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"class"~(name?" "~name.toString():"")~
 			(parents.length?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():"");}
 
 	override @property string kind(){ return "class"; }
 
 	mixin DownCastMethod;
-
+	mixin Visitors;
 }
 class InterfaceDecl: ReferenceAggregateDecl{
-	this(STC stc,Identifier name, Expression[] p, BlockDecl b){ parents=p; super(stc,name,b); }
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b)in{assert(!!b);}body{
+		super(stc,name,p,b);
+	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"interface"~(name?" "~name.toString():"")~
 			(parents?": "~join(map!(to!string)(parents),","):"")~(bdy?bdy.toString():";");}
 

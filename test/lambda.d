@@ -1,3 +1,12 @@
+
+class A{}
+class B:A{}
+
+auto f(A function() dg){return dg();}
+
+//pragma(msg, f(()=>cast(B)null));
+
+
 alias immutable(char)[] string;
 
 auto testcontextded(){
