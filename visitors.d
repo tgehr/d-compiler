@@ -49,15 +49,16 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 		static if(is(T==VarDecl)){
 			if(init)
 			if(auto tmp=(cast()init).isTemporaryExp()){
-				assert(tmp.tmpVarDecl is this);
+				assert(!tmp.tmpVarDecl||tmp.tmpVarDecl is this);
+				auto otmp = tmp.tmpVarDecl;
 				tmp.tmpVarDecl = null;
 				auto n = tmp.ddup();
-				n.tmpVarDecl = cast()this;
+				n.tmpVarDecl = otmp;
 				res.init = n;
 			}
 		}
 		foreach(x;__traits(allMembers, T)){
-			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="inst")&&(!is(T==VarDecl)||x!="tupleContext") && (!is(T==TemplateInstanceDecl)||x!="eponymousDecl"&&x!="constraintEponymousFunctionParameters") && (!is(T==VarDecl)||x!="init")){ // hack
+			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="inst")&&(!is(T==VarDecl)||x!="tupleContext") && (!is(T==TemplateInstanceDecl)||x!="eponymousDecl"&&x!="constraintEponymousFunctionParameters" && (!is(T:TemporaryExp)||x!="tmpVarDecl"))){ // hack
 				static if(is(typeof(*mixin("&res."~x)) S) &&
 					     !is(S:immutable(S))){
 					static if(is(S:const(Node))){

@@ -538,19 +538,8 @@ mixin template Interpret(T) if(is(T==CallExp)){
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
+		if(sstate == SemState.error) return;
 		if(rewrite) return;
-/+		if(auto sym = fun.isSymbol())
-			if(auto fn = cast(FunctionDef)sym.meaning){
-				sym.makeStrong();
-				mixin(SemChldPar!q{e});
-				if(fn.sstate == SemState.error){
-					// TODO: better error messages/error message handling scheme
-					sc.error("interpretation of invalid function failed",loc);
-					mixin(ErrEplg);
-				}+/
-		//}
-		//if(fn.type.ret is Type.get!void()) return this; // TODO: ok?
-		// better error messages
 		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
 		static struct MakeStrong{ void perform(Symbol sym){ sym.makeStrong(); } }
 		runAnalysis!MakeStrong(this);
@@ -1631,7 +1620,7 @@ Ltailcall:
 		swtch:final switch(cast(Instruction)byteCode[ip++]){
 			alias Instruction I;
 			case I.hlt:
-				goto Lhlt;
+					goto Lhlt;
 			case I.hltstr:
 				goto Lhltstr;
 			case I.nop: break;
@@ -3713,6 +3702,11 @@ private:
 mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 	private Symbol[] symbols;
 	final Symbol bcFetchVTBL(size_t index){
+		if(vtbl.length<=index){
+			semantic(scope_);
+			if(needRetry) throw new CTFERetryException(this);
+			if(sstate == SemState.error) throw new UnwindException;
+		}
 		if(!symbols.length) symbols = new Symbol[vtbl.length];
 		if(!symbols[index]){
 			symbols[index] = New!Symbol(vtbl.vtbl[index].fun);
@@ -3969,7 +3963,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 					return;
 				}
 				accessError();
-
 				return;
 			}
 			if(!inHeapContext){

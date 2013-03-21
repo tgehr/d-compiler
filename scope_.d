@@ -71,7 +71,7 @@ abstract class Scope{ // SCOPE
 				assert(!d.isOverloadableDecl());
 			}
 			error(format("redefinition of '%s'",decl.name), decl.name.loc);
-			note("previous definition was here",d.name.loc);	             
+			note("previous definition was here",d.name.loc);
 			mixin(SetErr!q{d});
 			return false;
 		}
@@ -113,7 +113,7 @@ abstract class Scope{ // SCOPE
 	}
 
 	final Dependent!Declaration lookupExactlyHere(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, alt).independent;		
+		return symtab.get(ident.ptr, alt).independent;
 	}
 
 	Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
@@ -126,12 +126,26 @@ abstract class Scope{ // SCOPE
 		else if((*ptr).find(decl).empty) (*ptr)~=decl;
 	}
 
+	void insertMixin(MixinDecl decl){
+		mixins ~= decl;
+	}
+	void removeMixin(MixinDecl decl){
+		foreach(i,x; mixins){
+			if(x is decl){
+				mixins[i]=move(mixins[$-1]);
+				mixins=mixins[0..$-1];
+				mixins.assumeSafeAppend();
+				break;
+			}
+		}
+	}
+
 	void potentialRemove(Identifier ident, Declaration decl){
 		auto ptr = ident.ptr in psymtab;
 		if(!ptr) return;
 		foreach(i,x;*ptr)
 			if(x is decl){
-				(*ptr)[i]=move((*ptr)[$-1]);	
+				(*ptr)[i]=move((*ptr)[$-1]);
 				(*ptr)=(*ptr)[0..$-1];
 				(*ptr).assumeSafeAppend();
 				break;
@@ -139,7 +153,9 @@ abstract class Scope{ // SCOPE
 	}
 
 	Declaration/+final+/[] potentialLookup(Identifier ident){
-		return psymtab.get(ident.ptr,[]);
+		return psymtab.get(ident.ptr,[])~cast(Declaration[])mixins;
+		// TODO: this is probably slow
+		// TODO: DMD should allow this without a cast
 	}
 
 
@@ -156,7 +172,7 @@ abstract class Scope{ // SCOPE
 	bool isEnclosing(BreakableStm){return false;}
 
 	bool insertLabel(LabeledStm stm){ assert(0); }
-	LabeledStm lookupLabel(Identifier lbl){ assert(0); }	
+	LabeledStm lookupLabel(Identifier lbl){ assert(0); }
 	void registerForLabel(GotoStm stm, Identifier l)in{
 		assert(stm.t==WhichGoto.identifier);
 	}body{ assert(0); }
@@ -182,6 +198,7 @@ protected:
 private:
 	Declaration[const(char)*] symtab;
 	Declaration[][const(char)*] psymtab;
+	MixinDecl[] mixins;
 }
 
 class ModuleScope: Scope{
@@ -320,12 +337,12 @@ class InheritScope: AggregateScope{
 		if(!d) d = alt;
 		return d.independent;
 	}
-	
+
 	override Dependent!Scope getUnresolved(Identifier ident){
 		mixin(LookupHere!q{auto d; super, ident, null});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
 		mixin(AggregateParentsInOrderTraversal!q{
-			if(auto lkup = parent.asc.getUnresolved(ident).prop) return lkup;	
+			if(auto lkup = parent.asc.getUnresolved(ident).prop) return lkup;
 		});
 		// TODO: this is a hack
 		return ident.recursiveLookup?parent.getUnresolved(ident):null.independent!Scope;
@@ -347,7 +364,7 @@ class TemplateScope: NestedScope{
 
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
-	override Declaration getDeclaration(){return iparent.getDeclaration();}	
+	override Declaration getDeclaration(){return iparent.getDeclaration();}
 	override TemplateInstanceDecl getTemplateInstance(){ return tmpl; }
 }
 

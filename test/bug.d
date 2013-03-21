@@ -1,3 +1,89 @@
+struct DynRange(T){
+	T delegate() front;
+	bool delegate() empty;
+	DynRange!T delegate() popFrontImpl;
+	void popFront(){
+		auto u = popFrontImpl();
+		front = u.front;
+		empty = u.empty;
+		popFrontImpl = u.popFrontImpl;
+	}
+}
+
+DynRange!int dynRange(R)(R dbg)if(isInputRange!R){
+	DynRange!int result;
+	auto x = dbg;
+	pragma(msg, R," ",typeof(x));
+	return result;
+}
+
+
+static struct Delay(R){
+	R delegate() dg;
+	R range;
+	bool init = false;
+	auto front()=>(check(), range.front());
+	auto empty()=>(check(), range.empty());
+	auto popFront()=>(check(), range.popFront());
+	//private:
+	void check(){
+		// if(dg) range = dg(); // TODO!
+		// if(dg == dg); // TODO!
+		// dg = null; // TODO!
+		if(!init) range = dg();
+		init = true;
+	}
+}
+auto delay(R)(R delegate() dg)if(isInputRange!R){
+	//return Delay!R(dg); // TODO
+	Delay!R r; r.dg = dg;
+	return r;
+}
+
+auto dynRangePrimes(){
+	DynRange!int impl(int start)=>
+		dynRange(delay(()=>iota(0,2)));
+	return impl(2);
+}
+
+int doIt(){
+	dynRangePrimes().popFront();
+	return 2;
+}
+
+pragma(msg, "dynRangePrimes: ", doIt());
+
+
+auto testDynRange(){
+	auto rng=dynRange(iota(0,2));
+	return 2;
+}
+
+
+auto iota(int start, int end){
+	static struct Iota{
+		int start, end;
+		int front(){ return start; }
+		bool empty(){ return start == end; }
+		void popFront(){ start++; }
+	}
+	assert(isInputRange!Iota);
+	// return Iota(start, end); // TODO!
+	Iota io; io.start = start; io.end = end;
+	return io;
+}
+
+alias typeof(int[].length) size_t;
+//pragma(msg, size_t);
+
+template isInputRange(R){
+	enum isInputRange=is(typeof({
+		R r;
+		if(!r.empty()) r.popFront();
+		auto f = r.front();
+	}));
+}
+
 
 
 /+
@@ -86,6 +172,15 @@ auto testcallCC(){
 }+/
 
 // ok now
+
+struct DynRange(T){
+	DynRange!T delegate() popFrontImpl;
+	void popFront(){
+		auto u = popFrontImpl();
+	}
+}
+pragma(msg, DynRange!int);
+
 
 struct TestInheritIsExp{
 	class A{ static assert(is(E: A)); }

@@ -1,3 +1,44 @@
+class Ino{
+	this(inout int x)inout{
+		static assert(is(typeof(this) == inout(Ino)));
+	}
+}
+void testIno(){
+	auto ino1 = new Ino(1);
+	auto ino2 = new const(Ino)(2);
+	auto ino3 = new immutable(Ino)(3);
+	(inout int){auto ino4 = new inout(Ino)(3);}(0);
+}
+
+struct TestVirtualCall{
+	class A{ string foo(){ return "B"; }}
+	class B: A{ override string foo(){ return "A"; }}
+	template Mixin(string s){
+		mixin("alias "~s~" Mixin;");
+	}
+	class C: Mixin!({A a = new B; return a.foo();}()){
+		static assert( is(typeof(this): A));
+		static assert(!is(typeof(this): B));
+	}
+
+	template X(){
+		alias Mixin!({E d = new E; return d.foo();}()) X;
+	}
+	class D: X!(){
+		override .string foo(){ // TODO: make work without the '.'
+			return "B";
+		}
+		int foo(int x){ return x;}
+	}
+	class E: D{
+		final override .string foo(){
+			return "C";
+		}
+		override foo(int x){ return super.foo(x); }
+	}
+	static assert({D e = new E; return e.foo(2);}()==2);
+}
+/+
 
 struct TEst{
 	enum x = { auto x = new C; return x.foo(); }();
@@ -272,7 +313,7 @@ class Container{
 		void foo()const shared{
 			static assert(is(typeof(global)==int));
 			static assert(is(typeof(cont)==const(shared(int))));
-			static assert(is(typeof(d)==const(D)));
+			static assert(is(typeof(d)==const(shared(D))));
 			static assert(is(typeof(d.u)==shared(const(int))));
 			static assert(is(typeof(Container2.y)==int));
 		}

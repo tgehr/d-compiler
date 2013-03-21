@@ -34,7 +34,7 @@ int testParentFieldAccess(){
 }
 static assert(testParentFieldAccess()==5);
 pragma(msg, "testParentFieldAccess: ", testParentFieldAccess());
-/+
+
 int[] testQualifiedNonVirtual(){
 	class P{ int foo(){ return 1; }}
 	class C1: P{ override int foo(){ return P.foo(); }}
@@ -78,7 +78,7 @@ int testVirtual(){
 static assert(testVirtual()==5);
 pragma(msg, "testVirtual: ", testVirtual());
 
-/+
+
 int testNew(){
 	struct S{ int x; }
 	class C{ int x; }

@@ -306,6 +306,19 @@ template RevEpoLkup(string e){
 		}
 	});
 }
+
+template RevEpoNoHope(string e){
+	enum RevEpoNoHope=mixin(X!q{
+		if(auto ident = e.isIdentifier()){
+			if(ident.recursiveLookup && typeid(ident) !is typeid(LookupIdentifier)){
+				if(!ident.meaning && ident.sstate != SemState.error){
+					ident.noHope(sc);
+				}
+			}			
+		}
+	});
+}
+
 /+
 // alternative implementation using an additional flag (firstlookup):
 template RevEpoLkup(string e){
@@ -1897,7 +1910,6 @@ class TemplateInstanceDecl: Declaration{
 		assert(!!paramScope);
 	}body{
 		auto bdyscope=New!NestedScope(paramScope);
-
 		bdy = bdy.ddup();
 
 		auto instanceScope = paramScope.iparent;
@@ -2893,9 +2905,13 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	}
 
 	override void noHope(Scope sc){
-		auto unresolved = res.getMemberScope();
-		if(!unresolved.inexistent(eponymous))
-			mixin(ErrEplg);
+		if(res){
+			auto unresolved = res.getMemberScope();
+			if(!unresolved.inexistent(eponymous))
+				mixin(ErrEplg);
+		}else{
+			mixin(RevEpoNoHope!q{e});
+		}
 	}
 
 private:
@@ -3777,7 +3793,10 @@ class Symbol: Expression{ // semantic node
 				fd.analyzeType();
 				mixin(Rewrite!q{fd.type});
 				mixin(CircErrMsg);
-				if(auto nr=fd.type.needRetry) { needRetry = nr; return; }
+				if(auto nr=fd.type.needRetry) {
+					Scheduler().await(this, fd.type, fd.scope_);
+					needRetry = nr; return;
+				}
 				mixin(PropErr!q{fd.type});
 				assert(!fd.rewrite);
 			}
@@ -4040,6 +4059,10 @@ struct MatchContext{
 
 // aware of circular dependencies
 mixin template Semantic(T) if(is(T==CallExp)){
+
+	override void noHope(Scope sc){
+		mixin(RevEpoNoHope!q{e});
+	}
 
 	override void semantic(Scope sc){ // TODO: type checking
 		// parameter passing
@@ -4597,8 +4620,10 @@ enum ResolveConstructor = q{
 			constructor = New!Identifier("this");
 			constructor.recursiveLookup = false;
 		}
-		mixin(Lookup!q{_; constructor, caggr.asc});
-		if(auto nr=constructor.needRetry) { needRetry = nr; return; }
+		if(!constructor.meaning){
+			mixin(Lookup!q{_; constructor, caggr.asc});
+			if(auto nr=constructor.needRetry) { needRetry = nr; return; }
+		}
 	}
 	if(!constructor||constructor.sstate == SemState.failed){
 		// no constructor for type
@@ -4609,7 +4634,9 @@ enum ResolveConstructor = q{
 		}
 	}else{
 		assert(constructor.meaning.isOverloadSet()&&
-		       constructor.meaning.isOverloadSet().isConstructor());
+		       constructor.meaning.isOverloadSet().isConstructor() ||
+		       constructor.meaning.isFunctionDecl()&&
+		       constructor.meaning.isFunctionDecl().isConstructor());
 		// nested classes cannot be built like this
 		//if(caggr.isReferenceAggregateDecl())
 		MatchContext context;
@@ -4626,8 +4653,8 @@ enum ResolveConstructor = q{
 			consCall.loc = loc;
 		}
 		mixin(SemChld!q{consCall});
-		/+				assert(constructor.meaning.isFunctionDecl()&&
-		 constructor.meaning.isFunctionDecl().isConstructor());+/
+		assert(constructor.meaning.isFunctionDecl()&&
+		       constructor.meaning.isFunctionDecl().isConstructor());
 		mixin(SemChld!q{constructor});
 	}
 };
@@ -9257,9 +9284,13 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		foreach(x; type.params){
 			x.semantic(fsc);
 			assert(!x.rewrite);
-			if(auto nr=x.needRetry){ type.needRetry = nr; return; }
+			if(auto nr=x.needRetry){
+				Scheduler().await(this, x, fsc);
+				type.needRetry = nr; return;
+			}
 		}
 		type.semantic(scope_);
+		if(type.needRetry) Scheduler().await(this, type, scope_);
 	}
 
 	override void semantic(Scope sc){
@@ -9390,11 +9421,12 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	static if(is(T==MixinExp)) alias Expression R; // workaround
 	else static if(is(T==MixinStm)) alias Statement R;
 	else static if(is(T==MixinDecl)) alias Declaration R;
-	static if(is(R==Declaration)){
+	static if(is(T==MixinDecl)){
 		override void presemantic(Scope sc){
 			if(sstate != SemState.pre) return;
 			scope_ = sc;
 			sstate = SemState.begin;
+			sc.insertMixin(this);
 		}
 		Declaration mixedin;
 		override void buildInterface(){
@@ -9477,6 +9509,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	override void semantic(Scope sc){
 		auto r=evaluate(sc);
 		mixin(SemCheck);
+		static if(is(T==MixinDecl)) sc.removeMixin(this);
 		mixin(RewEplg!q{r});
 	}
 }

@@ -21,6 +21,7 @@ class Scheduler{
 
 
 	final void await(Node from, Node to, Scope sc)in{assert(from !is to);}body{
+		// dw("from ", from, " to ", to);
 		workingset.await(from, to, sc);
 	}
 	
@@ -185,7 +186,6 @@ class Scheduler{
 				// dw("analyzing ",nd," ",nd.sstate," ",nd.needRetry," ",!!nd.rewrite);
 				if(nd.sstate == SemState.completed){
 					if(nd.needRetry){
-						//assert(nd.needRetry && cast(Expression)nd,text(nd.needRetry," ",nd));
 						if(auto exp=nd.isExpression()) exp.interpret(sc);
 					}else remove(nd);
 					continue;
