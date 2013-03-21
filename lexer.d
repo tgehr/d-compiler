@@ -195,7 +195,7 @@ struct Location{
 	}
 	Location to(const(Location) end)const{// in{assert(end.source is source);}body{
 		// in{assert(rep.ptr<=end.rep.ptr);}body{ // requiring that is not robust enough
-		if(rep.ptr>end.rep.ptr) return cast()this;
+		if(rep.ptr>end.rep.ptr+end.rep.length) return cast()this;
 		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length],line);
 	}
 }

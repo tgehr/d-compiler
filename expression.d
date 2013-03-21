@@ -126,6 +126,7 @@ abstract class Expression: Node{
 		TemporaryExp,
 		StructConsExp,
 		CallExp,
+		UFCSCallExp,
 		MultiReturnValueExp,
 		TernaryExp,
 		CastExp,

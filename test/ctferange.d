@@ -47,8 +47,8 @@ auto testList(){
 		list.add(i);
 	return list;
 }
-pragma(msg, "testList: ", array(testList().range()));
-pragma(msg, "testList2: ", array(map!(a=>a*2)(testList().brange())));
+pragma(msg, "testList: ", testList().range().array);
+pragma(msg, "testList2: ", testList().brange().map!(a=>a*2).array);
 
 auto map(alias a, R)(R range) if(isInputRange!R && is(typeof(a(range.front())))){
 	static struct Map{
@@ -107,7 +107,7 @@ pragma(msg, "iota:   ", array(iota(0,100)));
 static assert(array(map!(a=>a*2)(iota(0,26))) == [0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50]);
 pragma(msg, "map:    ", array(map!(a=>a*2)(iota(0,26))));
 static assert(array(filter!(a=>a&1)(iota(0,100))) == [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,57,59,61,63,65,67,69,71,73,75,77,79,81,83,85,87,89,91,93,95,97,99]);
-pragma(msg, "filter: ", array(filter!(a=>a&1)(iota(0,100))));
+pragma(msg, "filter: ", iota(0,100).filter!(a=>a&1).array);
 static assert(array(take(iota(0,20),10)) == [0,1,2,3,4,5,6,7,8,9]);
 pragma(msg, "take: ", array(take(iota(0,20),10)));
 static assert(reduce!((a,b)=>a+b)(iota(1,101)) == 5050);
@@ -212,11 +212,11 @@ template DDR(R){ alias Delay!(DynRange!R) DDR; }
 
 auto dynRangePrimes(){
 	DynRange!int impl(int start)=>
-		dynRange(cons(start,delay(()=>filter!(a=>a%start)(impl(start+1)))));
+		start.cons(delay(()=>impl(start+1).filter!(a=>a%start))).dynRange;
 	return impl(2);
 }
 
-pragma(msg, "dynRangePrimes: ", array(take(dynRangePrimes(), 20)));
+pragma(msg, "dynRangePrimes: ", dynRangePrimes().take(20).array);
 /+// TODO: be as fast as haskell :)
 dynRangePrimes: [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97,101,103,107,109,113,127,131,137,139,149,151,157,163,167,173,179,181,191,193,197,199,211,223,227,229,233,239,241,251,257,263,269,271,277,281,283,293,307,311,313,317,331,337,347,349,353,359,367,373,379,383,389,397,401,409,419,421,431,433,439,443,449,457,461,463,467,479,487,491,499,503,509,521,523,541]
 
