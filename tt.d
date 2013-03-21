@@ -1,19 +1,12 @@
-import std.stdio, std.range;
+//import std.stdio, std.range;
 
-struct S{
-	this() @disable;
-	int i;
-}
+//int a☺
 
-class C{
-	S s;
-	this(){} // Error: constructor tt.C.this field s must be initialized in constructor
-}
-
-int a☺
+void baz(int z)() {}
 
 void main(){
-	//auto c=new C(0);
+	int x;
+	baz!(x)();
 }
 
 

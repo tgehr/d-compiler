@@ -38,6 +38,11 @@ string escape(string i,bool isc=false){ // TODO: COW, replace with std lib one a
 	return r;
 }
 
+bool isNewLine(dchar c){
+	return c=='\u000A'||c=='\u000B'||c=='\u000C'||c=='\u000D'||c=='\u0085'||c=='\u2028'||c=='\u2029';
+}
+
+
 // memory allocation stuff
 struct MallocAppender(T:T[]){ // NO RAII. Loosely compatible to the std.array.appender interface.
 	static MallocAppender create(size_t initial=16){

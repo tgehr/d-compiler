@@ -1,5 +1,5 @@
 OBJFILES = ttt.o lexer.o parser.o module_.o error.o terminal.o util.o
-DMD = dmd -m32 -O -release -inline
+DMD = dmd -m32 -cov -O -release -inline
 #DMD = dmd -m64 -O -release -inline
 
 

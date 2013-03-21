@@ -2,7 +2,7 @@
 import std.stdio;
 import std.string, std.range, std.array, std.uni;
 
-import lexer;
+import lexer, util;
 
 abstract class ErrorHandler{
 	string source;
@@ -31,7 +31,6 @@ abstract class ErrorHandler{
 			if(l.front=='\t') res=res-res%tabsize+tabsize;
 			else res++;
 		}
-		//res+=loc.rep.ptr-l.ptr;
 		return res+1;
 	}
 }
@@ -48,11 +47,11 @@ class VerboseErrorHandler: ErrorHandler{
 		auto column=getColumn(loc);
 		stderr.writeln(source,':',loc.line,":",column,": ","error: ",err);
 		if(loc.rep[0]){
-			stderr.write(lines[loc.line-1]);
+			stderr.writeln(lines[loc.line-1]);
 			foreach(i;0..column-1) stderr.write(" ");
 			stderr.write("^");
 			loc.rep.popFront();
-			foreach(x;loc.rep){if(isWhite(x)) break; stderr.write("~");}
+			foreach(x;loc.rep) stderr.write("~");
 			stderr.writeln();
 		}
 	}
@@ -71,7 +70,7 @@ class FormattingErrorHandler: VerboseErrorHandler{
 				//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
 				stderr.write(BOLD,GREEN,"^");
 				loc.rep.popFront();
-				foreach(dchar x;loc.rep){if(isWhite(x)) break; stderr.write("~");}
+				foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");}
 				stderr.writeln(RESET);
 			}
 		}else VerboseErrorHandler.error(err,loc);

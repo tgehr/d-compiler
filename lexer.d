@@ -100,7 +100,7 @@ string[2][] specialTokens =
 	 [" ",     "Whitespace",               ],
 	 ["//",    "Comment",                  ],
 	 ["///",   "DokComment",               ],
-	 ["\n",    "NewLine",                  ],
+	 ["\n",    "NewLine",                  ], // TODO: incorporate unicode new line support
 	 ["Error", "Error"                     ],
 	 ["__error","ErrorLiteral"             ],
 	 ["EOF",   "Eof"                       ]];
@@ -157,6 +157,9 @@ string toString(immutable(Token)[] a){string r;foreach(t;a) r~='['~t.toString()~
 struct Location{
 	string rep; // slice of the code representing the Location
 	int line;   // line number at start of location
+	Location to(Location end)const in{assert(rep.ptr<=end.rep.ptr);}body{
+		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length], line);
+	}
 }
 
 struct Token{
@@ -673,6 +676,7 @@ struct Lexer{
 						s=p, p+=len;
 						if(isUniAlpha(ch)) goto identifier;
 						if(!isWhite(ch)) errors~=tokError(format("unsupported character '%s'",ch),s[0..len]);
+						// else if(isNewLine(ch)) line++; // TODO: implement this everywhere
 						continue;
 					}catch{} goto default; // moved outside handler to make -w shut up
 				default:
