@@ -28,15 +28,15 @@ mixin template Analyze(){
 				static assert(!is(typeof(_idfododi)));
 				static assert(!is(typeof(_idfofodi2)));
 				foreach(_idfododi; __traits(allMembers, T)){
-					static if(_idfododi.length && (!is(T:Symbol)||_idfododi!="meaning" && _idfododi!="circ" && _idfododi!="clist") && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy") && (!is(T==TemplateInstanceExp)||_idfododi!="eponymous"&&_idfododi!="decl")&&(!is(T==VarDecl)||_idfododi!="tupleContext")){ // hack
+					static if(_idfododi.length && (!is(T:Symbol)||_idfododi!="meaning" && _idfododi!="circ" && _idfododi!="clist") && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy") && (!is(T==TemplateInstanceExp)||_idfododi!="eponymous"&&_idfododi!="decl")&&(!is(T==VarDecl)||_idfododi!="tupleContext")&&(!is(T==TemplateInstanceDecl)||_idfododi!="eponymousDecl"&&_idfododi!="constraintEponymousFunctionParameters")){ // hack
 						mixin(`alias `~_idfododi~` _idfofodi2;`);
 						static if(is(typeof(_idfofodi2): Node) && !is(typeof(_idfofodi2): Type)){
-							//import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
+							// import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
 
 							if(_idfofodi2) dg(_idfofodi2);
 						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl"){ // hack, annotations will solve this
 
-								//import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
+								// import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
 							 foreach(x; _idfofodi2) if(x) dg(x);
 						}
 					}

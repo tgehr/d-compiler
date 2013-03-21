@@ -1,10 +1,44 @@
+
+template CircCirc(a...){
+	template F(A){}
+	alias F!(CircCirc!(1,2,3)) CircCirc;
+}
+pragma(msg, CircCirc!());
+
+
 alias immutable(char)[] string;
+
+template Test(alias a){
+	enum Test = a;
+}
+
+//int delegate() fozo(){return ()=>2;}
+//pragma(msg,Test!(fozo())() // TODO!
+
+
+
+
+template redefinedparam(T)if(is(typeof(t)==int)){
+	void redefinedparam(T t) {}
+	enum a = t; // is an error
+}
+pragma(msg, redefinedparam!int);
+
+
 
 auto toString(int i){
 	immutable(char)[] s;
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
 }
+
+template CircularInstantiation(int x){
+	enum A = CircularInstantiation!x;
+	enum CircularInstantiation = x;
+}
+pragma(msg, CircularInstantiation!3);
+
+
 
 template fc(int x){
 	static if(x<=1) enum fc=1; // TODO: shouldn't be ambiguous
@@ -265,8 +299,8 @@ auto gun(alias a)(){
 	mixin(stc~q{ref typeof(a) foo(){auto ptr=&a; return *ptr;};});
 	return &foo;
 }
-immutable int x=223;
 
+immutable int x=223;
 auto fun(){
 	int y;
 	immutable int[][] z=[[]];
@@ -280,7 +314,7 @@ auto fun(){
 	x()+=2;
 	return y;
 }
-pragma(msg, fun());
+pragma(msg, "fun: ",fun());
 
 T foo(T)(T arg)=>arg+arg;
 pragma(msg, foo!double(32.2));

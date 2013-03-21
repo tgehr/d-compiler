@@ -146,8 +146,12 @@ class TildeThisExp: Identifier{
 class InvariantExp: Identifier{
 	this(){ super(q{invariant}); }
 }
-class DollarExp: Identifier{
-	this(){ super(q{$}); }
+class DollarExp: Expression{
+	this(){ }
+
+	override string toString(){return "$";}
+
+	mixin Visitors;
 }
 
 class CastExp: Expression{

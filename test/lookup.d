@@ -1,14 +1,72 @@
-template TypeTuple(T...){ alias T TypeTuple;}
+
+template Inex(a...){
+	alias Inex!(1,a[0..n]) Inex;
+}
+
+pragma(msg, Inex!(2,2,3));
+
+
+template Seq(T...){ alias T Seq;}
+
+struct A{
+	alias B.b b;
+	static int foo;
+	int bar;
+}
+struct B{
+	shared int b;
+	alias A.foo foo;
+	alias A.bar bar;
+}
+
+void foo(){
+	immutable(A) a;
+	const(B) b;
+	static assert(!is(typeof({a.b=2;})),"wrong type for this");
+	a.foo=2; // ok: access mutable static member
+	static assert(!is(typeof({a.bar=2;})),"a.bar is immutable");
+	static assert(is(typeof(a.bar)==immutable(int)));
+	
+	static assert(!is(typeof({b.b=2;})), "b.b is shared const");
+	static assert(is(typeof(b.b)==shared(const(int))));
+	b.foo=2; // ok: access mutable static member of another type
+	static assert(!is(typeof({b.bar=2;})), "wrong type for this");
+
+	static assert(is(typeof(b.b)==const(typeof(B.b))));
+	pragma(msg, typeof(B.b));
+	pragma(msg, typeof(b.b));
+}
+
+
+
+/+struct Fancy{
+	int a;
+	int b;
+	alias Seq!(a,b) c;
+	//alias a c;
+}
+
+auto main(){
+	Fancy f;
+	f.a=2;
+	f.c[0]=3;
+	assert(a==3);
+	f.b=2;
+	assert(f.c[1]==2);
+	return f.c;
+}
+pragma(msg, main());+/
+
+
 
 
 void local(){
 	int x;
 	//alias x y;
-	alias TypeTuple!x y;
+	alias Seq!x y;
 	static void foo(){y[0]++;}
 }
 
-/+
 template TT(int i){
 	alias Rest V;
 	static if(i) alias TT!(0).V Rest;
@@ -31,7 +89,7 @@ alias QQ.y b;
 
 double x,y;
 
-alias TypeTuple!(QQ.x, QQ.y) QQs;
+alias Seq!(QQ.x, QQ.y) QQs;
 pragma(msg, QQs);
 
 struct QQ{

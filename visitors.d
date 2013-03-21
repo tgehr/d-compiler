@@ -1,11 +1,22 @@
 // Written in the D programming language.
 
+template IsNonASTType(T){
+	enum IsNonASTType =
+		is(T==Symbol)||
+		is(T==TemplateInstanceDecl)||
+		is(T==ExprTuple)||
+		is(T==TypeTuple)||
+		is(T==PtrExp)||
+		is(T==LengthExp);
+}
+
+
 mixin template Visitors(){
 	// workaround for DMD bug: Interpret goes first
 	/*static if(is(typeof({mixin Semantic!(typeof(this));})))*/
 	static if(is(typeof(this):Expression)&&!is(typeof(this):Type)) mixin Interpret!(typeof(this));// TODO: minimize and report bug
 	static assert(is(TypeTuple==class));
-	static if(!is(typeof(this)==Symbol)&&!is(typeof(this)==TemplateInstanceDecl)&&!is(typeof(this)==ExprTuple)&&!is(typeof(this)==TypeTuple)) mixin Semantic!(typeof(this));
+	static if(!IsNonASTType!(typeof(this))) mixin Semantic!(typeof(this));
 	// another workaround for DMD bug, other part is in expression.Node
 	static if(!is(typeof(this)==Node)){
 		static if(!is(typeof(this)==AggregateTy)) mixin Analyze; // wtf?
@@ -23,7 +34,7 @@ mixin template DeepDup(T) if(is(T: BasicType)){
 
 mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 	@trusted inout(T) ddup()inout{
-		static if(is(T:Type)){
+		static if(is(T:Type) && !is(T==FunctionTy)){
 			if(sstate==SemState.completed) return this;
 			assert(sstate == SemState.begin);
 		}
@@ -33,7 +44,7 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 		memcpy(data.ptr, cast(void*)this, siz);
 		auto res=cast(T)data.ptr;
 		foreach(x;__traits(allMembers, T)){
-			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="decl")&&(!is(T==VarDecl)||x!="tupleContext") /+&& (!is(T:VarDecl)||x!="rtype")+/){ // hack
+			static if(x.length && (!is(T:Symbol)||x!="meaning" && x!="circ" && x!="clist") && x!="ctfeCallWrapper" && (!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="decl")&&(!is(T==VarDecl)||x!="tupleContext") && (!is(T==TemplateInstanceDecl)||x!="eponymousDecl"&&x!="constraintEponymousFunctionParameters")){ // hack
 				static if(is(typeof(*mixin("&res."~x)) S) &&
 					     !is(S:immutable(S))){
 					static if(is(S:const(Node))){
@@ -44,6 +55,9 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 					}
 				}
 			}// else{ import std.stdio; writeln("not copying "~T.stringof,".",x);}
+		}
+		static if(is(T==FunctionTy)){
+			res.clearCaches();
 		}
 		return *cast(inout(T)*)&res;
 	}

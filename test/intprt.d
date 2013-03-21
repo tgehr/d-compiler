@@ -1,3 +1,22 @@
+
+immutable int i = 3;
+pragma(msg, [1,2,3][(()=>i)()]);
+pragma(msg, [1,2,3][$]);
+pragma(msg, [1,2,3][$-1]);
+
+pragma(msg, [1,2][0..$+1]);
+pragma(msg, [1,2][$+1..0]);
+pragma(msg, [0,1][1..0]);
+
+
+int fail(){int x; return x/x;}
+
+pragma(msg, [fail()][$/($-1)]);
+/+
+pragma(msg, 2/3);
+
+
+
 static assert( (4.0 + 3.0i) * (5 + 7i) ==-1 + 43i  );
 
 static assert(cast(short)cast(ulong)1e10 == -7168);

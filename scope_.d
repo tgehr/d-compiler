@@ -106,6 +106,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 		return symtab.get(ident.ptr, alt);
 	}
 
+	Expression getArrayExp(){return null;}
 	FunctionDef getFunction(){return null;}
 	AggregateDecl getAggregate(){return null;}
 	Declaration getDeclaration(){return null;}
@@ -132,6 +133,12 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 
 
 	string toString(){return to!string(typeid(this))~"{"~join(map!(to!string)(symtab.values),",")~"}";}
+
+	final Scope clone(){
+		auto r = New!Scope(handler);
+		r.symtab=symtab.dup;
+		return r;
+	}
 
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
@@ -193,6 +200,20 @@ class NestedScope: Scope{
 	override Module getModule(){return parent.getModule();}
 }
 
+class ArrayScope: NestedScope{
+	Expression e;
+	bool hasDollarExp;
+	this(Scope parent, Expression e){
+		super(parent);
+		this.e = e;
+	}
+
+	override Expression getArrayExp(){
+		hasDollarExp = true;
+		return e;
+	}
+}
+
 class AggregateScope: NestedScope{
 	this(AggregateDecl decl) in{assert(!!decl.scope_);}body{
 		super(decl.scope_);
@@ -206,7 +227,8 @@ private:
 }
 
 class TemplateScope: NestedScope{
-	Scope iparent;
+	// inherits Scope parent; // parent scope of the template declaration
+	Scope iparent; // parent scope of the instance
 	TemplateInstanceDecl tmpl;
 	this(Scope parent, Scope iparent, TemplateInstanceDecl tmpl) in{assert(!!parent);}body{
 		super(parent);

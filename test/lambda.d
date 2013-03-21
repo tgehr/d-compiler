@@ -1,4 +1,12 @@
 
+void validconversions(){
+	void delegate()const[] x;
+	const(void delegate())[] y = x;
+}
+
+
+/+
+
 struct S{
 	int a;
 	int foo(){return 2;}
@@ -50,3 +58,4 @@ auto toString(int i){
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
 }
++/

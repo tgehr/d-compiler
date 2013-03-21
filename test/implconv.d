@@ -1,4 +1,6 @@
 
+static assert(!is(int[2]: int[1]),"TODO"); // TODO!
+
 //byte b = 0b11110000; // TODO: find a case to prove inconsistency of DMD
 
 enum x = 2i*1;

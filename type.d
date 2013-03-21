@@ -120,7 +120,7 @@ struct Class{}
 struct Size_t{
 	static int size = 8;
 	static @property string suffix(){
-		return size==4?"U":size==8?"LU":"";
+		return size==4?"U":size==8?"LU":(assert(0),"");
 	}
 }
 
@@ -151,7 +151,7 @@ class FunctionTy: Type{
 	Parameter[] params;
 	VarArgs vararg;
 	this(STC stc, Expression retn,Parameter[] plist,VarArgs va){this.stc=stc; rret=retn; params=plist; vararg=va;}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(rret&&!ret?rret.toString():ret?ret.toString():"")~pListToString();}
+	override string toString(){return (rret&&!ret?rret.toString():ret?ret.toString():"")~pListToString();}
 	string pListToString(){
 		return "("~join(map!(to!string)(params),",")~(vararg==VarArgs.cStyle?(params.length?",":"")~"...)":vararg==VarArgs.dStyle?"...)":")")~STCtoString(stc);
 	}

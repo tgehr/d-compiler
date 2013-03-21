@@ -1,5 +1,5 @@
 //alias void foo(){};
-bool match(Group!DataIndex matches[]);
+bool match(Group!DataIndex matches[]); // TODO
 void main(){
 	//auto x = r"\ ";
 	//import std.stdio;
@@ -7,6 +7,8 @@ void main(){
 	int[]x,y;
 	//1 < 2 < 3;
 	//@@=;
+
+	auto fun = delegate immutable{return 2;};// TODO: ban or make correct
 
 	static assert(!is(typeof({mixin(`auto dg = (int)@ => 2;`);})));
 

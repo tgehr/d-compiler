@@ -1,3 +1,132 @@
+
+bool bsearch(T)(T[] haystack, T needle){
+	if(haystack.length<=1) return (haystack~(needle+1))[0]==needle;
+	bool b = haystack[$/2]>needle;
+	return bsearch!T(haystack[b?0:$/2..b?$/2:$], needle);
+}
+
+pragma(msg, "bsearch1: ",bsearch!int([1,2,3],0));
+pragma(msg, "bsearch2: ",bsearch!int([0,2,5],2));
+pragma(msg, "bsearch3: ",bsearch!int([0,2,5],3));
+pragma(msg, "bsearch4: ",bsearch!int([],0));
+
+
+auto testdollar(){
+	int[] x = [1,2,3,4];
+	auto ptr=&x[(x~=cast(int)$,x~=cast(int)$,0)];
+	assert(x.length==6 && x[$-2]==4 && x[$-1]==4);
+	*ptr = 2;
+	assert(x[0]==2);
+	x[0]=1;
+	assert(*ptr==1);
+	x=x[0..$-2];
+	return x[$-1]~x[$-3..$-1]~x[$-4..$][0];
+}
+static assert(testdollar()==[4,2,3,1]);
+pragma(msg, "testdollar: ",testdollar());
+
+auto loopclosures(int n){
+	immutable(int)* delegate()[] a;
+	for(int i=0;i<n;i++){
+		immutable int j=i;
+		a ~= {return &j;};
+	}
+	int[] r;
+	for(int i=0;i<n;i++) r~=*a[i]();
+	return r;
+}
+
+static assert(loopclosures(10)==[0,1,2,3,4,5,6,7,8,9],"TODO!"); // TODO!
+
+auto testlambda(){
+	int x;
+	(){(){x++;}();}();
+	return x;
+}
+
+pragma(msg, "testlambda: ",testlambda());
+
+
+auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0]))[])){
+	typeof(a(arg[0]))[] r;
+	for(int i=0;i<arg.length;i++)
+		r~=a(arg[i]);
+	return r;
+}
+pragma(msg, typeof(map!(toString,int)));
+
+int[] iota(int a, int b){ int[] r; for(int i=a;i<b;i++) r~=i; return r; }
+
+bool pred(string s){
+	int c=0;
+	for(int i=0;i<s.length;i++) c+=s[i]=='2';
+	return c>=2;
+}
+
+pragma(msg, filter!(pred,string)(map!(toString,int)(iota(0,1000))));
+
+auto filter(alias a,T)(T[] arg) if(is(typeof(cast(bool)a(arg[0])):bool)){
+	typeof(arg) r;
+	for(int i=0;i<arg.length;i++)
+		if(a(arg[i])) r~=arg[i];
+	return r;
+}
+
+template binaryFun(alias fun,T){
+	static if(is(typeof(fun)==string))
+		auto binaryFun(T a, T b){
+			return mixin(fun);
+		}
+	else alias fun binaryFun;
+}
+
+auto sort(alias p,T)(T[] arg){
+	alias binaryFun!(p,T) pred;
+	if(arg.length <= 1) return arg;
+	bool low(T x){return !!pred(x,arg[0]);}
+	bool high(T x){return !pred(x,arg[0]);}
+	return sort!(pred,T)(filter!(low,T)(arg))
+	~ arg[0] ~ sort!(pred,T)(filter!(high,T)(arg[1..arg.length]));
+}
+
+
+
+auto mod(int x){return (int y)=>y%x;}
+
+
+auto mod10(int y){return mod(10)(y);}
+
+enum unsorted = [3,28,1,29,33,828,11,282,34,378,122,122];
+
+pragma(msg, sort!("a<b",int)(map!(mod10,int)(unsorted)));
+
+//pragma(msg, sort!("a",int)(map!(mod10,int)([3,28,1,29,33,828,11,282,34,378,122,122])));
+
+bool less(int a,int b){return a<b;}
+pragma(msg, sort!(less,int)(unsorted));
+pragma(msg, sort!(less,int)(unsorted));
+pragma(msg, sort!("a>b",int)(unsorted));
+
+
+
+
+auto testarrayptrlength(){
+	int[] x = [1,2,4];
+	assert(x.length==3);
+
+	auto y = x.ptr;
+	static assert(is(typeof(*y) == typeof(x[0])));
+	assert(*y==1 && y[1]==2 && y[2]==4);
+
+	*y=8;
+	assert(x[0]==8);
+	(){*(y+2)=1337;}();
+	return *(y+x.length-1);
+}
+static assert(testarrayptrlength()==1337);
+pragma(msg, "testarrayptrlength: ", testarrayptrlength());
+
+
 typeof(null) retnull(){return null;}
 pragma(msg, "retnull: ",retnull());
 
@@ -934,3 +1063,11 @@ auto dg = (delegate int(int x) => x)(2);+/
 
 // +/
 // +/
+
+alias immutable(char)[] string;
+
+auto toString(int i){
+	immutable(char)[] s;
+	do s=(i%10+'0')~s, i/=10; while(i);
+	return s;
+}

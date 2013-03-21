@@ -6,6 +6,23 @@ template TypeTuple(T...){ alias T TypeTuple; }
 pragma(msg, TypeTuple!(1,2,3,4)[1..3]);
 TypeTuple!(int,double,float,long)[1..3] xx;
 pragma(msg, typeof(xx));
+pragma(msg, "length: ",TypeTuple!(1,2,3).length);
+pragma(msg, "$ 1: ", TypeTuple!(1,2,3)[$-1]);
+
+pragma(msg, "$ 2: ", TypeTuple!(int,double)[$-1]);
+
+pragma(msg, "$ 3: ", TypeTuple!(1,2,3)[1..$]);
+pragma(msg, "$ 3: ", TypeTuple!(int,int,int)[1..$]);
+
+
+/+
+
+template Fst(T...){
+	alias T[0] Fst;
+}
+
+pragma(msg, "Fst: ",[TypeTuple!(Fst!(TypeTuple!("133",2,3,4)),"2","3","4")]);
+
 
 
 
@@ -48,8 +65,6 @@ auto testAliasTuple(){
 }
 static assert(testAliasTuple()==[2,3,4,5,3,4,5,6,18,4,5,4,5]);
 pragma(msg, testAliasTuple());
-
-
 
 
 pragma(msg, TypeTuple!(1,2,3));
@@ -103,31 +118,33 @@ immutable int[2] a2=[1,2];
 //pragma(msg, a[1..3]);
 pragma(msg, a2[1]);
 
-template StaticMap(alias F, int len, a...){
-	static if(len) alias TypeTuple!(F!(a[0]), StaticMap!(F,len-1,a[1..len])) StaticMap;
+template StaticMap(alias F, a...){
+	static if(a.length) alias TypeTuple!(F!(a[0]), StaticMap!(F,a[1..a.length])) StaticMap;
 	else alias TypeTuple!() StaticMap;
 }
 
-template StaticFoldr(alias F, int len, a...){
-	static if(len==2) alias F!(a[0],a[1]) StaticFoldr;
-	else alias F!(a[0],StaticFoldr!(F,len-1,a[1..len])) StaticFoldr;
+template StaticFoldr(alias F, a...){
+	static if(a.length==2) alias F!(a[0],a[1]) StaticFoldr;
+	else alias F!(a[0],StaticFoldr!(F, a[1..a.length])) StaticFoldr;
 }
+
+
+template CommonType(A,B){ alias typeof({A a; B b; return 1?a:b;}()) CommonType; }
+pragma(msg, StaticFoldr!(CommonType, int, double, short, real));
 
 template TimesTwo(int x){ enum TimesTwo = x+x; }
 template Square(int x){ enum Square = x*x; }
 
-template CommonType(A,B){ alias typeof({A a; B b; return 1?a:b;}()) CommonType; }
 
-pragma(msg, [StaticMap!(TimesTwo,30,StaticIota!(1,31))]);
-pragma(msg, StaticMap!(Square,30,StaticIota!(1,31)));
+pragma(msg, [StaticMap!(TimesTwo,StaticIota!(1,31))]);
+pragma(msg, StaticMap!(Square,StaticIota!(1,31)));
 
-pragma(msg, StaticFoldr!(CommonType, 4,int, double, short, real));
 
-template StaticFilter(alias F, int len, a...){
-	static if(!len) alias a StaticFilter;
+template StaticFilter(alias F, a...){
+	static if(!a.length) alias a StaticFilter;
 	else static if(F!(a[0])) alias TypeTuple!(a[0], Rest) StaticFilter;
 	else alias Rest StaticFilter;
-	static if(len) alias StaticFilter!(F,len-1,a[1..len]) Rest;
+	static if(a.length) alias StaticFilter!(F,a[1..a.length]) Rest;
 }
 
 bool any(alias a,R)(R r, int len){// if(is(typeof(a(r[0])) == bool)) {
@@ -157,6 +174,7 @@ template StaticIota(int a, int b) if(a<=b){
 	else alias TypeTuple!(a,StaticIota!(a+1,b)) StaticIota;
 }
 
+
 template Divides(int a){
 	template Divides(int b){
 		enum Divides = a%b==0;
@@ -167,7 +185,7 @@ template Divides(int a){
 
 
 template IsPrime(int p){
-	//enum IsPrime = !is(typeof(StaticFilter!(Divides!p, p, StaticIota!(1,p+1))[2]));
+	// enum IsPrime = StaticFilter!(Divides!p, StaticIota!(1,p+1)).length==2;
 	enum IsPrime = {
 		int r;
 		for(int i=1;i<=p;i++) r+=!(p%i);

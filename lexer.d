@@ -1193,7 +1193,7 @@ unittest{
 	assert(lex(".\r..\v...\t  ....\r\n") == [t!".", t!"\n", t!"..", t!"...", t!"...", t!".",t!"\n"]);
 	assert(to!string(lex(ulong.max.stringof)[0]) == ulong.max.stringof);
 	assert(lex(ulong.max.stringof[0..$-2])[0].type == Tok!"Error");
-	for(ulong i=0;i<1000;i++){
+	foreach(i;0..1000UL){
 		ulong v = i^^4*1337;
 		ulong w = lex(to!string(v))[0].int64;
 		assert(w == v);
