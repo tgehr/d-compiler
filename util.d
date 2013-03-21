@@ -1,5 +1,13 @@
 // Written in the D programming language.
 
+// FOR DEBUGGING ONLY
+public import std.stdio;
+void dw(T...)(T args){
+	debug writeln(args);
+	else static assert(0,"debugging output call in release mode");
+}
+/////////////////////
+
 import std.c.stdlib;
 import std.c.string;
 
@@ -300,11 +308,11 @@ template XX(string x){
 // Versions from Phobos do not work. TODO: reduce and file bug report
 
 import std.range;
-bool any(alias a,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
+bool any(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(/+auto+/ref x;range) if(a(x)) return true;
 	return false;
 }
-bool all(alias a,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
+bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(/+auto+/ref x;range) if(!a(x)) return false;
 	return true;
 }

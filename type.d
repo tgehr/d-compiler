@@ -11,7 +11,7 @@ import std.traits : Unqual;
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
 	this(){type = get!void();}
-	private this(int){type = this;}
+	private this(int){type = this;} // break infinite recursion for 'void'
 
 	override string toString(){return "Type";}
 	override @property string kind(){return "type";}
@@ -71,9 +71,9 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 	}
 
 	static Type get(T:Size_t)(){ // typeof((new int[]).length)
-		enum _32bit = true; // TODO: make parameterizable
-		if(_32bit) return get!uint();
-		else return get!ulong();
+		if(Size_t.size==4) return get!uint();
+		else if(Size_t.size==8) return get!ulong();
+		else assert(0,"TODO: gracefully melt down");
 	}
 
 
@@ -117,7 +117,12 @@ struct EmptyArray{}
 struct Struct{}
 struct Class{}
 
-struct Size_t{}
+struct Size_t{
+	static int size = 8;
+	static @property string suffix(){
+		return size==4?"U":size==8?"LU":"";
+	}
+}
 
 class NullPtrTy: Type{ // typeof(null)
 	this(){sstate = SemState.completed;}
@@ -323,8 +328,6 @@ class InoutTy: QualifiedTy{
 class AggregateTy: Type{
 	AggregateDecl decl;
 	this(AggregateDecl decl){ this.decl = decl; sstate = SemState.completed; }
-
-	override string toString(){return decl.name.name;}
 
 	mixin DownCastMethod;
 	mixin Visitors;

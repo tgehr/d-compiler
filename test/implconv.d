@@ -16,3 +16,9 @@ inout(void) foo(inout(int)){
 	inout(const(int))* x3 = x1;
 	x2 = x3;
 }
+
+
+int[][] a = [[]];
+immutable int[][] b = [[]];
+
+pragma(msg, typeof(a~b));

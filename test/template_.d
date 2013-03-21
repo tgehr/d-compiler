@@ -1,16 +1,162 @@
 
-auto foo(){
+alias immutable(char)[] string;
+
+template fc(int x){
+	static if(x<=1) enum fc=1; // TODO: shouldn't be ambiguous
+	else enum fc = fc!(x-1);
+}
+pragma(msg, fc!2);
+
+template ttt(int x){
+	int ttt(){return 2;}
+	pragma(msg, typeof(ttt));
+}
+mixin ttt!2;
+
+
+/+
+
+template AA(string xx){
+	enum x = mixin(xx);
+	static assert(x>0);
+	template BB(int y) if(x<y){
+		static assert(y<10);
+		enum BB = "hello world";
+	}
+}
+pragma(msg, AA!"0".BB!1);
+pragma(msg, AA!"0".BB!0);
+pragma(msg, AA!"3".BB!13~' '~AA!"3".BB!4);
+
+
+auto to(T,F)(F arg){
+	static if(is(F==int) && is(T==string)) return toString(arg);
+	else static assert(0, "not yet implemented!");
+}
+
+pragma(msg, [to!(string,int)(1337)]);
+pragma(msg, [to!(string,uint)(1337u)]);
+
+
+template Ov(const(int) x){pragma(msg, 1);}
+template Ov(uint x){pragma(msg, 2);}
+
+mixin Ov!2u; 
++/
+
+template isInputRange(R){
+	enum isInputRange=is(typeof(delegate void(){
+		R r;
+		if(!r.empty()) r.popFront();
+		auto f = r.front();
+	}));
+}
+
+template ElementType(R) if(isInputRange!R){
+	alias typeof({R r; return r.front();}()) ElementType;
+}
+
+struct Range{
+	bool empty(){return false;}
+	void popFront(){}
+	int front(){return 10;}
+}
+Range r;
+
+struct NonRange{
+	auto really(){return -10;}
+	bool nota(){return true;}
+	void range(){}
+}
+
+struct PRange(alias a){
+	bool empty(){return false;}
+	void popFront(){}
+	auto front(){return a;}
+}
+
+PRange!r pr;
+PRange!pr ppr;
+PRange!ppr pppr;
+PRange!pppr ppppr;
+
+pragma(msg, "! ",ElementType!(ElementType!(ElementType!(ElementType!(PRange!(ppr))))));
+
+pragma(msg, ElementType!(PRange!ppr));
+pragma(msg, ElementType!(PRange!pr));
+
+
+pragma(msg, typeof(PRange!pr.front()));
+
+
+
+
+auto array(R)(R arg) if(isInputRange!R) {
+	ElementType!R[] res;
+	for(auto r = arg; !r.empty(); r.popFront()) res~=r.front();
+	return res;
+}
+
+struct L(T){
+	static if(is(typeof(T.t))) enum t = T.t*2;
+	else enum t = 1;
+}
+
+static assert(L!(L!(L!(L!(L!(L!(L!(L!int))))))).t == 1<<7);
+pragma(msg, "L!L!L!...: ", L!(L!(L!(L!(L!(L!(L!(L!int))))))).t);
+
+
+//pragma(msg, int*);
+
+pragma(msg, "Range*: ",ElementType!(Range*));
+
+
+pragma(msg, typeof(array!(PRange!pppr)(ppppr)));
+
+pragma(msg, "!!",typeof(PRange!(PRange!(r)).front()));
+
+
+pragma(msg, ElementType!Range);
+pragma(msg, ElementType!NonRange);
+pragma(msg, isInputRange!Range);
+pragma(msg, isInputRange!NonRange);
+
+
+
+
+pragma(msg, typeof(array!Range(r)));
+pragma(msg, typeof(array!NonRange(r)));
+
+
+template TT(int x) if(x>22){ immutable int TT = x; }
+
+pragma(msg, TT!21);
+pragma(msg, TT!23);
+
+bool iloop(){return iloop();}
+template LoL(int x) if(x>22 && iloop()){ immutable int LoL=x; }
+pragma(msg, LoL!21);
+
+immutable int[] x;
+
+pragma(msg, typeof(x)[]);
+
+
+
+
+auto foo3(){
 	immutable int y=22;
 	auto fooz()(){return y+2;}
 	auto x = (){enum a = fooz!()(); return a;};
 	pragma(msg, typeof(x));
 	return x;
 }
-pragma(msg, foo()());
+pragma(msg, foo3());
 
 
-
-/+int testaliasparam(){
+version(DigitalMars){}
+else mixin(q{
+int testaliasparam(){
 	int x;
 	template Foo(alias X) { auto p(){return &X;} }
 	template Bar(alias T) { alias T!(x) abc; }
@@ -18,8 +164,9 @@ pragma(msg, foo()());
 	test();
 	return x;
 }
-pragma(msg, testaliasparam());+/
-
+static assert(testaliasparam()==3);
+pragma(msg, "testaliasparam: ",testaliasparam());
+ });
 /+class S{
 	int x;
 	template foo(){
@@ -37,7 +184,7 @@ pragma(msg, testaliasparam());+/
 }+/
 
 
-/+
+
 T foo(T)(T arg){
 	return arg>0?arg+foo!T(arg-1):0;
 }
@@ -58,8 +205,8 @@ template test(){
 void main(){
 	test!();
 }
-+/
-/+
+
+
 
 // TODO: currently, recursive templates are in Omega(N^2)
 // TODO: FIX!
@@ -68,19 +215,20 @@ template factorial(int n){
 	static if(n<=1) enum V = 1.0L;
 	else enum V = n*factorial!(n-1).V;
 }
+/+
 template recu1(int n){
 	static if(n<=1) int V(){return 1;}
 	else int V(){return recu1!(n-1).V();}
 }
 
-pragma(msg, recu1!200.V());
+pragma(msg, "recu1: ",recu1!20.V());
 
 template recu2(int n){
 	static if(n<=1) int V(){return 1;}
 	else auto V(){return recu2!(n-1).V();}
-}
+}+/
 
-pragma(msg, recu2!200.V());
+pragma(msg, "recu2: ",recu2!20.V());
 
 
 //pragma(msg, factorial!130.V);
@@ -94,7 +242,6 @@ auto gen(){
 
 //pragma(msg, gen());
 mixin(gen());
-+/
 
 /+
 auto gun(alias a)(){
@@ -388,3 +535,6 @@ auto toString(int i){
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
 }
+
+
+// +/

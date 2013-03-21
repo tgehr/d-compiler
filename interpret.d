@@ -40,7 +40,7 @@ mixin template Interpret(T) if(is(T==MixinExp) || is(T==IsExp)){
 mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
 	override Expression interpret(Scope sc){
 		assert(sc, "expression "~toString()~" was assumed to be interpretable");
-		sc.error(format("expression '%s' is not interpretable at compile time yet",loc.rep),loc);
+		sc.error(format("expression '%s' is not interpretable at compile time yet",toString()),loc);
 		mixin(ErrEplg);
 	}
 }
@@ -48,10 +48,15 @@ mixin template Interpret(T) if(is(T:Expression) && NotYetImplemented!T){
 mixin template Interpret(T) if(is(T==Expression)){
 
 	final void prepareInterpret(){
-		static struct DontAccessibilityCheckSymbols{
-			void perform(Symbol self){ self.accessCheck = AccessCheck.memberFuns; }
+		weakenAccessCheck(AccessCheck.memberFuns);
+	}
+
+	final void prepareLazyConditionalSemantic(){
+		static struct ApplyLazyConditionalSemantic{
+			void perform(BinaryExp!(Tok!"||") self){ self.lazyConditionalSemantic = true; }
+			void perform(BinaryExp!(Tok!"&&") self){ self.lazyConditionalSemantic = true; }
 		}
-		runAnalysis!DontAccessibilityCheckSymbols(this);
+		runAnalysis!ApplyLazyConditionalSemantic(this);
 	}
 
 	// scope may be null if it is evident that the expression can be interpreted
@@ -87,6 +92,13 @@ mixin template Interpret(T) if(is(T==Expression)){
 		return Variant("TODO: cannot interpret "~to!string(this)~" yet");
 		//return Variant.init;
 	}
+
+	final Expression cloneConstant()in{assert(!!isConstant());}body{
+		auto r = interpretV().toExpr();
+		r.type = type;
+		return r;
+	}
+
 protected:
 	// for interpret.d internal use only, protection system cannot express this.
 	Expression _interpretFunctionCalls(Scope sc){return this;}
@@ -138,7 +150,12 @@ mixin template Interpret(T) if(is(T==Type)){
 mixin template Interpret(T) if(is(T==Symbol)){
 	override bool checkInterpret(Scope sc){
 		if(meaning.sstate == SemState.error) return false;
-		if(isConstant()) return true;
+		if(auto vd = meaning.isVarDecl()){
+			if(vd.stc&STCenum
+			|| vd.stc&(STCimmutable|STCconst)
+			&& vd.init && vd.init.isConstant())
+				return true;
+		}
 		return super.checkInterpret(sc);
 	}
 
@@ -355,7 +372,22 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 	}
 protected:
 	override Expression _interpretFunctionCalls(Scope sc){
-		static if(S==Tok!"&&"||S==Tok!"||"){
+		static if(S==Tok!"/"){
+			mixin(IntFCChldNoEplg!q{e1,e2});
+			if(type.isIntegral() && e2.interpretV() == Variant(0)){
+				sc.error("divide by zero",loc);
+				mixin(ErrEplg);
+			}
+			mixin(IntFCEplg);
+		}else static if(S==Tok!"is"||S==Tok!"!is"){
+			mixin(IntFCChldNoEplg!q{e1,e2});
+			assert(e1.type is e2.type);
+			
+			// TODO: allow comparing values against 'null' or '[]'
+
+			sc.error("cannot interpret '"~TokChars!S~"' expression during compile time", loc);
+			mixin(ErrEplg);
+		}else static if(S==Tok!"&&"||S==Tok!"||"){
 			mixin(IntFCChldNoEplg!q{e1});
 			assert(e1.type is Type.get!bool());
 			if(cast(bool)e1.interpretV()^(S==Tok!"&&")) return e1;
@@ -426,6 +458,7 @@ protected:
 			r.loc = this.loc;
 			return r;
 		}catch(CTFERetryException e){
+			static int ccc;
 			needRetry = e.needRetry;
 			return this;
 		}catch(Exception){
@@ -792,14 +825,7 @@ struct ByteCodeBuilder{
 	private size_t stackOffset=0;
 	private size_t contextOffset=0;
 	private size_t iloc;
-	debug{
-		enum State{
-			idle,
-			waitingForLabel,
-		}
-		State state;
-	}
-	
+
 	void addStackOffset(size_t amt){stackOffset+=amt;}
 	size_t getStackOffset(){return stackOffset;}
 	void addContextOffset(size_t amt){contextOffset+=amt;}
@@ -2021,7 +2047,7 @@ Loutofbounds:
 	auto s_t = Type.get!Size_t();
 	if(s_t.getSizeof()==uint.sizeof) tmp[0] = cast(uint)tmp[0];
 	else assert(s_t.getSizeof()==ulong.sizeof);
-	handler.error(format("array index %sU is out of bounds [0U..%dU)",tmp[0],tmp[1]),info1.loc);
+	handler.error(format("array index %s%s is out of bounds [0%s..%d%s)",tmp[0],Size_t.suffix,Size_t.suffix,tmp[1],Size_t.suffix),info1.loc);
 	goto Lfail;
 Lshiftoutofrange:
 	auto info2 = obtainErrorInfo();
@@ -2939,6 +2965,8 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 		}else{
 			// TODO: nested functions
 			size_t len, off = vd.getBCLoc(len);
+			// import std.stdio; writeln(vd," ",off," ",len);
+
 			if(!~off || !len){
 				if(isConstant()){
 					// TODO: this can be inefficient for non-enum variables
@@ -3001,7 +3029,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 			bld.emitConstant(cast(ulong)cast(void*)this);
 			return;
 		}
-		bld.error(format("cannot interpret symbol '%s' at compile time", toString()), loc);
+		bld.error(format("cannot interpret symbol '%s' at compile time", loc.rep), loc);
 	}
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		if(auto vd = meaning.isVarDecl()){
@@ -3083,6 +3111,12 @@ mixin template CTFEInterpret(T) if(is(T==Declarators)){
 }
 mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		if(auto tp=type.isTypeTuple()){
+			assert(tupleContext && tupleContext.vds.length == tp.length);
+			foreach(x;tupleContext.vds) x.byteCompile(bld);
+			return;
+		}
+
 		size_t off, len = getBCSizeof(type);
 		if(len!=-1){
 			if(inHeapContext){
@@ -3108,14 +3142,17 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			bld.addContextOffset(len);
 			return;
 		}
+
 		bld.error(format("cannot interpret local variable of type '%s' at compile time yet.",type.toString()),loc);
 	}
 
 	final void setBCLoc(size_t off, size_t len){
+		// import std.stdio; writeln(this," ", len," ", off);
 		byteCodeStackOffset = off;
 		byteCodeStackLength = len;
 	}
 	final size_t getBCLoc(ref size_t len){
+		// import std.stdio; writeln("l ",this," ",cast(void*)this," ", byteCodeStackLength," ", byteCodeStackOffset);
 		len = byteCodeStackLength;
 		return byteCodeStackOffset;
 	}

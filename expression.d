@@ -33,16 +33,19 @@ abstract class Expression: Node{
 	override string toString(){return _brk("{}()");}
 	protected string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
 
-	override @property string kind(){return "expression";}
+	override @property string kind(){return isConstant?"constant":"expression";}
 
 	mixin DownCastMethods!(
 		Symbol,
 		Identifier,
 		FieldExp,
-		Type,
 		LiteralExp,
 		ArrayLiteralExp,
 		TernaryExp,
+		Type,
+		Tuple,
+		ExprTuple,
+		TypeTuple,
 	);
 
 	mixin Visitors;
@@ -56,7 +59,7 @@ class ErrorExp: Expression{
 }
 
 class StubExp: Expression{
-	this(Type type)in{assert(type.sstate==SemState.completed);}body{
+	this(Type type)in{assert(type && type.sstate==SemState.completed);}body{
 		sstate = SemState.completed;
 		this.type = type;
 	}
@@ -76,7 +79,6 @@ class LiteralExp: Expression{
 		//if(loc.rep.length) return loc.rep;
 		return _brk(value.toString());
 	}
-	override @property string kind(){return "constant";}
 
 	mixin DownCastMethod;
 
@@ -125,7 +127,7 @@ class Identifier: Symbol{
 		if(n !is null) this.name = n;
 		else this.name = uniq[name] = name;
 	}
-	override string toString(){return _brk(name);}
+	override string toString(){return !meaning?_brk(name):super.toString();}
 	override @property string kind(){return meaning?super.kind:"identifier";}
 
 	mixin DownCastMethod;
@@ -184,16 +186,16 @@ class InstanceNewExp: Expression{
 }
 
 class MixinExp: Expression{
-	Expression e;
-	this(Expression exp){e=exp;}
-	override string toString(){return _brk("mixin("~e.toString()~")");}
+	Expression[] a;
+	this(Expression[] arg){a=arg;}
+	override string toString(){return _brk("mixin("~join(map!(to!string)(a),",")~")");}
 
 	mixin Visitors;
 }
 class ImportExp: Expression{
-	Expression e;
-	this(Expression exp){e=exp;}
-	override string toString(){return _brk("import("~e.toString()~")");}
+	Expression[] a;
+	this(Expression[] arg){a=arg;}
+	override string toString(){return _brk("import("~join(map!(to!string)(a),",")~")");}
 }
 class AssertExp: Expression{
 	Expression[] a;

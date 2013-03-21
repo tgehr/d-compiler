@@ -56,6 +56,7 @@ int main(string[] args){
 	SemState sstate=SemState.completed;
 	foreach(x; args){
 		// TODO: add to module repository
+		scope(failure) writeln(x);
 		auto m=new Module(x);
 		m.semantic();
 		if(m.sstate == SemState.error) sstate = SemState.error;

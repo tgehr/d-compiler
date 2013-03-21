@@ -1,0 +1,27 @@
+int[""] saa;
+
+int[(()=>5)()] sa;
+//pragma(msg, typeof(sa));
+static assert(is(typeof(sa)==int[5]));
+static assert(!is(typeof(sa)==int[6]));
+static assert(!is(typeof(sa)==char[5]));
+
+char[4194303*4+3] sa2;
+pragma(msg, typeof(sa2));
+
+pragma(msg, {
+		auto r="";
+		int i=4194303*4+3;
+		int j;
+		while(i){
+			r='0'+(i&1)~r;
+			i/=2;
+		}
+		return r;
+	}());
+
+enum int[2] i2 = [1,2];
+enum int[4] i3 = [1,2,3,43];
+immutable int[5] i5 = i2~i3; // TODO: should be error
+
+pragma(msg, i5);

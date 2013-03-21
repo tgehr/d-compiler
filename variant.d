@@ -429,7 +429,7 @@ struct Variant{
 	Variant convertTo(Type ty)in{assert(!!id);}body{return id.convertTo(this, ty);}
 
 	bool opCast(T)()if(is(T==bool)){
-		assert(id.type == Type.get!bool());
+		assert(id.type == Type.get!bool(), to!string(id.type)~" "~toString());
 		return cast(bool)int64;
 	}
 
@@ -470,7 +470,9 @@ struct Variant{
 			if(rhs.id.occupies != Occupies.arr) rhs=rhs.strToArr();
 			static if(op=="~"){
 				return Variant(arr~rhs.arr);
-			}static if(op=="in"||op=="!in"||op=="is"||op=="!is"){
+			}static if(op=="is"||op=="!is"){
+				return Variant(mixin(`arr `~op~` rhs.arr`));
+			}static if(op=="in"||op=="!in"){
 				// TODO: implement this
 				assert(0,"TODO");
 			}else static if(isRelationalOp(Tok!op)){
@@ -494,6 +496,10 @@ struct Variant{
 				else static if(op=="!=") return Variant(false);
 				else return Variant(mixin(`l1 `~op~` l2`));
 			}
+		}else if(id.occupies == Occupies.none){
+			static if(is(typeof(mixin(`null `~op~` null`))))
+				return Variant(mixin(`null `~op~` null`));
+			assert(0);
 		}else switch(id.whichBasicType){
 			foreach(x; ToTuple!basicTypes){
 				static if(x!="void"){
@@ -519,7 +525,7 @@ struct Variant{
 				alias typeof(mixin(x)) T;
 				alias getOccupied!T occ;
 				assert(id.occupies == occ);
-				enum code = to!string(occ)~op~`rhs.`~to!string(occ);
+				enum code = to!string(occ)~` `~op~` rhs.`~to!string(occ);
 				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
 				static if(is(typeof(mixin(code)))){
 					case Tok!x: 

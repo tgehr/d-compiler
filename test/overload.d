@@ -1,3 +1,26 @@
+/+bool isLvalue(ref int x){return true;}
+bool isLvalue(int x){return false;}
+
+static assert(!isLvalue(1));
+static assert({int x;return isLvalue(x);}());
+
+bool testRefOv(ref int x, double y){return true;}
+bool testRefOv(int x, int y){return false;}
+
+static assert(!testRefOv(1,1));
+static assert(!{int x;return testRefOv(x,1);}());
+static assert({int x;return testRefOv(x,1.0);}());
+static assert(!is(typeof({return testRefOv(1,1.0);})));
++/
+
+int foo(typeof(foo(2,3)) x){return x;}
+int foo(int,int){return 2;}
+
+
+bool foo(undef){return 1;}
+bool foo(undef a,undef b){return e;}
+pragma(msg, foo("asdf","asdf"));
+/+
 /+void foo(int, int){}
 void foo(double, int){}
 
@@ -57,4 +80,4 @@ void main(){
 	bar(1);
 +/
 	//baz(1,1);
-}
+}+/

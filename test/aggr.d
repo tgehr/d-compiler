@@ -32,3 +32,4 @@ void foo(int){}
 pragma(msg,is(typeof(foo(typeof(0)))));
 
 void main(){}
+

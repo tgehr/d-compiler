@@ -135,15 +135,19 @@ class StaticAssertDecl: Declaration{
 }
 
 class MixinDecl: GenerativeDecl{
-	Expression e;
-	this(STC stc, Expression exp){e=exp; super(stc,null);}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"mixin("~e.toString()~");";}
+	Expression[] a;
+	this(STC stc, Expression[] arg){a=arg; super(stc,null);}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"mixin("~join(map!(to!string)(a),",")~");";}
+
+	override @property string kind(){return "string mixin declaration";}
+
 	mixin Visitors;
 }
 class AliasDecl: Declaration{
 	Declaration decl;
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"alias "~decl.toString();}
+	override @property string kind(){return "alias declaration";}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -155,13 +159,12 @@ class TypedefDecl: Declaration{
 }
 class BlockDecl: Declaration{
 	Declaration[] decls;
-	this(STC s,Declaration[] declarations){stc=s; decls=declarations; super(stc,null);}
+	this(STC s,Declaration[] declarations){decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(astStc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
 
 	mixin Visitors;
 }
-class AttributeDecl: Declaration{
-	Declaration[] decls;
+class AttributeDecl: BlockDecl{
 	this(STC stc,Declaration[] declarations){decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(astStc)~":\n"~join(map!(to!string)(decls),"\n");}
 }

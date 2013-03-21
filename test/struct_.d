@@ -1,3 +1,13 @@
+
+void foo(int){}
+void goo(){}
+alias goo foo;
+
+
+//int ass(){return 0;}
+//static if(!is(typeof(ass(1)))) int ass(int){return 0;}
+
+
 /+enum E=2;
 struct RR{
 	//static if(is(typeof(S.S.S))) template B(){enum B = 1;}
@@ -7,6 +17,8 @@ struct RR{
 //alias RR.S a;
 enum FG = RR.S;
 +/
+
+/+
 int foo(){return foo();}
 
 class Inaccessible{
@@ -110,7 +122,7 @@ struct S{
 
 //pragma(msg, S.x);
 
-int a;
+//int a;
 
 
 
@@ -121,7 +133,7 @@ static assert(!is(typeof({
 					static if(is(typeof({enum x=foo();}))){
 						float a;
 					}
-					int foo(){return a;}
+					static int foo(){return a;}
 				}
 			})));
 struct T{

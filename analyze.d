@@ -3,6 +3,17 @@ import expression, type, statement;
 
 import util: ID;
 
+/+
+template isASTNode(T,string member){
+	enum isASTNode=x.length &&
+		(!is(T:Symbol)||x!="meaning" && x!="circ")               &&
+		(!is(T==FunctionDef)||x!="ctfeCallWrapper")              &&
+		(!is(T==FunctionLiteralExp)||x!="bdy")                   &&
+		(!is(T==TemplateInstanceExp)||x!="eponymous"&&x!="decl") &&
+		true;
+}
++/
+
 mixin template Analyze(){
 	alias typeof(this) T;
 	static if(is(T==Node)){
@@ -17,12 +28,17 @@ mixin template Analyze(){
 				static assert(!is(typeof(_idfododi)));
 				static assert(!is(typeof(_idfofodi2)));
 				foreach(_idfododi; __traits(allMembers, T)){
-					static if(_idfododi.length && _idfododi!="meaning" && _idfododi!="circ" && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy")){ // hack
+					static if(_idfododi.length && (!is(T:Symbol)||_idfododi!="meaning" && _idfododi!="circ" && _idfododi!="clist") && _idfododi!="ctfeCallWrapper" && (!is(T==FunctionLiteralExp)||_idfododi!="bdy") && (!is(T==TemplateInstanceExp)||_idfododi!="eponymous"&&_idfododi!="decl")&&(!is(T==VarDecl)||_idfododi!="tupleContext")){ // hack
 						mixin(`alias `~_idfododi~` _idfofodi2;`);
 						static if(is(typeof(_idfofodi2): Node) && !is(typeof(_idfofodi2): Type)){
-						if(_idfofodi2) dg(_idfofodi2);
-						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl") // hack, annotations will solve this
-						      foreach(x; _idfofodi2) if(x) dg(x);
+							//import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
+
+							if(_idfofodi2) dg(_idfofodi2);
+						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl"){ // hack, annotations will solve this
+
+								//import std.stdio; writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
+							 foreach(x; _idfofodi2) if(x) dg(x);
+						}
 					}
 				}
 			}
@@ -32,11 +48,11 @@ mixin template Analyze(){
 import std.traits: ParameterTypeTuple;
 import std.typetuple;
 // TODO: combined analysis as one single call
-auto runAnalysis(T)(Node node){
+auto runAnalysis(T,S...)(Node node,S args){
 	static if(__traits(hasMember,T,"manualPropagate") && T.manualPropagate)
 		enum manualPropagate = true;
 	else enum manualPropagate = false;
-	T result;
+	auto result = T(args);
 	alias TypeTuple!(__traits(getOverloads,T,"perform")) overloads;
 	//static assert(overloads.length<7,"TODO: fix.");
 	void runIt(Node node){

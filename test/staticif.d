@@ -1,5 +1,5 @@
-void bazz(){}
-static if(!is(typeof(bazz(2)))) void bazz(int){} // TODO!
+// void bazz(){}
+// static if(!is(typeof(bazz(2)))) void bazz(int){} // TODO!
 
 static if(!is(typeof(c))) enum a = 1;
 static if(is(typeof(b))) enum c = 1;

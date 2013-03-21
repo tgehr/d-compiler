@@ -73,10 +73,11 @@ private template GetStringOf(T){enum GetStringOf=T.stringof;} // Workaround for 
 private template getParseProc(T...){
 	static if(is(T[0]==AssignExp)) enum prc=`parseExpression(rbp!(Tok!","))`, off=2;
 	else static if(is(T[0]==OrOrExp)) enum prc=`parseExpression(rbp!(Tok!"?"))`, off=2;
-	else static if(is(T[0]==ArgumentList)||is(T[0]==AssocArgumentList)||is(T[0]==Tuple)){ // ArgumentList, AssocArgumentList can take optional parameters
+	else static if(is(T[0]==ArgumentList)||is(T[0]==AssocArgumentList)||is(T[0]==PTuple)){ // ArgumentList, AssocArgumentList can take optional parameters
+		enum name = is(T[0]==PTuple)?"Tuple":T[0].stringof;
 		static if(T[2][0]=='('&&T[2][$-1]==')')
-			enum prc=`parse`~T[0].stringof~`!`~T[3].stringof~T[2], off=3;
-		else enum prc=`parse`~T[0].stringof~`!`~T[2].stringof~"()", off=2;
+			enum prc=`parse`~name~`!`~T[3].stringof~T[2], off=3;
+		else enum prc=`parse`~name~`!`~T[2].stringof~"()", off=2;
 	}else static if(is(T[0]==StorageClass)) enum prc="parseSTC!toplevelSTC()", off=2;
 	else static if(is(T[0]==CondDeclBody)) enum prc="parseCondDeclBody(flags)", off=2; // flags is a variable in parseDeclDef
 	else static if(is(T[0]==SimpleIdentifierList)) enum prc="parseIdentifierList!false()", off=2;
@@ -88,7 +89,7 @@ private{
 	struct IdentifierList{} struct SimpleIdentifierList{}  struct OrOrExp{}
 	struct Existing{}       struct DebugCondition{}        struct VersionCondition{}
 	struct CondDeclBody{}   struct OptTemplateConstraint{} struct TemplateParameterList{}
-	struct Tuple{}          struct TypeOrExpression{}      struct Initializer{}
+	struct PTuple{}         struct TypeOrExpression{}      struct Initializer{}
 	struct DeclDef{}        struct Condition{}
 }
 private template TTfromStr(string arg){ // turns "a,b,c,..." into TypeTuple(a,b,c,...)
@@ -491,7 +492,7 @@ private struct Parser{
 				}
 				expect(Tok!")");
 				mixin(rule!(IsExp,Existing,q{which,type,ident,typespec,typespec2,tparams}));
-			case Tok!"__traits": mixin(rule!(TraitsExp,"_","(",Tuple,")"));
+			case Tok!"__traits": mixin(rule!(TraitsExp,"_","(",PTuple,")"));
 			case Tok!"delete": mixin(rule!(DeleteExp,"_",Expression));
 			case Tok!"(":
 				auto tt = peekPastParen().type;
@@ -533,8 +534,8 @@ private struct Parser{
 					mixin(rule!(NewClassExp,Existing,q{args,aggr}));
 				}else{mixin(rule!(NewExp,"OPT"q{"(",ArgumentList,")"},Type,"OPT"q{"(",ArgumentList,")"}));}
 			case Tok!"assert": mixin(rule!(AssertExp,"_","(",ArgumentList,")"));
-			case Tok!"mixin": mixin(rule!(MixinExp,"_","(",AssignExp,")"));
-			case Tok!"import": mixin(rule!(ImportExp,"_","(",AssignExp,")"));
+			case Tok!"mixin": mixin(rule!(MixinExp,"_","(",ArgumentList,")"));
+			case Tok!"import": mixin(rule!(ImportExp,"_","(",ArgumentList,")"));
 			case Tok!"typeid": mixin(rule!(TypeidExp,"_","(",TypeOrExpression,")"));
 			case Tok!"typeof":
 				nextToken(); expect(Tok!"(");
@@ -827,13 +828,13 @@ private struct Parser{
 			case Tok!"mixin":
 				if(peek().type!=Tok!"(") goto default; // mixin template declaration
 				Location loc=tok.loc;
-				mixin(doParse!("_","_",AssignExp,"e",")"));
+				mixin(doParse!("_","_",ArgumentList,"a",")"));
 				if(ttype != Tok!";"){// is a mixin expression, not a mixin statement
-					auto m=New!MixinExp(e); m.loc=loc.to(ptok.loc);
-					auto e2=parseExpression2(m);
-					mixin(rule!(ExpressionStm,Existing,"e2",";"));
+					auto m=New!MixinExp(a); m.loc=loc.to(ptok.loc);
+					auto e=parseExpression2(m);
+					mixin(rule!(ExpressionStm,Existing,"e",";"));
 				}
-				mixin(rule!(MixinStm,Existing,"e","_"));
+				mixin(rule!(MixinStm,Existing,"a","_")); // consume ';'
 			default: // TODO: replace by case list
 				if(auto d=parseDeclDef(tryonly|allowstm)) return d;
 				mixin(rule!(ExpressionStm,Expression,";")); // note: some other cases may invoke parseExpression2 and return an ExpressionStm!
@@ -1476,14 +1477,14 @@ private struct Parser{
 				if(ttype==Tok!"="){mixin(rule!(VersionSpecDecl,Existing,"stc","_",DebugCondition,";"));}
 				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"pragma":
-				mixin(rule!(PragmaDecl,Existing,"stc","_","(",ArgumentList,")",CondDeclBody)); // Body can be empty
+				mixin(rule!(PragmaDecl,Existing,"stc","_","(",PTuple,")",CondDeclBody)); // Body can be empty
 			case Tok!"import": return res=parseImportDecl(stc);
 			case Tok!"enum":
 				auto x=peek(), y=peek(2);
 				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":") goto default;
 				return res=parseEnumDecl(stc);
 			case Tok!"mixin":
-				nextToken(); if(ttype==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",AssignExp,")",";"));}
+				nextToken(); if(ttype==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",ArgumentList,")",";"));}
 				if(ttype==Tok!"template"){isMix=true; goto case;}
 				mixin(rule!(TemplateMixinDecl,Existing,"stc",IdentifierList,"OPT",Identifier,";"));
 			case Tok!"template":

@@ -1,11 +1,28 @@
 typeof(null) retnull(){return null;}
 pragma(msg, "retnull: ",retnull());
 
+static assert(retnull() is null); // TODO!
+
+static assert([] is null); // TODO!
+static assert([] == null); // TODO!
+
+immutable a = "hallo";
+immutable b = a;
+pragma(msg, a is b);
+//pragma(msg, (()=>a is b)());
+//pragma(msg, ((immutable(char)[] a, immutable(char)[] b)=>a is b)(a,b));
+
+int retzero(){return 0;}
+enum divby0 = 1/retzero();
+
+/+
+// TODO: should this be legal code?
 struct InterpretImmutableField{
 	immutable y=22;
 }
-static assert(InterpretImmutableField.y==22); // TODO!
-static assert((()=>InterpretImmutableField.y==22)()); // TODO!
+static assert(InterpretImmutableField.y==22);
+static assert((()=>InterpretImmutableField.y==22)());
++/
 
 mixin(`auto foo1="1.0f";`);
 mixin(`float a11=`~foo1~";");
@@ -115,8 +132,6 @@ int fops(int x){return x;}
 
 //enum x = (fops(),1);
 
-static assert({return rettrue();}());
-auto rettrue(){return {return {return true;}();}();}
 
 // xP
 /+int bug6498(int x)
@@ -126,7 +141,7 @@ auto rettrue(){return {return {return true;}();}();}
 		n++;
 	return n;
 }
-static assert(bug6498(10_000_000)!=10_000_000);+/
+static assert(bug6498(10_000_000)!=10_000_000);
 
 
 immutable int immu=2;
@@ -159,13 +174,13 @@ int testlocal2(){ // (should compile)
 	static assert(tt());
 }
 
-/+int testlazy(){
+int testlazy(){
 	int x;
 	int foo(lazy int x){return x;}
 	foo(++x);
 	return x;
 }
-pragma(msg, "testlazy: ",testlazy());+/
+pragma(msg, "testlazy: ",testlazy());
 
 ref int testrefret(){
 	int x;
@@ -236,6 +251,7 @@ int casts(){
 pragma(msg, casts());
 
 
+
 int twiceinterpret(){
 	int accessible = 2; // only accessible from 'foo'  on the second invocation
 	immutable zero = 0; // always accessible from 'foo'
@@ -246,7 +262,6 @@ int twiceinterpret(){
 static assert(twiceinterpret()==2);
 
 
-
 void invtest(){
 	bool x = false;
 	bool foo(){return true&&x;} // cannot access x
@@ -254,7 +269,6 @@ void invtest(){
 	static assert(ttt());
 }
 static assert({invtest(); return true;}());
-
 
 
 
@@ -276,7 +290,6 @@ int dggg(){
 }
 pragma(msg, "dggg: ",dggg());
 static assert(dggg()==4);
-
 
 int[] testdelegate(){
 	void doall(int delegate(int) dg, int[] a, int n){
@@ -316,6 +329,11 @@ int testnested2(){
 pragma(msg, "testnested2: ", testnested2());
 static assert(testnested2()==13);
 
++/
+
+static assert({return rettrue();}());
+auto rettrue(){return {return {return true;}();}();}
+
 int testnested(){
 	int x,y;
 	int *p;
@@ -329,6 +347,9 @@ int testnested(){
 }
 pragma(msg, "testnested: ",testnested());
 static assert(testnested()==6);
+
+
+
 
 int* aliasinp(int* x){
 	auto y = &x;
@@ -361,7 +382,6 @@ int testescape(){
 static assert(testescape() == 23); // TODO: should this be an error instead?
 pragma(msg, "testescape: ", testescape());
 
-
 int addr(int a){
 	int* x;
 	int**y = &x;
@@ -371,15 +391,16 @@ int addr(int a){
 	return a;
 }
 
+
 pragma(msg, "addr: ",addr(3));
 
 int tailcalls(int n, int x){
 	if(!n) return x;
 	return 1?tailcalls(n-1, x+n):10;
 }
-
 int tcfac(int n){
-	int loop(int x, int a) => x>n?a: loop(x+1,x*a);
+	version(DigitalMars) int loop(int x, int a) {return x>n?a: loop(x+1,x*a);}
+	else mixin(q{int loop(int x, int a) => x>n?a: loop(x+1,x*a);});
 	return loop(1,1);
 }
 pragma(msg, "tcfac: ", tcfac(10));
@@ -509,7 +530,7 @@ pragma(msg, "testbrkcnt: ", testbrkcnt());
 
 
 bool strchr(immutable(char)* haystack, immutable(char)* needle){
-	//if(haystack is null || needle is null) return false;
+	if(haystack is null) return needle is null;
 	auto p = haystack, q = needle;
 	for(;; p++){
 		for(auto h=p, n=q;;h++,n++){
@@ -522,13 +543,14 @@ bool strchr(immutable(char)* haystack, immutable(char)* needle){
 	((p))=p;
 	return false;
 }
-pragma(msg, strchr(null, null)); // TODO!
-pragma(msg, "strchr: ", strchr(&"1234"[0],&"232"[0]));
-pragma(msg, "strchr: ", strchr(&"1234"[0],&"23"[0]));
-pragma(msg, "strchr: ", strchr(&"1234"[0],&"023"[0]));
-pragma(msg, "strchr: ", strchr(&"1234"[0],&"123"[0]));
-pragma(msg, "strchr: ", strchr(&"123"[0],&""[0])); // TODO: fix?
-pragma(msg, "strchr: ", strchr(&""[0],&""[0]));
+pragma(msg, "strchr1: ",strchr(null, null)); 
+pragma(msg, "strchr2: ",strchr(null, &"\0"[0])); 
+pragma(msg, "strchr3: ", strchr(&"1234"[0],&"232"[0]));
+pragma(msg, "strchr4: ", strchr(&"1234"[0],&"23"[0]));
+pragma(msg, "strchr5: ", strchr(&"1234"[0],&"023"[0]));
+pragma(msg, "strchr6: ", strchr(&"1234"[0],&"123"[0]));
+pragma(msg, "strchr7: ", strchr(&"123"[0],&""[0])); // TODO: fix?
+pragma(msg, "strchr8: ", strchr(&"\0"[0],&"\0"[0]));
 
 
 int strcmp(immutable(char)[] a, immutable(char)[] b){
@@ -537,7 +559,7 @@ int strcmp(immutable(char)[] a, immutable(char)[] b){
 	return *p == *q ? 0 : *p < *q ? -1 : 1;
 }
 
-pragma(msg, strcmp("122","123"));
+pragma(msg, "strcmp: ",strcmp("122","123"));
 
 
 immutable estr = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
@@ -548,18 +570,20 @@ auto toestr(int i){
 	//return *(p+i);
 	return *(&p[i+1]-1)~" "~*(&p[i-199]+199);
 }
-
+static assert(toestr(19)=="nineteen nineteen");
 pragma(msg, toestr(19));
 
 
 long testvoid(){
 	long a = 0;
 	long b = 0;
-	b || function(long*a){*a = 1;}(&a); // TODO: use closure instead
-	a && function(long*b){*b = 1;}(&b); // TODO: use closure instead
+	b || function(long*a){*a = 1;}(&a);
+	b || {a++;}();
+	a && function(long*b){++*b;}(&b);
+	a && {b+=2;}();
 	return a+b;
 }
-
+static assert(testvoid()==5);
 pragma(msg, "testvoid: ", testvoid());
 
 
@@ -825,7 +849,6 @@ int[] erathos(int x){
 
 pragma(msg, "erathos: ",erathos(1000));
 
-/+
 int[] primes(int x){
 	int[] r;
 	if(x>=2) r~=2;
@@ -843,8 +866,8 @@ int[] primes(int x){
 	return r;
 }
 
-pragma(msg, primes(10000)); // TODO!: array boundschecks (in interpretV?)
-
+pragma(msg, "primes: ",primes(100)); // TODO!: array boundschecks (in interpretV?)
+/+
 
 //mixin("s");
 
@@ -881,12 +904,12 @@ pragma(msg, assert(bar()));+/
 
 
 immutable int xx = 10;
-auto foo(int x){
+auto azfoo(int x){
 	real y,z;
 	z=y=x+xx;
 	return z;
 }
-pragma(msg, foo(2));+/
+pragma(msg, "azfoo: ",azfoo(2));
 
 /+
 +/
@@ -909,4 +932,5 @@ auto dg = (delegate int(int x) => x)(2);+/
 //int x;
 //pragma(__p, [2,x]~1);
 
+// +/
 // +/

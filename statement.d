@@ -235,9 +235,9 @@ class AsmStm: Statement{
 	//override string toString(){return "asm{ "~join(map!(to!string)(asmcode)," ")~" } /* TODO: fix this */";}
 }
 class MixinStm: Statement{
-	Expression e;
-	this(Expression exp){e=exp;}
-	override string toString(){return "mixin("~e.toString()~");";}
+	Expression[] a;
+	this(Expression[] arg){a=arg;}
+	override string toString(){return "mixin("~join(map!(to!string)(a),",")~");";}
 
 	mixin Visitors;
 }

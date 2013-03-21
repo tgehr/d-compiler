@@ -53,24 +53,27 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				error(format("declaration of '%s' results in potential ambiguity", decl.name), decl.name.loc);
 				note("offending symbol lookup", d.name.loc);
+				d.name.sstate = SemState.error;
 				return false;
 		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					fd.scope_ = this;
 					os.add(fd);
 					return true;
-				}else if(auto ofd=d.isOverloadableDecl()){
-					auto os = New!OverloadSet(fd,ofd);
-					decl.scope_ = os.scope_ = this;
-					symtab[decl.name.ptr]=os;
-					return true;
 				}
+				assert(!d.isOverloadableDecl());
 			}
 			error(format("redefinition of '%s'",decl.name), decl.name.loc);
 			note("previous definition was here",d.name.loc);	             
 			// d.sstate = SemState.error;
 			return false;
 		}
+
+		if(auto ov = decl.isOverloadableDecl()){
+			decl.scope_ = this;
+			decl = New!OverloadSet(ov);
+		}
+
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
 		Identifier.tryAgain = true; // TODO: is this the right place for this?
@@ -82,6 +85,7 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
 				error(format("declaration of '%s' results in potential ambiguity", d.name), d.name.loc);
 				note("offending symbol lookup", ident.loc);
+				ident.sstate = SemState.error;
 				return false;
 			}
 		}else insert(New!DoesNotExistDecl(ident));
