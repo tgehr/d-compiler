@@ -98,6 +98,11 @@ template Semantic(T) if(is(T==Node)){
 
 mixin template Semantic(T) if(is(T==ErrorDecl)||is(T==ErrorExp)||is(T==ErrorStm)||is(T==ErrorTy)){
 	override T semantic(Scope sc){ return this; } // DMD compiler bug: T is required
+	static if(is(T:Declaration)):
+	override T presemantic(Scope sc){
+		scope_ = sc;
+		return this;
+	}
 }
 
 
@@ -110,11 +115,11 @@ mixin template Semantic(T) if(is(T==Expression)){
 		Expression me;
 		if(sstate != SemState.completed){ // TODO: is this ok?
 			me = semantic(sc);
-			if(me.sstate == SemState.error) return New!ErrorTy;
+			if(me.sstate == SemState.error) return New!ErrorTy();
 			if(auto ty=me.isType()) return ty;
 		}else me=this;
 		sc.error(format("%s '%s' is used as a type",me.kind,me.loc.rep),me.loc);
-		return New!ErrorTy;
+		return New!ErrorTy();
 	}
 
 	final Expression expSemantic(Scope sc){
@@ -152,6 +157,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		if(type.implicitlyConvertsTo(rhs)) return true;
 		auto l = type.getHeadUnqual().isIntegral(), r = rhs.getHeadUnqual().isIntegral();
 		if(l && r){
+			// TODO: fix this. This is not yet right
 			if(l.op == Tok!"long" || l.op == Tok!"ulong") return r.getLongRange().contains(getLongRange());
 			return r.getIntRange().contains(this.getIntRange());
 		}
@@ -359,7 +365,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 		// TODO: TypeTuple slice
 		Type ty;
 		e=ty=e.typeSemantic(sc);
-		if(ty.sstate == SemState.error) return New!ErrorTy;
+		if(ty.sstate == SemState.error) return New!ErrorTy();
 		if(!a.length) return ty.getDynArr().semantic(sc);
 		return super.typeSemantic(sc); // TODO: implement
 	}
@@ -418,6 +424,10 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		}
 		if(auto tt = e.type.isFunctionTy()){
 			type = tt.retTy.resolveInout(context.inoutRes);
+			foreach(i,x; tt.params){
+				auto pty = x.type.resolveInout(context.inoutRes);
+				args[i]=args[i].implicitlyConvertTo(pty);
+			}
 		}else{
 			type = Type.get!void(); // TODO: fix
 		}
@@ -455,7 +465,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				}
 			}else mixin(ErrEplg);
 		}else static if(S==Tok!"*"){
-			if(auto p=ty.isPointerTy){
+			if(auto p=ty.isPointerTy()){
 				type = p.ty;
 				mixin(SemEplg);
 			}else{
@@ -554,10 +564,17 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 				}
 			}
 		}else static if(isLogicalOp(S)){
+			static assert(S==Tok!"&&"||S==Tok!"||");
 			auto bl = Type.get!bool();
-			e1 = e1.convertTo(bl), e2 = e2.convertTo(bl);
+			e1 = e1.convertTo(bl);
+			// allow (bool) && (void), (bool) || (void)
+			auto ty2 = e2.type.getHeadUnqual();
+			if(ty2 !is Type.get!void()){
+				e2 = e2.convertTo(bl);
+				ty2 = bl;
+			}
 			mixin(SemChld!q{e1,e2});
-			type = bl;
+			type = ty2;
 			mixin(SemEplg);
 		}else{
 			auto t1=e1.type.getHeadUnqual(), t2=e2.type.getHeadUnqual();
@@ -639,15 +656,18 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						break;
 				}
 				if(type){
-					// unique data mustn't be const-qualified
-					auto stc = type.getHeadSTC();
-					if(stc&STCconst){
-						stc&=~STCconst;
-						// if((el1.isImmutable() || el2.isImmutable())
-						//   && el1 is el1.getConst() && el2 is el2.getConst()) 
-						// 	stc|=STCimmutable;
-						type = type.getHeadUnqual().applySTC(stc);
-					}
+					// TODO: unique data mustn't be const-qualified
+					// TODO: except if the unqualified type has mutable indirections
+					//auto stc = type.getHeadSTC();
+					//if(stc&STCconst){
+					//	stc&=~STCconst;
+					//	// TODO: immutable~const should be immutable
+					//	// TODO: except if the unqualified type has const indirections
+					//	// if((el1.isImmutable() || el2.isImmutable())
+					//	//   && el1 is el1.getConst() && el2 is el2.getConst()) 
+					//	// 	stc|=STCimmutable;
+					//	type = type.getHeadUnqual().applySTC(stc);
+					//}
 					if(!f1) e1 = e1.implicitlyConvertTo(type);
 					if(!f2) e2 = e2.implicitlyConvertTo(type);
 					type = type.getDynArr();
@@ -785,7 +805,7 @@ template Semantic(T) if(is(T X==TernaryExp)){
 		return r;
 	}
 
-	mixin(__dgliteralRng);
+	mixin(__dgliteralRng());
 }
 class Symbol: Expression{ // semantic node
 	Declaration meaning;
@@ -793,7 +813,8 @@ class Symbol: Expression{ // semantic node
 	this(Declaration m)in{assert(m&&1);}body{meaning = m;}
 	override Symbol semantic(Scope sc){
 		mixin(SemPrlg);
-		assert(meaning&&1);
+		assert(!!meaning);
+		mixin(PropErr!q{meaning});
 		static Symbol circ = null;
 		// TODO: always display the exact cycle that caused the error
 		enum CircErrMsg=q{
@@ -809,18 +830,20 @@ class Symbol: Expression{ // semantic node
 		}else sstate = SemState.started;
 		if(auto vd=meaning.isVarDecl()){
 			if(!vd.type || vd.stc & STCenum){
-				meaning = meaning.semantic(sc);
+				meaning = meaning.semantic(meaning.scope_);
 				mixin(CircErrMsg);
 				mixin(PropErr!q{meaning});
 			}
+			assert(!!vd.type);
 			type=vd.type.typeSemantic(sc);
 		}else if(auto fd=meaning.isFunctionDecl()){
 			if(!fd.type.ret){
-				meaning = meaning.semantic(sc);
+				meaning = meaning.semantic(meaning.scope_);
 				mixin(CircErrMsg);
 				mixin(PropErr!q{meaning});
 			}
-			type = fd.type.typeSemantic(sc);
+			assert(!!fd.type.ret);
+			type = fd.type.typeSemantic(meaning.scope_);
 		}// TODO: overloads and templates
 		else type=Type.get!void(); // same as DMD
 		//mixin(CircErrMsg); // TODO: re-enable?
@@ -839,9 +862,8 @@ class Symbol: Expression{ // semantic node
 
 	override Expression matchCall(Expression[] args, ref MatchContext context){
 		if(auto m = meaning.matchCall(args, context)){
-			// TODO: could maybe mutate itself
-			if(m is meaning) return this;
-			return New!Symbol(m);
+			meaning = m;
+			return this;
 		}
 		return null;
 	}
@@ -1126,7 +1148,7 @@ mixin template Semantic(T) if(is(T==BasicType)){
 	override Type checkVarDecl(Scope sc, VarDecl me){
 		if(op!=Tok!"void") return this;
 		sc.error(format("%s '%s' has invalid type '%s'", me.kind, me.name, this), me.loc);
-		return New!ErrorTy;
+		return New!ErrorTy();
 	}
 	
 	BasicType intPromote(){
@@ -1753,6 +1775,7 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 mixin template Semantic(T) if(is(T==EmptyDecl)){
 	override EmptyDecl presemantic(Scope sc){
 		if(sstate == SemState.pre) sstate = SemState.begin;
+		scope_ = sc;
 		return this;
 	}
 	override EmptyDecl semantic(Scope sc){
@@ -1762,7 +1785,12 @@ mixin template Semantic(T) if(is(T==EmptyDecl)){
 }
 
 mixin template Semantic(T) if(is(T==Declaration)){
+	Scope scope_ = null;
+
+	invariant(){assert(sstate != SemState.pre || !scope_);}
+
 	Declaration presemantic(Scope sc){ // insert into symbol table, but don't do the heavy processing yet
+		//if(scope_) return this;
 		if(sstate != SemState.pre) return this;
 		sstate = SemState.begin;
 		if(!name){sc.error("unimplemented feature",loc); sstate = SemState.error; return this;} // TODO: obvious
@@ -1925,6 +1953,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		}else{
 			foreach(i,p; type.params){
 				if(!args[i].implicitlyConvertsTo(at[i])){
+					//if(args[i].sstate == SemState.error) continue;
 					args[i].implicitlyConvertTo(at[i]).semantic(sc); // trigger consistent error message
 					if(p.name) sc.note(format("while matching function parameter '%s'",p.name),p.loc);
 					else sc.note("while matching function parameter",p.loc);
@@ -1938,6 +1967,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 mixin template Semantic(T) if(is(T==FunctionDef)){
 	override FunctionDef semantic(Scope sc){
 		mixin(SemPrlg);
+		if(!type.ret) type.ret = Type.get!int(); // BUG!
 		if(!fsc) fsc = New!FunctionScope(sc);
 		if(sstate == SemState.pre) presemantic(sc); // add self to parent scope
 		//mixin(SemChld!q{type.params});

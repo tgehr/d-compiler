@@ -1,4 +1,11 @@
-void main(){}
+;
+enum y=main();
+auto main(){
+	int wuala;
+	x();
+	int x;
+}
+auto x(){return 2+wuala;}
 /+void function() x = &main;
 
 void main(){
@@ -11,5 +18,5 @@ pragma(msg, typeof(1?ab:cd));
 
 immutable(int)** x;
 int** y;
-pragma(msg, typeof(1?y:x));*/
+pragma(msg, typeof(1?y:x));*/+/
 

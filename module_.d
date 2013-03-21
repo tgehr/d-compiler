@@ -12,7 +12,7 @@ class Module{
 		GC.disable(); scope(exit) GC.enable();
 		//auto f=File(path); // TODO: handle exceptions
 		File f; if(path=="-") f=stdin; else f=File(path);
-		auto app=mallocAppender!(char[]);
+		auto app=mallocAppender!(char[])();
 		foreach(r;f.byChunk(1024)){app.put(cast(char[])r);}
 		app.put("\n\0\0\0\0"); // insert 4 padding zero bytes
 		string code=cast(string)app.data;

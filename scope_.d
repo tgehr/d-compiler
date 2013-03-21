@@ -50,13 +50,13 @@ class Scope{ // TOP LEVEL (MODULE) SCOPE
 					return true;
 				}
 			}
-			if(d.sstate != SemState.error){ // TODO: is this always desirable?
-				error(format("redefinition of '%s'",decl.name), decl.name.loc);
-				note("previous definition was here",d.name.loc);	             
-			}
+			error(format("redefinition of '%s'",decl.name), decl.name.loc);
+			note("previous definition was here",d.name.loc);	             
+			// d.sstate = SemState.error;
 			return false;
 		}
 		symtab[decl.name.ptr]=decl;
+		decl.scope_=this;
 		return true;
 	}
 	

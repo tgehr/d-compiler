@@ -61,7 +61,7 @@ class VerboseErrorHandler: ErrorHandler{
 			foreach(i;0..column-1) stderr.write(" ");
 			stderr.write("^");
 			loc.rep.popFront();
-			foreach(x;loc.rep){if(isNewLine(x)) break; stderr.write("~");};
+			foreach(dchar x;loc.rep){if(isNewLine(x)) break; stderr.write("~");};
 			stderr.writeln();
 		}
 	}

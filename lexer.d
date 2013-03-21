@@ -7,7 +7,12 @@ import std.traits : EnumMembers;
 import core.memory;
 
 // enum TokenType;
+//mixin("enum TokenType{"~import("tokennames")~"}");
 mixin("enum TokenType{"~TokenNames()~"}");
+
+/+enum TokenType{
+	none,whitespace,comment,dokComment,newLine,error,errorLiteral,eof,identifier,stringLiteral,stringLiteralC,stringLiteralW,stringLiteralD,characterLiteral,integer32Literal,unsigned32Literal,integer64Literal,unsigned64Literal,floatLiteral,doubleLiteral,realLiteral,imaginaryFloatLiteral,imaginaryDoubleLiteral,imaginaryLiteral,divide,divideAssign,dot,dotDot,dotDotDot,and,andAssign,andAnd,or,orAssign,orOr,minus,minusAssign,minusMinus,plus,plusAssign,plusPlus,less,lessEqual,leftShift,leftShiftAssign,lessGreater,lessGreaterEqual,greater,greaterEqual,rightShiftAssign,arithmeticRightShiftAssign,rightShift,arithmeticRightShift,exclamationMark,notEqual,notLessGreater,unordered,notLess,notLessEqual,notGreater,notGreaterEqual,leftParen,rightParen,leftBracket,rightBracket,leftCurly,rightCurly,questionMark,comma,semicolon,colon,dollar,assign,goesTo,equal,star,multiplyAssign,modulo,moduloAssign,xor,xorAssign,pow,powAssign,concat,concatAssign,at,autoRef,notIs,notIn,abstract_,alias_,align_,asm_,assert_,auto_,body_,bool_,break_,byte_,case_,cast_,catch_,cdouble_,cent_,cfloat_,char_,class_,const_,continue_,creal_,dchar_,debug_,default_,delegate_,delete_,deprecated_,do_,double_,else_,enum_,export_,extern_,false_,final_,finally_,float_,for_,foreach_,foreach_reverse_,function_,goto_,idouble_,if_,ifloat_,immutable_,import_,in_,inout_,int_,interface_,invariant_,ireal_,is_,lazy_,long_,macro_,mixin_,module_,new_,nothrow_,null_,out_,override_,package_,pragma_,private_,protected_,public_,pure_,real_,ref_,return_,scope_,shared_,short_,static_,struct_,super_,switch_,synchronized_,template_,this_,throw_,true_,try_,typedef_,typeid_,typeof_,ubyte_,ucent_,uint_,ulong_,union_,unittest_,ushort_,version_,void_,volatile_,wchar_,while_,with_,__gshared_,__thread_,__traits_,
+}+/
 
 import scope_, util; // ugly: if expression is imported before the mixin, it cannot reference the mixin with DMD
 
@@ -16,7 +21,7 @@ template TokChars(TokenType type){mixin(TokCharsImpl());}
 
 
 
-private immutable{
+private immutable {
 string[2][] complexTokens =
 	[["i",     "Identifier"                ],
 	 ["``",    "StringLiteral"             ],
@@ -113,6 +118,7 @@ string[2][] compoundTokens =
 
 string[] keywords = ["abstract", "alias", "align", "asm", "assert", "auto", "body", "bool", "break", "byte", "case", "cast", "catch", "cdouble", "cent", "cfloat", "char", "class", "const", "continue", "creal", "dchar", "debug", "default", "delegate", "delete", "deprecated", "do", "double", "else", "enum", "export", "extern", "false", "final", "finally", "float", "for", "foreach", "foreach_reverse", "function", "goto", "idouble", "if", "ifloat", "immutable", "import", "in", "inout", "int", "interface", "invariant", "ireal", "is", "lazy", "long", "macro", "mixin", "module", "new", "nothrow", "null", "out", "override", "package", "pragma", "private", "protected", "public", "pure", "real", "ref", "return", "scope", "shared", "short", "static", "struct", "super", "switch", "synchronized", "template", "this", "throw", "true", "try", "typedef", "typeid", "typeof", "ubyte", "ucent", "uint", "ulong", "union", "unittest", "ushort", "version", "void", "volatile", "wchar", "while", "with", /*"__FILE__", "__LINE__",*/ "__gshared", "__thread", "__traits"];
 
+
 string[2][] tokens = specialTokens ~ complexTokens ~ simpleTokens ~ compoundTokens ~ keywordTokens();
 }
 
@@ -185,7 +191,7 @@ template token(string t){enum token=Token(Tok!t);}
 		if(!found) return false;
 	}return true;
 }(),"Every non-empty prefix of simpleTokens must be a valid token.");+/
-string caseSimpleToken(string prefix="", bool needs = false){
+string caseSimpleToken(string prefix="", bool needs = false)pure{
 	string r;
 	int c=0,d=0;
 	foreach(i;simpleTokens){string s=i[0]; if(s.startsWith(prefix)) c++;}
@@ -206,7 +212,7 @@ string caseSimpleToken(string prefix="", bool needs = false){
 }
 
 
-auto lex(string code){
+auto lex(string code){ // pure
 	return Lexer(code);
 }
 
@@ -228,6 +234,7 @@ struct Lexer{
 		assert(!(buffer.length&buffer.length-1)); // buffer size is always a power of two
 		assert(numAnchors||firstAnchor==size_t.max);
 	}+/
+	//pure: phobos ...
 	this(string c)in{assert(c.length>=4&&!c[$-4]&&!c[$-3]&&!c[$-2]&&!c[$-1]);}body{ // four padding zero bytes required because of UTF
 		code = c;
 		enum initsize=4096;//685438;//
@@ -292,7 +299,7 @@ struct Lexer{
 		n=n+anchor.index-s&buffer.length-1;
 		s=anchor.index;
 	}
-	Token tokError(string s, string rep, int l=0) {
+	Token tokError(string s, string rep, int l=0){
 		auto r = token!"Error";
 		r.str = s;
 		r.loc = Location(rep, l?l:line);
@@ -353,7 +360,7 @@ struct Lexer{
 								if(*p&0x80){
 									try{
 										auto ch=utf.decode(p[0..4],len);
-										if(isUniAlpha(ch)) goto default;
+										if(isAlpha(ch)) goto default;
 									}catch{} goto default;
 								}
 								break findnotinnotis;
@@ -511,7 +518,7 @@ struct Lexer{
 									case 0x80: .. case 0xFF:
 										len=0;
 										try{auto ch=utf.decode(p[0..4],len);
-											if(isUniAlpha(ch)){p+=len; continue;}
+											if(isAlpha(ch)){p+=len; continue;}
 											break;
 										}catch{invCharSeq(); break;}
 									default: break;
@@ -532,7 +539,7 @@ struct Lexer{
 										case 0x80: .. case 0xFF:
 											len=0;
 											try{auto ch=utf.decode(p[0..4],len);
-												if(isUniAlpha(ch)){
+												if(isAlpha(ch)){
 													if(p[0..len]!=ip[0..len]) break;
 													p+=len; ip+=len; continue;
 												}
@@ -691,7 +698,7 @@ struct Lexer{
 								break;
 							case 0x80: .. case 0xFF:
 								len=0;
-								try if(isUniAlpha(utf.decode(p[0..4],len))) p+=len;
+								try if(isAlpha(utf.decode(p[0..4],len))) p+=len;
 									else break readident;
 								catch{break readident;} // will be caught in the next iteration
 								break;
@@ -706,7 +713,7 @@ struct Lexer{
 					len=0; p--;
 					try{auto ch=utf.decode(p[0..4],len);
 						s=p, p+=len;
-						if(isUniAlpha(ch)) goto identifier;
+						if(isAlpha(ch)) goto identifier;
 						if(!isWhite(ch)) errors~=tokError(format("unsupported character '%s'",ch),s[0..len]);
 						// else if(isNewLine(ch)) line++; // TODO: implement this everywhere
 						continue;
@@ -732,7 +739,7 @@ struct Lexer{
 	   //errRepr      = tokError("numerical constant is not representable in [float|double|real]");
 	   errOctDepr   = tokError("octal literals are deprecated");
 	*/
-	private Token lexNumber(ref immutable(char)* _p) {
+	private Token lexNumber(ref immutable(char)* _p){
 		static assert(real.mant_dig <= 64);
 		auto p = _p;
 		enum dlim  = ulong.max / 10; // limit for decimal values (prevents overflow)
@@ -878,7 +885,7 @@ struct Lexer{
 							val = (val << 1) + (val << 3) + *p -'0'; dig++;
 							break;
 						case '.':
-							if(p[1] != '.' && dot == -1) dot = dig, isfloat=1; // break; }
+							if('0'<=p[1]&&p[1]<='9' && dot == -1) dot = dig, isfloat=1; // break; }
 							else break readdec; goto case;
 						case '_': // ignore embedded _
 							break;
@@ -901,7 +908,7 @@ struct Lexer{
 							if(mulp<mlim) val2 = (val2 << 1) + (val2 << 3) + *p -'0', mulp*=10, adjexp--;
 							break;
 						case '.':
-							if(p[1] != '.' && dot == -1) dot = dig, isfloat = 1; // break; }
+							if('0'<=p[1]&&p[1]<='9' && dot == -1) dot = dig, isfloat = 1; // break; }
 							else break consumedec; goto case;
 						case '_': // ignore embedded _
 							break;
@@ -996,7 +1003,7 @@ struct Lexer{
 		}
 		if(tok.type == Tok!"0L"){
 			if(toobig || val > long.max && base!=HEX) tok = tokError("signed integer constant exceeds long.max",_p[0..p-_p]);
-			else if(val > long.max && base == HEX) tok.type = Tok!"0LU"; // EXTENSION: Just here to match what DMD does
+			else if(val > long.max && base == HEX) tok.type = Tok!"0LU";
 		}else if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
 		if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
 		return _p=p, tok;
@@ -1011,7 +1018,7 @@ class EscapeSeqException: Exception{string loc; this(string msg,string loc){this
 	returns a dchar representing the read escape sequence or
 	throws EscapeSeqException if the input is not well formed
  */
-private dchar readEscapeSeq(ref immutable(char)* _p)in{assert(*(_p-1)=='\\');}body{
+private dchar readEscapeSeq(ref immutable(char)* _p) in{assert(*(_p-1)=='\\');}body{ // pure
 	auto p=_p;
 	switch(*p){
 		case '\'','\?','"','\\':
@@ -1023,7 +1030,7 @@ private dchar readEscapeSeq(ref immutable(char)* _p)in{assert(*(_p-1)=='\\');}bo
 		case 'r': return _p=p+1, '\r';
 		case 't': return _p=p+1, '\t';
 		case 'v': return _p=p+1, '\v';
-		case '0': .. case '7': // ENHANCEMENT: Actually works for all ASCII characters
+		case '0': .. case '7': // BUG: Actually works for all ASCII characters
 			auto s=p;
 			for(int r=*p++-'0', i=0;;i++, r=(r<<3)+*p++-'0')
 				if(i>2||'0'>*p||*p>'7'){

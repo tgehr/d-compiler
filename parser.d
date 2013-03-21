@@ -63,10 +63,11 @@ bool isClosingToken(TokenType type){
 
 //private template isCode(R){enum isCode=isForwardRange!R && is(Unqual!(ElementType!R) == Token);}
 private template GetStringOf(T){enum GetStringOf=T.stringof;} // Workaround for strange compiler limitations
-private template GetStringOf(S: UnaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
-private template GetStringOf(S: BinaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
-private template GetStringOf(S: PostfixExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
-private template GetStringOf(S: QualifiedType!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
+// uncomment to trigger forward reference bug: 
+//private template GetStringOf(S: UnaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
+//private template GetStringOf(S: BinaryExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
+//private template GetStringOf(S: PostfixExp!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
+//private template GetStringOf(S: QualifiedType!Y,TokenType Y){enum GetStringOf=S.stringof~"!("~Y.stringof~")";}
 //private template GetStringOf(S: S!Y,Y...){enum GetStringOf=S.stringof~"!("~Y.stringof[6..$-1]~")";} // why doesn't that work?
 
 
@@ -127,13 +128,14 @@ private template parseDefOnly(T...){
 	else enum parseDefOnly="typeof("~getParseProc!T.prc~") "~T[1]~"=cast(typeof("~getParseProc!T.prc~"))null;\n"~parseDefOnly!(T[2..$]);
 }
 private template doOptParse(T...){
-	static assert(is(typeof(T[0]):string));
+	static assert(is(typeof(T[0]):const(char)[]));
+	//static assert(is(typeof(T[0]):string)); // TODO: reduce bug
 	enum doOptParse=parseDefOnly!T~"if(ttype==Tok!\""~T[0]~"\"){\n"~doParseImpl!(false,"_",T[1..$])~"}\n";
 }
 
 private template fillParseNamesImpl(int n,string b,T...){ // val: new TypeTuple, off: that many names have been filled in
 	static if(T.length==0){alias T val; enum off=0;}
-	else static if(is(typeof(T[0])==string)){
+	else static if(is(typeof(T[0]):const(char)[])){// ==string. TODO: reduce bug
 		static if(T[0].length>3 && T[0][0..3]=="OPT"){
 			private alias fillParseNamesImpl!(n,b,TTfromStr!(T[0][3..$])) a;
 			static assert(a.val.stringof[0..6]=="tuple(", "apparently something has finally been fixed");
@@ -156,8 +158,8 @@ private template fillParseNames(string base,T...){
 	alias fillParseNamesImpl!(0,base,T).val fillParseNames;
 }
 private template getParseNames(T...){
-	static if(T.length==0) enum getParseNames=""; // next line: ':' instead of '==' is workaround
-	else static if(!is(typeof(T[0]):string)) enum getParseNames=T[1]~","~getParseNames!(T[2..$]);
+	static if(T.length==0) enum getParseNames=""; // next line: ':' instead of '==string' is workaround
+	else static if(!is(typeof(T[0]):const(char)[])) enum getParseNames=T[1]~","~getParseNames!(T[2..$]);
 	else{
 		static if(T[0].length>3 && T[0][0..3]=="OPT") enum getParseNames=getParseNames!(TTfromStr!(T[0][3..$]))~getParseNames!(T[1..$]);
 		else enum getParseNames=getParseNames!(T[1..$]);
@@ -199,7 +201,7 @@ private struct Parser{
 		ttype=tok.type;
 		this.handler = handler;
 	}
-	@property ref const(Token) tok(){return code.buffer[code.n];};
+	@property ref Token tok(){return code.buffer[code.n];};
 	@property ref const(Token) ptok(){return code.buffer[code.n-1&code.buffer.length-1];};
 	TokenType ttype;
 	void nextToken(){
@@ -291,7 +293,7 @@ private struct Parser{
 		void errori(){expectErr!"identifier following '.'"();}
 		static if(T.length==0){
 			if(ttype==Tok!"."){e = New!Identifier(""); e.loc=tok.loc; nextToken();}
-			else if(ttype!=Tok!"i"){expectErr!"identifier"(); return New!ErrorExp;}
+			else if(ttype!=Tok!"i"){expectErr!"identifier"(); return New!ErrorExp();}
 			else e = New!Identifier(tok.name); e.loc = tok.loc; nextToken();
 		}else{e=args[0];}
 		for(bool multerr=0;;){
@@ -400,7 +402,7 @@ private struct Parser{
 			mixin(getTTCases(literals));
 				e = New!LiteralExp(tok); break;
 			default:
-				expectErr!"template argument"(); return New!ErrorExp;
+				expectErr!"template argument"(); return New!ErrorExp();
 		}
 		e.loc = tok.loc;
 		nextToken();
@@ -438,7 +440,8 @@ private struct Parser{
 				mixin(rule!(CastExp,Existing,q{stc,tt,e}));
 			case Tok!"!is":
 				ttype = Tok!"is"; // TODO: maybe replace with parseIsExp?
-				return res = new UnaryExp!(Tok!"!")(nud());
+				tok.loc.rep = tok.loc.rep[1..$];
+				return res = new UnaryExp!(Tok!"!")(parseExpression(nbp));
 			case Tok!"is":
 				mixin(doParse!("_","(",Type,"type"));
 				Identifier ident; // optional
@@ -578,7 +581,7 @@ private struct Parser{
 				if(ttype==Tok!"is"){loc=loc.to(tok.loc); goto case Tok!"!is";}
 				else if(ttype==Tok!"in"){loc=loc.to(tok.loc); goto case Tok!"!in";}
 				if(ttype==Tok!"("){
-					nextToken(); auto e=New!TemplateInstanceExp(left,parseTuple!")");
+					nextToken(); auto e=New!TemplateInstanceExp(left,parseTuple!")"());
 					if(e.args.length==1) e.args[0].brackets++; expect(Tok!")"); return res=e;
 				}
 				mixin(rule!(TemplateInstanceExp,Existing,q{left,[parseTemplateSingleArg()]}));
@@ -640,7 +643,7 @@ private struct Parser{
 	Statement parseStmError(){
 		while(ttype != Tok!";" && ttype != Tok!"}" && ttype != Tok!"EOF") nextToken();
 		if(ttype == Tok!";") nextToken();
-		return New!ErrorStm;
+		return New!ErrorStm();
 	}
 	private static template pStm(T...){
 		enum pStm="case Tok!\""~T[0]~"\":\n"~rule!(mixin(T[0][0]+('A'-'a')~T[0][1..$]~"Stm"),"_",T[1..$]);
@@ -770,7 +773,7 @@ private struct Parser{
 					//pragma(msg,doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
 					expect(Tok!"catch");
 					typeof(parseType()) type=null;
-					typeof(parseIdentifier()) ident;//=null; //DMD BUG: if the initializer is specified, DMD generates wrong code that results in segfault
+					typeof(parseIdentifier()) ident=null;
 					if(ttype==Tok!"("){
 						nextToken();
 						type = parseType();
@@ -822,7 +825,7 @@ private struct Parser{
 				if(auto d=parseDeclDef(tryonly|allowstm)) return d;
 				mixin(rule!(ExpressionStm,Expression,";")); // note: some other cases may invoke parseExpression2 and return an ExpressionStm!
 			case Tok!")", Tok!"}", Tok!":": // this will be default
-				expectErr!"statement"; return parseStmError();
+				expectErr!"statement"(); return parseStmError();
 		}
 	}
 	Expression parseType(string expectwhat="type"){
@@ -838,9 +841,12 @@ private struct Parser{
 			case Tok!"i": tt=parseIdentifierList(); break;
 			mixin({string r;
 				foreach(x;typeQualifiers) r~=q{
-					case Tok!}`"`~x~`":`q{nextToken();
-					if(ttype==Tok!"(") brk=true, nextToken();
-					auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
+					case Tok!}`"`~x~`":`q{
+						auto loc=tok.loc;
+						nextToken();
+						if(ttype==Tok!"(") brk=true, nextToken();
+						auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
+						tt.loc=loc.to(ptok.loc);
 						if(ttype==Tok!".") tt=parseIdentifierList(tt); // ENHANCEMENT
 						break;
 				};
@@ -851,7 +857,7 @@ private struct Parser{
 				error("found '"~tok.toString()~"' when expecting "~expectwhat);
 				nextToken();
 				if(ttype == Tok!";") nextToken();
-				return New!ErrorExp; // TODO: don't always do nextToken();
+				return New!ErrorExp(); // TODO: don't always do nextToken();
 		}
 		for(;;){
 			switch(ttype){
@@ -1041,13 +1047,13 @@ private struct Parser{
 		bool needtype=ttype!=Tok!"this" && (ttype!=Tok!"~"||peek().type!=Tok!"this") && ttype!=Tok!"invariant";
 		TokenType p;
 		if(needtype&&(!stc||(ttype!=Tok!"i" || (p=peek().type)!=Tok!"=" && p!=Tok!"("))) type=parseType("declaration");
-		if(cast(ErrorExp)type) return New!ErrorDecl;
+		if(cast(ErrorExp)type) return New!ErrorDecl();
 		if(isAlias){
 			if(ttype==Tok!"this"){
 				nextToken();
-				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!ThisExp,cast(Expression)null)); expect(Tok!";"); // alias this
+				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!ThisExp(),cast(Expression)null)); expect(Tok!";"); // alias this
 			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
-		}else if(!needtype||peek.type==Tok!"(") d=parseFunctionDeclaration(stc,type);
+		}else if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type);
 		else d=parseDeclarators(stc,type);
 		return d;
 	}
@@ -1074,7 +1080,7 @@ private struct Parser{
 			auto stc=parseSTC!toplevelSTC();
 			if(!stc||ttype!=Tok!"i") type=parseType();
 			auto name=parseIdentifier();
-			if(ttype!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp;}
+			if(ttype!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp();}
 			nextToken();
 			init=parseExpression(rbp!(Tok!","));
 			auto e=New!ConditionDeclExp(stc,type,name,init); e.loc=loc.to(init.loc);
@@ -1135,16 +1141,25 @@ private struct Parser{
 		Parameter[] params;
 		if(ret) goto notspecial; // so that I don't have to test for ret multiple times
 		if(ttype==Tok!"this"){
-			name=New!ThisExp, name.loc=tok.loc; nextToken();
+			name=New!ThisExp(), name.loc=tok.loc; nextToken();
 			if(ttype==Tok!"("&&peek().type==Tok!"this"){
 				nextToken(), nextToken(), expect(Tok!")");
 				auto param = New!PostblitParameter(); param.loc=tok.loc;
 				params = [param]; // TODO: avoid heap allocation.
 				goto isspecial;
 			}
-		}else if(ttype==Tok!"~" && peek().type==Tok!"this"){name=New!TildeThisExp; Location loc=tok.loc; nextToken(), name.loc=loc.to(tok.loc); nextToken();}
-		else if(ttype==Tok!"invariant"){Location loc=tok.loc; mixin(doParse!("_","(",")")); name=New!InvariantExp; name.loc=loc; params=[]; goto isspecial;}
-		else{
+		}else if(ttype==Tok!"~" && peek().type==Tok!"this"){
+			name=New!TildeThisExp();
+			Location loc=tok.loc;
+			nextToken(), name.loc=loc.to(tok.loc);
+			nextToken();
+		}else if(ttype==Tok!"invariant"){
+			Location loc=tok.loc;
+			mixin(doParse!("_","(",")"));
+			name=New!InvariantExp(); name.loc=loc;
+			params=[];
+			goto isspecial;
+		}else{
 			notspecial:
 			if(ttype!=Tok!"i") expectErr!"function name"(), name=New!Identifier(cast(string)null);
 			else{name=New!Identifier(tok.name); name.loc=tok.loc; nextToken();}
@@ -1368,8 +1383,8 @@ private struct Parser{
 		if(ttype==Tok!"i"){auto e=New!Identifier(tok.name); e.loc=tok.loc; nextToken(); return e;}
 		if(ttype==Tok!"0"||ttype==Tok!"0L"||ttype==Tok!"0U"||ttype==Tok!"0LU"){auto e=New!LiteralExp(tok); e.loc=tok.loc; nextToken(); return e;}
 		if(ttype==Tok!"unittest"&&allowunittest) return nextToken(), New!Identifier("unittest");
-		expectErr!"condition";
-		return New!ErrorExp;
+		expectErr!"condition"();
+		return New!ErrorExp();
 	}
 	Expression parseDebugCondition(){return parseVersionCondition(false);}
 	Statement parseCondDeclBody(int flags){ // getParseProc fills in an argument called 'flags'

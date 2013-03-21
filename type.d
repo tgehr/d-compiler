@@ -18,30 +18,34 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 
 	static Type get(T: T*)(){
 		if(uniqueType!(T*)) return uniqueType!(T*);
-		return uniqueType!(T*)=get!T.getPointer();
+		return uniqueType!(T*)=get!T().getPointer();
 	}
 
 	static Type get(T: T[])(){
 		if(uniqueType!(T[])) return uniqueType!(T[]);
-		return uniqueType!(T[])=get!T.getDynArr();
+		return uniqueType!(T[])=get!T().getDynArr();
 	}
 
 	static Type get(T: T[N], ulong N)(){
 		if(uniqueType!(T[N])) return uniqueType!(T[N]);
-		return uniqueType!(T[N])=get!T.getArray(N);
+		return uniqueType!(T[N])=get!T().getArray(N);
 	}
 
 	static Type get(T: const(T))() if(!is(typeof({T x; x=T.init;}))&&!.isBasicType!T){
 		if(uniqueType!(const(T))) return uniqueType!(const(T));
-		return uniqueType!(const(T))=get!T.getConst();		
+		return uniqueType!(const(T))=get!T().getConst();		
 	}
 	static Type get(T: immutable(T))(){
 		if(uniqueType!(immutable(T))) return uniqueType!(immutable(T));
-		return uniqueType!(immutable(T))=get!T.getImmutable();		
+		return uniqueType!(immutable(T))=get!T().getImmutable();
 	}
 	static Type get(T: shared(T))(){
 		if(uniqueType!(shared(T))) return uniqueType!(shared(T));
-		return uniqueType!(shared(T))=get!T.getShared();		
+		return uniqueType!(shared(T))=get!T().getShared();
+	}
+	static Type get(T: inout(T))(){
+		if(uniqueType!(inout(T))) return uniqueType!(inout(T));
+		return uniqueType!(inout(T))=get!T().getInout();
 	}
 
 	static Type get(T)() if(!.isBasicType!T){

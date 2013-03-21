@@ -53,14 +53,14 @@ class ExpressionStm: Statement{
 class IfStm: Statement{
 	Expression e; Statement s1,s2;
 	this(Expression cond, Statement left, Statement right){e=cond, s1=left, s2=right;}
-	override string toString(){return "if(" ~ e.toString ~ ") "~s1.toString()~(s2!is null?(cast(BlockStm)s1?"":"\n")~"else "~s2.toString:"");}
+	override string toString(){return "if(" ~ e.toString() ~ ") "~s1.toString()~(s2!is null?(cast(BlockStm)s1?"":"\n")~"else "~s2.toString():"");}
 
 	mixin Visitors;
 }
 class WhileStm: Statement{
 	Expression e; Statement s;
 	this(Expression cond, Statement statement){e=cond; s=statement;}
-	override string toString(){return "while(" ~ e.toString ~ ") "~s.toString();}
+	override string toString(){return "while(" ~ e.toString() ~ ") "~s.toString();}
 
 	mixin Visitors;
 }
@@ -75,7 +75,7 @@ class ForStm: Statement{
 	Statement s1; Expression e1, e2;
 	Statement s2;
 	this(Statement init, Expression cond, Expression next, Statement statement){s1=init; e1=cond; e2=next; s2=statement;}
-	override string toString(){return "for("~s1.toString()~(e1?e1.toString():"")~";"~(e2?e2.toString:"")~") "~s2.toString();}
+	override string toString(){return "for("~s1.toString()~(e1?e1.toString():"")~";"~(e2?e2.toString():"")~") "~s2.toString();}
 
 	mixin Visitors;
 }

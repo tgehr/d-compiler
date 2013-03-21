@@ -65,17 +65,19 @@ string upperf(string s){
 
 // memory allocation stuff
 struct MallocAppender(T:T[]){ // NO RAII. Loosely compatible to the std.array.appender interface.
-	static MallocAppender create(size_t initial=16){
+	static MallocAppender create(size_t initial=16){//pure
 		MallocAppender app;
 		app._length=initial;
+		//extern(C)void*malloc(size_t)pure; // =D
 		app._data=cast(Unqual!T*)malloc(T.sizeof*app._length);
 		app._clength=0;
 		return app;
 	}
-	void put(const(Unqual!T) x){
+	void put(const(Unqual!T) x){//pure
 		_clength++;
 		if(_clength>=_length){
 			_length*=2;
+			//extern(C)void*realloc(void*,size_t)pure;
 			_data=cast(Unqual!T*)realloc(cast(void*)_data, T.sizeof*_length);
 		}
 		_data[_clength-1]=x;
@@ -205,7 +207,7 @@ struct ChunkGCAlloc{
 	auto appender(T)(){return AppWrap!T(std.array.appender!T());}+/
 }
 
-string toEngNum(uint i){
+string toEngNum(uint i){ // pure
 	static string[] a=["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven",
 	                   "twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
 	static string[] b=[null,"ten","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
@@ -283,6 +285,9 @@ private string Ximpl(string x){
 template X(string x){
 	enum X = Ximpl(x);
 }
+
+enum a="";
+
 
 template XX(string x){
 	enum XX = mixin(Ximpl(x));

@@ -2,7 +2,8 @@ SRCFILES = ttt.d lexer.d operators.d parser.d expression.d statement.d declarati
 OBJFILES = ttt.o lexer.o operators.o parser.o expression.o statement.o declaration.o type.o scope_.o module_.o semantic.o vrange.o visitors.o error.o terminal.o util.o
 
 #DMD = dmd -m32 -O -release -inline -noboundscheck
-DMD = dmd -gc -m32
+DMD = dmd -property -gc -m32
+#DMD = ../dmd/src/dmd -property -gc -m32
 #DMD = gdmd -m32 -L-lgphobos2 -O -release -inline -noboundscheck
 #DMD = gdmd -gc -m32 -L-lgphobos2
 
@@ -16,7 +17,7 @@ __ttt: $(OBJFILES)
 	$(DMD) -J. -c $<
 
 ttt: $(SRCFILES) makefile
-	$(DMD) -J. $(SRCFILES)
+	$(DMD) -J. $(SRCFILES) -ofttt
 #$(DMD) $(OBJFILES) -ofttt
 clean:
 	rm *.o ttt tt
