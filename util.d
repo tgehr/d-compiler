@@ -258,7 +258,9 @@ mixin template DownCastMethods(T...){
 	mixin(_dgliteral!T()); // DMD bug
 }
 
-
+mixin template DownCastMethod(){
+	mixin(`override `~typeof(this).stringof~` is`~typeof(this).stringof~`(){return this;}`);
+}
 
 
 

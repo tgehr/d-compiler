@@ -1,7 +1,7 @@
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, util;
-import semantic, scope_, visitors;
+import semantic, scope_, vrange, visitors;
 
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
@@ -9,9 +9,14 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 
 	override string toString(){return "Type";}
 
-	static BasicType get(T)() if(isBasicType!T){
+	static BasicType get(T)() if(.isBasicType!T){
 		if(uniqueType!T) return uniqueType!T;
 		return uniqueType!T=New!BasicType(Tok!(T.stringof));
+	}
+
+	static Type get(T: T*)(){
+		if(uniqueType!(T*)) return uniqueType!(T*);
+		return uniqueType!(T*)=get!T.getPointer();
 	}
 
 	static Type get(T: T[])(){
@@ -19,7 +24,12 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!(T[])=get!T.getDynArr();
 	}
 
-	static Type get(T: const(T))() if(!is(typeof({T x; x=T.init;}))&&!isBasicType!T){
+	static Type get(T: T[N], ulong N)(){
+		if(uniqueType!(T[N])) return uniqueType!(T[N]);
+		return uniqueType!(T[N])=get!T.getArray(N);
+	}
+
+	static Type get(T: const(T))() if(!is(typeof({T x; x=T.init;}))&&!.isBasicType!T){
 		if(uniqueType!(const(T))) return uniqueType!(const(T));
 		return uniqueType!(const(T))=get!T.getConst();		
 	}
@@ -32,7 +42,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 		return uniqueType!(shared(T))=get!T.getShared();		
 	}
 
-	static Type get(T)() if(!isBasicType!T){
+	static Type get(T)() if(!.isBasicType!T){
 		if(uniqueType!T) return uniqueType!T;
 		pragma(msg,"TODO: fix. do not know how to get type "~T.stringof);
 		return uniqueType!T=New!BasicType(Tok!"void"); // TODO: improve		
@@ -51,6 +61,8 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 	override Type isType(){return this;}
 
 	mixin DownCastMethods!(
+		BasicType,
+		QualifiedTy,
 		ConstTy,
 		ImmutableTy,
 		SharedTy,
@@ -67,7 +79,7 @@ class Type: Expression{ //Types can be part of Expressions and vice-versa
 
 protected:
 	static template uniqueType(T){
-		static if(isBasicType!T) BasicType uniqueType;
+		static if(.isBasicType!T) BasicType uniqueType;
 		else Type uniqueType;
 	}
 	Type[long] arrType;
@@ -88,12 +100,14 @@ struct Class{}
 
 class NullPtrTy: Type{ // typeof(null)
 	this(){sstate = SemState.completed;}
-	override string toString(){return "null_t";}
+	override string toString(){return "typeof(null)";}
+
+	mixin Visitors;
 }
 
 class EmptyArrTy: Type{ // typeof([])
 	this(){sstate = SemState.completed;}
-	override string toString(){return "emptyarray_t";}
+	override string toString(){return "typeof([])";}
 }
 
 
@@ -148,6 +162,7 @@ final class BasicType: Type{
 	this(TokenType op)in{assert(strength[op]||op==Tok!"void");}body{this.op=op; sstate=SemState.completed;}
 	override string toString(){return _brk(TokenTypeToString(op));}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -178,9 +193,9 @@ class DynArrTy: Type{ //purely semantic node
 
 class ArrayTy: Type{ //purely semantic node
 	Expression e;
-	long size;
-	this(Expression next, long siz)in{assert(next&&1);}body{e=next; size=siz;}
-	override string toString(){return _brk(e.toString()~'['~to!string(size)~']');}
+	ulong length;
+	this(Expression next, long len)in{assert(next&&1);}body{e=next; length=len;}
+	override string toString(){return _brk(e.toString()~'['~to!string(length)~']');}
 	override ArrayTy isArrayTy(){return this;}
 
 	mixin Visitors;
@@ -196,6 +211,8 @@ template QualifiedType(TokenType op){
 
 class QualifiedTy: Type{
 	Expression e;
+
+	mixin DownCastMethod;
 }
 
 class ConstTy: QualifiedTy{

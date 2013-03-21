@@ -284,7 +284,7 @@ private struct Parser{
 		nextToken();
 		return e;
 	}
-	Expression parseIdentifierList(T...)(T args){
+	Expression parseIdentifierList(bool tmpl=true,bool instNew=false,T...)(T args){ // tmpl: allow template instantiations, instNew: allow identifier.new Class;
 		TokenType tt;
 		Expression e;
 		void errori(){expectErr!"identifier following '.'"();}
@@ -297,27 +297,38 @@ private struct Parser{
 			if(ttype==Tok!"."){
 				auto loc=tok.loc;
 				nextToken();
-				if(ttype!=Tok!"i"){errori(); return e;}
-				auto i = New!Identifier(tok.name); i.loc=tok.loc;
-				e = New!(BinaryExp!(Tok!"."))(e,i); e.loc=loc;
-				nextToken();
-			}else if(ttype==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
-				e=led(e);
-				if(ttype==Tok!"!"&&!multerr && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
-					error("multiple '!' arguments are disallowed"), multerr=1;
+				static if(!instNew){
+					if(ttype!=Tok!"i"){errori(); return e;}
+				}else{
+					if(ttype!=Tok!"i"){
+						if(ttype!=Tok!"new"){errori(); return e;}
+					}else{
+						auto f = New!InstanceNewExp(e,nud());
+						f.loc=e.loc.to(ptok.loc);
+						return f;
+					}
 				}
-			}
-			else break;
+				auto i = New!Identifier(tok.name); i.loc=tok.loc;
+				e = New!(BinaryExp!(Tok!"."))(e,i); e.loc=loc.to(ptok.loc);
+				nextToken();
+			}else static if(tmpl){
+				if(ttype==Tok!"!"){
+					e=led(e);
+					if(ttype==Tok!"!"&&!multerr && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+						error("multiple '!' arguments are disallowed"), multerr=1;
+					}
+				}else break;
+			}else break;
 		}
 		return e;
 	}
-	bool skipIdentifierList(){
+	bool skipIdentifierList(){ // only used for types, so no handling of instance.new
 		TokenType tt;
 		skip(Tok!".");
 		if(!skip(Tok!"i")) return false;
 		for(;;){
 			if(skip(Tok!".")){if(!skip(Tok!"i")) return false;}
-			else if(ttype==Tok!"!" && (tt=peek().type)!=Tok!"in" && tt!=Tok!"is"){
+			else if(ttype==Tok!"!"){
 				nextToken();
 				if(ttype==Tok!"("){
 					nextToken();
@@ -399,7 +410,7 @@ private struct Parser{
 	Expression nud() {
 		mixin(SetLoc!Expression);
 		switch(ttype){
-			case Tok!"i",Tok!".": return parseIdentifierList(); // TODO: instance.new Class(...);
+			case Tok!"i",Tok!".": return parseIdentifierList!(true,true)(); // allow template instantiations and instance.new Class
 			case Tok!"``", Tok!"``c", Tok!"``w", Tok!"``d": // adjacent string tokens get concatenated
 				Token t=tok;
 				for(nextToken();ttype==t.type||ttype==Tok!"``";nextToken()){
@@ -422,6 +433,9 @@ private struct Parser{
 				expect(Tok!")");
 				auto e=nud();
 				mixin(rule!(CastExp,Existing,q{stc,tt,e}));
+			case Tok!"!is":
+				ttype = Tok!"is"; // TODO: maybe replace with parseIsExp?
+				return res = new UnaryExp!(Tok!"!")(nud());
 			case Tok!"is":
 				mixin(doParse!("_","(",Type,"type"));
 				Identifier ident; // optional
@@ -509,8 +523,10 @@ private struct Parser{
 	// left denotation
 	Expression led(Expression left){
 		Expression res=null;
-		Location loc=tok.loc;
-		scope(exit) if(res) res.loc=loc;
+		//Location loc=tok.loc;
+		//scope(exit) if(res) res.loc=loc;
+		Location loc=left.loc;
+		scope(exit) if(res) res.loc=loc.to(ptok.loc);
 		switch(ttype){
 			//case Tok!"i": return New!CallExp(New!BinaryExp!(Tok!".")(left,New!Identifier(self.name)),parseExpression(45));// infix
 			case Tok!"?": mixin(rule!(TernaryExp,"_",Existing,"left",Expression,":",OrOrExp));
@@ -785,11 +801,14 @@ private struct Parser{
 		}
 	}
 	Expression parseType(string expectwhat="type"){
-		mixin(SetLoc!Expression);
 		Expression tt;
 		bool brk=false;
 		switch(ttype){
-			mixin(getTTCases(basicTypes)); tt = New!BasicType(ttype); nextToken(); break;
+			mixin(getTTCases(basicTypes));
+				tt = New!BasicType(ttype);
+				tt.loc=tok.loc;
+				nextToken();
+				break;
 			case Tok!".": goto case;
 			case Tok!"i": tt=parseIdentifierList(); break;
 			mixin({string r;
@@ -807,7 +826,11 @@ private struct Parser{
 		}
 		for(;;){
 			switch(ttype){
-				case Tok!"*": nextToken(); tt=New!PointerTy(tt); continue;
+				case Tok!"*":
+					tt=New!PointerTy(tt); 
+					tt.loc=tok.loc;
+					nextToken();
+					continue;
 				case Tok!"[":
 					auto save = saveState();
 					bool isAA=skip()&&skipType()&&ttype==Tok!"]";
@@ -815,7 +838,8 @@ private struct Parser{
 					if(isAA){
 						Location loc=tok.loc;
 						mixin(doParse!("_",Type,"e","]"));
-						tt=New!IndexExp(tt,[e]); tt.loc=loc.to(ptok.loc);
+						tt=New!IndexExp(tt,[e]);
+						tt.loc=loc.to(ptok.loc);
 					}else tt=led(tt); continue; //'Bug': allows int[1,2].
 				case Tok!"function":
 					auto loc=tt.loc;
@@ -823,7 +847,8 @@ private struct Parser{
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
 					STC stc=parseSTC!functionSTC();
-					tt=New!FunctionPtr(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc.to(ptok.loc);
+					tt=New!FunctionPtr(New!FunctionType(stc,tt,params,vararg));
+					tt.loc=loc.to(ptok.loc);
 					continue;
 				case Tok!"delegate":
 					auto loc=tt.loc;
@@ -831,13 +856,14 @@ private struct Parser{
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
 					STC stc=parseSTC!functionSTC();
-					tt=New!DelegateType(New!FunctionType(stc,tt,params,vararg)); tt.loc=loc.to(ptok.loc);
+					tt=New!DelegateType(New!FunctionType(stc,tt,params,vararg));
+					tt.loc=loc.to(ptok.loc);
 					continue;
 				default: break;
 			}
 			break;
 		}
-		return res=tt;
+		return tt;
 	}
 	bool skipType(){
 		switch(ttype){
@@ -1165,7 +1191,7 @@ private struct Parser{
 		auto bind=appender!(Expression[])();
 		bool isBindings=false;
 		for(;;){
-			Expression s=parseIdentifierList();
+			Expression s=parseIdentifierList!false(); // only allow foo.bar.qux, and not foo.bar!qux.new C
 			if(ttype==Tok!"=") nextToken(), s=New!(BinaryExp!(Tok!"="))(s,parseIdentifierList());
 			else if(!isBindings&&ttype==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
 			if(isBindings) bind.put(s); 			//(isBindings?bind:symbols).put(s); TODO: report bug!
@@ -1288,7 +1314,6 @@ private struct Parser{
 		bool isStatic=false;
 		bool isMix=false;
 		STC stc=STC.init;
-		alias CondDeclBody Body;
 	    dispatch:
 		switch(ttype){
 			case Tok!";": mixin(rule!(EmptyDecl,"_"));
@@ -1298,17 +1323,17 @@ private struct Parser{
 				nextToken();
 				auto tt=ttype;
 				if(tt==Tok!"assert"){mixin(rule!(StaticAssertDecl,Existing,"stc","_","(",ArgumentList,")",";"));}
-				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));}
+				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));}
 				stc|=STCstatic;
 				goto dispatch;
 			case Tok!"debug":
 				nextToken();
 				if(ttype==Tok!"="){mixin(rule!(DebugSpecDecl,Existing,"stc","_",DebugCondition,";"));}
-				mixin(rule!(DebugDecl,Existing,"stc","OPT"q{"(",DebugCondition,")"},"NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));
+				mixin(rule!(DebugDecl,Existing,"stc","OPT"q{"(",DebugCondition,")"},"NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"version":
 				nextToken();
 				if(ttype==Tok!"="){mixin(rule!(VersionSpecDecl,Existing,"stc","_",DebugCondition,";"));}
-				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",Body,"OPT"q{"else","NonEmpty",CondDeclBody}));
+				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"pragma":
 				mixin(rule!(PragmaDecl,Existing,"stc","_","(",ArgumentList,")",CondDeclBody)); // Body can be empty
 			case Tok!"import": return res=parseImportDecl(stc);

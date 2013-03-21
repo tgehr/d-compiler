@@ -6,24 +6,34 @@ int xyz(float);
 	class D{}
 }*/
 
-int[] y;
+//int[] y;
 pragma(msg, "start");
 
 inout(const(int)[]) foo(inout(const(int)[]) x){
-	//inout(const(inout(shared(immutable(inout(int)[]))))[]) y;
+	inout(const(inout(shared(immutable(inout(int)[]))))[]) y;
 	//const(immutable(int)) y;
-	//pragma(msg, typeof(y));
-	immutable(int*)[] p;
-	const(inout(int*)[]) q=p;
-	pragma(msg, typeof(q));
+	pragma(msg, typeof(y));
+	immutable(int[]) p;
+	inout(immutable(int)[]) q;
+	pragma(msg, typeof(cast()q));
 	
-	immutable(float) yy;
-	int xx;
+	// inout(int[]) yy;
+	// immutable(int[]) xx;
+
+
+	//shared(const(immutable(int)*[][][][])) yy;
+	//shared(inout(int)*[][][][]) xx;
+	inout(immutable(int)[]*)[] xx;
+	inout(const(int[])*)[] yy;
+
+	//shared(const(int*))* pp = yy;
+
+	//const(shared(inout(int)*))* pp=yy;
+
 	auto zz = 1 ? xx : yy;
-	auto ww = 1 ? yy : xx;
 	pragma(msg, typeof(zz));
+	auto ww = 1 ? yy : xx;
 	pragma(msg, typeof(ww));
-	
 
 	return x;
 }
@@ -33,7 +43,9 @@ inout(const(int)[]) foo(inout(const(int)[]) x){
 
 void foo(){}
 int bar(){ return 1; }
-void main(){/*
+void main(){
+	//int[0] nn = [];
+	//pragma(msg, typeof(nn));
 	//pragma(msg, typeof(q));
 	shared(int) x=cast(const(int))1;
 	const(shared(int)) xxx=1;
@@ -53,8 +65,14 @@ void main(){/*
 	pragma(msg, typeof(xxd));
 	//static assert(is(typeof(xxd) == const(immutable(int)*[])));
 	
-	/*int yyy=xxx;
+	int yyy=xxx;
 	ushort wc=((x&1)+1)+1U; int ii=wc;
+	short wx = 10/(1+(wc%2));
+	
+	ulong goo;
+	ubyte moo = ((cast(ubyte)goo&252)^2)+cast(int)1;
+	pragma(__range, ((goo&252)^2)+cast(int)1f);
+
 	auto arr=[2fi+1L, 1.0L, 2,];
 	float sa=1+1; char cb;//=sa;
 	int cc;
@@ -63,7 +81,7 @@ void main(){/*
 	creal cx,cy;
 	//pragma(msg,typeof(cx<cy));
 	pragma(msg,typeof(cc,cb,arr));
-	ubyte x;
+	//ubyte x;
 	double y;
 	//pragma(msg,typeof(x+y));
 	ifloat ix, iy;
@@ -92,12 +110,12 @@ void main(){/*
 	//int i;
 	//{int i(){};}
 	//C c=new C;
-	//C.D d=c.new D;
+	//C.d d=new c.D;
 	//printf("x=%d!\n",x);
 	//int i(){}
 	for(int i=0;i<100;i++){
 		//for(int i=0;i<100;i++){}
-		}*/
+	}//*/
 }
 //auto foo(){return bar();return 1;}
 //auto bar(){return foo();}

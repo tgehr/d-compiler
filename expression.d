@@ -1,7 +1,7 @@
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, declaration, statement, type;
-import scope_, semantic, visitors, util;
+import scope_, semantic, visitors, vrange, util;
 
 
 abstract class Node{
@@ -135,6 +135,15 @@ class NewClassExp: Expression{
 		return "new class("~join(map!(to!string)(args),",")~")"~(class_.parents?" "~join(map!(to!string)(class_.parents),","):"")~class_.bdy.toString();
 	}
 }
+class InstanceNewExp: Expression{
+	Expression inst;
+	Expression nexp;
+	this(Expression instance, Expression newexp)in{assert(instance&&newexp);}body{
+		inst=instance, nexp=newexp;
+	}
+	override string toString(){return inst.toString()~'.'~nexp.toString();}
+}
+
 class MixinExp: Expression{
 	Expression e;
 	this(Expression exp){e=exp;}

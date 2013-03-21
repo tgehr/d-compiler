@@ -39,6 +39,7 @@ abstract class ErrorHandler{
 class SimpleErrorHandler: ErrorHandler{
 	this(string source,string code){super(source,code);}
 	override void error(string err, Location loc){
+		nerrors++;
 		stderr.writeln(source,'(',loc.line,"): error: ",err);
 	}
 }

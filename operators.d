@@ -117,7 +117,7 @@ bool isBitwiseOp(TokenType op){
 bool isArithmeticOp(TokenType op){
 	switch(op){
 			// additive operators
-		case Tok!"+",Tok!"-",Tok!"~":
+		case Tok!"+",Tok!"-":
 			return true;
 			// multiplicative operators
 		case Tok!"*",Tok!"/",Tok!"%":

@@ -1,38 +1,325 @@
+import std.stdio, std.conv;
+import std.algorithm, std.math;
 
-import std.traits, std.algorithm;
+alias ValueRange!32 IntRange;
+alias ValueRange!64 LongRange;
 
-struct ValueRange{
-	union{long a; ulong ua;}
-	union{long b; ulong ub;}
+struct ValueRange(int size) if(size==32||size==64){
+	static if(size==32){
+		private alias uint T;
+		private alias  int S;
+	}else static if(size==64){
+		private alias ulong T;
+		private alias  long S;
+	}
+	private alias ValueRange R;
+
+	T min, max;
 	bool signed;
-	this(long a, long b){this.a=a; this.b=b; signed=true;}
-	this(ulong ua, ulong ub){this.ua=ua; this.ub=ub; signed=false;}
-	ValueRange widest(){return signed?ValueRange(long.min, long.max):ValueRange(ulong.min, ulong.max);}
+	string toString(){return signed?text(cast(S)min,"..",cast(S)max):text(min,"..",max);}
 
-	ValueRange normalize(){
+	bool contains(R rhs){
 		if(signed){
-			if(a>b) return this=widest();
-		}else
-			if(ua>ub) return this=widest();
-		return this;
+			if(!rhs.signed) rhs = rhs.toSigned();
+			return cast(S)min<=cast(S)rhs.min && cast(S)max>=cast(S)rhs.max;
+		}else{
+			if(rhs.signed) rhs = rhs.toUnsigned();
+			return min<=rhs.min && max>=rhs.max;
+		}
 	}
 
-	ValueRange opBinary(string op: "+")(const ref ValueRange rhs)const{
-		if(signed)
-			return ValueRange(a+rhs.a, b+rhs.b).normalize();
-		else
-			return ValueRange(ua+rhs.ua, b+rhs.ub).normalize();
+	static R full(bool signed){return signed?R(S.min,S.max,true):R(T.min,T.max,false);}
+	R toSigned(){
+		if(signed) return this;
+		if(cast(S)min<=cast(S)max) return R(min, max, true);
+		return full(true);
+	}
+	R toUnsigned(){
+		if(!signed) return this;
+		if(min<=max) return R(min, max, false);
+		return full(false);
+	}
+	R getAbs(){
+		if(!signed) return this;
+		if(cast(S)(min^max)>=0) return max<0?-this:this;
+		return R(0,.max(abs(min),max),true);
 	}
 
-	ValueRange opBinary(string op: "-")(const ref ValueRange rhs)const{
-		if(signed)
-			return ValueRange(a-rhs.b, b-rhs.a).normalize();
-		else
-			return ValueRange(ua-rhs.ub, b-rhs.ua).normalize();
+	.ValueRange!32 narrow(bool sign, int bits){
+		T mask = (1<<bits)-1;
+		alias .ValueRange!32 R;
+		static if(size == 32){
+			if(!sign) return (this&R(cast(uint)mask,cast(uint)mask,signed)).toSigned();
+		}else{
+			auto r = (this&ValueRange(mask,mask,signed)).toSigned();
+			if(!sign) return R(cast(uint)r.min, cast(uint)r.max, true);
+		}
+		T diff = min^max;
+		T s = 1<<bits-1;
+		if(diff>mask || !(min&s) && max&s) return R(cast(uint)-s, cast(uint)s-1, true);
+		diff|=diff>>1; diff|=diff>>2; diff|=diff>>4; diff|=diff>>8;
+		static if(is(T==long)) diff|=diff>>16;
+		T nmin = min&~diff&mask, nmax=max&mask;
+		return R(cast(uint)nmin, cast(uint)nmax, true);
 	}
 
-	ValueRange opBinary(string op: "*")(const ref ValueRange rhs)const{ // probably wrong
-		return widest();
+	R opUnary(string op:"~")(){return R(~max,~min,signed);}
+	R opUnary(string op:"-")(){return ~this+R(1,1,signed);}
+	
+	R opBinary(string op:"^")(R rhs)in{assert(signed==rhs.signed);}body{
+		// TODO: build dedicated logic to make this more efficient
+		return this&~rhs|~this&rhs;
 	}
 
+	R opBinary(string op:"&")(R rhs)in{assert(signed==rhs.signed);}body{
+		//if(!signed) return R(minAnd(this,rhs),maxAnd(this,rhs),signed);
+		// unsigned or identical sign bits:
+		if(!signed || (cast(S)(min^max)>=0 && cast(S)(rhs.min^rhs.max)>=0)){
+			return R(minAnd(this,rhs),maxAnd(this,rhs),signed);
+		}
+		auto l = this, r = rhs;
+		S x, y;
+		// both intervals span [-1,0]
+		if(cast(S)(l.min^l.max)<0 && cast(S)(r.min^r.max)<0){
+			// cannot be larger than either l.max or r.max, set the other one to -1
+			y=.max(l.max,r.max);
+			// only negative numbers for minimum
+			l.max=-1; r.max=-1;
+			x=minAnd(l,r);
+		}else{ // only one interval spans [-1,0]
+			if(cast(S)(l.min^l.max)<0) swap(l,r); // r spans [-1,0]
+			x = .min(cast(S)minAnd(l,R(r.min, -1, true)), cast(S)minAnd(l,R(0, r.max, true)));
+			y = .max(cast(S)maxAnd(l,R(r.min, -1, true)), cast(S)maxAnd(l,R(0, r.max, true)));
+
+		}
+		return R(x, y, signed);
+	}
+
+	R opBinary(string op:"|")(R rhs)in{assert(signed==rhs.signed);}body{
+		// unsigned or identical sign bits:
+		if(!signed || (cast(S)(min^max)>=0 && cast(S)(rhs.min^rhs.max)>=0)){
+			return R(minOr(this,rhs), maxOr(this,rhs),signed);
+		}
+		auto l = this, r = rhs;
+		S x, y;
+		// both intervals span [-1,0]
+		if(cast(S)(l.min^l.max)<0 && cast(S)(r.min^r.max)<0){
+			// cannot be smaller than either l.min or r.min, set the other one to 0
+			x = .min(l.min,r.min);
+			// no negative numbers for maximum.
+			// TODO: there certainly is a more efficient way to handle this
+			l.min = r.min = 0;
+			y=maxOr(l,r);
+		}else{ // only one interval spans [-1,0]
+			if(cast(S)(l.min^l.max)<0) swap(l,r); // r spans [-1,0]
+			x = .min(cast(S)minOr(l,R(r.min, -1, true)), cast(S)minOr(l,R(0, r.max, true)));
+			y = .max(cast(S)maxOr(l,R(r.min, -1, true)), cast(S)maxOr(l,R(0, r.max, true)));
+		}
+		return R(x, y, signed);
+	}
+	R opBinary(string op:"+")(R rhs)in{assert(signed==rhs.signed);}body{
+		R r;
+		if(!signed){
+			if(max>T.max-rhs.max && min<=T.max-rhs.min) return full(false);
+			return R(min+rhs.min, max+rhs.max, false);
+		}else{
+			S x, y;
+			bool
+				mino = cast(S)min>0 && cast(S)rhs.min>0 && cast(S)min>S.max-cast(S)rhs.min, // min+rhs.min overflows
+				maxo = cast(S)max>0 && cast(S)rhs.max>0 && cast(S)max>S.max-cast(S)rhs.max, // max+rhs.max overflows
+				minu = cast(S)min<0 && cast(S)rhs.min<0 && cast(S)min<S.min-cast(S)rhs.min, // min+rhs.min underflows
+				maxu = cast(S)max<0 && cast(S)rhs.max<0 && cast(S)max<S.min-cast(S)rhs.max; // max+rhs.max underflows
+			if(!mino && !maxo && !minu && !maxu || mino && maxo || minu && maxu) return R(min+rhs.min, max+rhs.max, true);
+			return full(true);
+		}
+	}
+
+	R opBinary(string op:"-")(R rhs)in{assert(signed==rhs.signed);}body{
+		// return this+-rhs; // (this would work too)
+		R r;
+		if(!signed){
+			if(min<rhs.max && max>=rhs.min) return full(false);
+			return R(min-rhs.max, max-rhs.min, false);
+		}else{
+			S x, y;
+			bool
+				mino = cast(S)min>0 && cast(S)rhs.max<0 && cast(S)min>S.max+cast(S)rhs.max, // min-rhs.max overflows
+				maxo = cast(S)max>0 && cast(S)rhs.min<0 && cast(S)max>S.max+cast(S)rhs.min, // max-rhs.min overflows
+				minu = cast(S)min<0 && cast(S)rhs.max>0 && cast(S)min<S.min+cast(S)rhs.max, // min-rhs.max underflows
+				maxu = cast(S)max<0 && cast(S)rhs.min>0 && cast(S)max<S.min+cast(S)rhs.min; // max-rhs.min underflows
+			if(!mino && !maxo && !minu && !maxu || mino && maxo || minu && maxu) return R(min-rhs.max, max-rhs.min);
+			return full(true);
+		}
+	}
+
+	R opBinary(string op:"/")(R rhs)in{assert(signed==rhs.signed);}body{
+		if(!rhs.max){
+			if(!rhs.min) return full(signed); // ignore divide by zero
+			rhs.max--;
+		}else if(!rhs.min) rhs.min++;
+		if(!signed){
+			return R(min/rhs.max, max/rhs.min, false);
+		}else{
+			S x=S.max, y=S.min;
+			if(cast(S)(rhs.min^rhs.max)<0){ // divisor spans [-1, 0, 1]
+				x = .min(cast(S)min, -cast(S)min, -cast(S)max);
+				y = .max(cast(S)max, -cast(S)max, -cast(S)min);
+			}else{
+				// TODO: a few branches may be more efficient
+				S a = cast(S)min/cast(S)rhs.min,
+				  b = cast(S)min/cast(S)rhs.max,
+				  c = cast(S)max/cast(S)rhs.min,
+				  d = cast(S)max/cast(S)rhs.max;
+				x = .min(a,b,c,d);
+				y = .max(a,b,c,d);
+			}
+			return R(x, y, true);
+		}
+	}
+
+	// multiply is just a conservative approximation in case of overflow.
+	R opBinary(string op:"*")(R rhs)in{assert(signed==rhs.signed);}body{
+		if(!signed){
+			if(max>T.max/rhs.max) return full(false);
+			return R(min*rhs.min, max*rhs.max,false);
+		}else{
+			static S satMul(S a, S b, ref int n){
+				if(!a||!b){n++; return 0;}
+				if(a==S.min) return b>0 ? S.min : S.max;
+				if(b==S.min) return a>0 ? S.min : S.max;
+				bool s=(a<0)^(b<0);
+				a=abs(a); b=abs(b);
+				if(s && S.min/a==-b) return S.min;
+				if(a>S.max/b) return s ? S.min : S.max;
+				n++;
+				return s ? -a*b : a*b;
+			}
+			int n=0;
+			S a = satMul(min, rhs.min,n),
+			  b = satMul(min, rhs.max,n),
+			  c = satMul(max, rhs.min,n),
+			  d = satMul(max, rhs.max,n);
+			if(n!=4) return full(true);
+			return R(.min(a,b,c,d), .max(a,b,c,d), true);
+		}
+	}
+
+	R opBinary(string op:"^^")(R rhs)in{assert(signed==rhs.signed);}body{
+		// TODO: implement
+		assert(0);
+	}
+	R opBinary(string op:"<<")(R rhs)in{assert(signed==rhs.signed);}body{
+		// TODO: implement
+		assert(0);
+	}
+	R opBinary(string op:">>")(R rhs)in{assert(signed==rhs.signed);}body{
+		// TODO: implement
+		assert(0);
+	}
+	R opBinary(string op:">>>")(R rhs)in{assert(signed==rhs.signed);}body{
+		// TODO: implement
+		assert(0);
+	}
+
+	// modular arithmethics leads to hard problems => conservative approx.
+	R opBinary(string op:"%")(R rhs)in{assert(signed==rhs.signed);}body{
+		if(!rhs.max){
+			if(!rhs.min) return full(signed); // ignore divide by zero
+			rhs.max--;
+		}else if(!rhs.min) rhs.min++;
+		if(!signed){
+			//if(max-min>=rhs.max) return R(0, rhs.max-1, false);
+			return R(0, rhs.max-1, false);
+		}else{
+			auto r = rhs.getAbs();
+			r.min=0; r.max--;
+			if(cast(S)min<0){
+				if(cast(S)max<0) r=-r;
+				else r.min=-r.max;
+			}
+			// mod cannot create a wider range
+			if(cast(S)min<0 &&-cast(S)min<cast(S)rhs.max) r.min=min;
+			if(cast(S)max>0 && cast(S)max<cast(S)rhs.max) r.max=max;
+			return r;
+		}
+	}
+
+static:
+	T maxOr(R lhs, R rhs){
+		T x=0;
+		auto xor=lhs.max^rhs.max;
+		auto and=lhs.max&rhs.max;
+		for(T d=1LU<<(8*T.sizeof-1);d;d>>=1){
+			if(xor & d){
+				x |= d;
+				if(lhs.max&d){if(~lhs.min&d) lhs.min=0;}
+				else{if(~rhs.min&d) rhs.min=0;}
+			}else if(lhs.min&rhs.min&d){
+			x |= d;
+			}else if(and & d){
+				x |= (d<<1)-1;
+				break;
+			}
+		}
+		return x;
+	}
+	
+	T minOr(R lhs, R rhs){return ~maxAnd(~lhs,~rhs);}
+	
+	T maxAnd(R lhs, R rhs){
+		T x=0;
+		for(T d=1LU<<(8*T.sizeof-1);d;d>>=1){
+			if(lhs.max&rhs.max&d){
+				x |= d;
+				if(~lhs.min&d) lhs.min=0;
+				if(~rhs.min&d) rhs.min=0;
+			}else if(~lhs.min & d && lhs.max & d){
+				lhs.max |= d-1;
+			}else if(~rhs.min & d && rhs.max & d){
+				rhs.max |= d-1;
+			}
+		}
+		return x;
+	}
+	
+	T minAnd(R lhs, R rhs){return ~maxOr(~lhs,~rhs);}
+	
+	T maxXor(R lhs, R rhs){return maxOr(lhs&~rhs,~lhs&rhs);}
+	T minXor(R lhs, R rhs){return minOr(lhs&~rhs,~lhs&rhs);}
 }
+
+
+import std.random;
+
+unittest{
+	alias int S;
+	alias uint T;
+	alias IntRange R;
+
+	S a,b,c,d;
+	for(int t;;t++){
+		if(!(t%100)) writeln(t," tests passed!"); 
+		//a=uniform(0U,T.max); b=a+uniform(0U,10000);
+		//c=uniform(0U,T.max); d=c+uniform(0U,10000);
+		a=uniform(-5000,5000); b=a+uniform(0U,10000);
+		b=uniform(-5000,5000); d=c+uniform(0U,10000);
+
+		if(a>b) swap(a,b);
+		if(c>d) swap(c,d);
+		//if(!~scanf("%d %d %d %d",&a,&b,&c,&d)) break;		
+		//writefln("%.32b..%.32b\n%.32b..%.32b",a,b,c,d);
+		S min=S.max, mi, mj;
+		foreach(i;a..b+1)
+			foreach(j;c..d+1)
+				if((i^j)<min) min = i^j, mi=i, mj=j;
+		//writeln(mi," ",mj);
+		//writefln("%.32b\n%.32b",mi,mj);
+		//writeln(maxAnd(R(a,b),R(c,d)));
+		//writeln(a,"..",b," ",c,"..",d,": ",max);
+		S omin=(R(a,b,true)^R(c,d,true)).min;
+		//writeln(min," =? ",omin);
+		if(min!=omin){writeln(a,"..",b," ",c,"..",d); writeln(min,"!=",omin); break;}
+		//break;
+	}
+}
+version(unittest){void main(){}}

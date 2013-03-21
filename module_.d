@@ -14,7 +14,7 @@ class Module{
 		File f; if(path=="-") f=stdin; else f=File(path);
 		auto app=mallocAppender!(char[]);
 		foreach(r;f.byChunk(1024)){app.put(cast(char[])r);}
-		app.put("\0\0\0\0"); // insert 4 padding zero bytes
+		app.put("\n\0\0\0\0"); // insert 4 padding zero bytes
 		string code=cast(string)app.data;
 		sc=new Scope(new FormattingErrorHandler(path, code));
 		//sc=new Scope(new SimpleErrorHandler(path, code));

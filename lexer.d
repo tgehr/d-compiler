@@ -204,11 +204,11 @@ string caseSimpleToken(string prefix="", bool needs = false){
 				r~=caseSimpleToken(s,true);
 			}
 		}
-		if(needs) r~=`default: res[0].type = Tok!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
+		if(prefix=="!") r~="default: mixin(lexNotAndNotIsAndNotIn);\nbreak;\n}\nbreak;\n";
+		else if(needs) r~=`default: res[0].type = Tok!"`~prefix~`"`~";\nbreak;\n}\nbreak;\n";
 	}
 	return r;
 }
-
 
 
 auto lex(string code){
@@ -337,6 +337,46 @@ struct Lexer{
 				case '\r': if(*p=='\n') p++; goto case;
 				case '\n': line++;
 					continue;
+
+				// ! can be the start of !is or !in tokens
+				enum lexNotAndNotIsAndNotIn=q{
+					s = p; int cline = line; // save p and line in case we will NOT find in or is
+					findnotinnotis: for(;;){
+						switch(*p){
+							case 'i': p++;
+								if(*p == 's') res[0].type = Tok!"!is";
+								else if(*p == 'n') res[0].type = Tok!"!in";
+								else goto default;
+								p++;
+								// make sure the identifier stops here:
+								if('a' <= *p && *p <='z') goto default;
+								if('A' <= *p && *p <='Z') goto default;
+								if(*p&0x80){
+									try{
+										auto ch=utf.decode(p[0..4],len);
+										if(isUniAlpha(ch)) goto default;
+									}catch{} goto default;
+								}
+								break findnotinnotis;
+							case ' ', '\t', '\v': 
+								p++; continue; // ignore whitespace
+							case '\r': if(*++p=='\n') p++; goto case;
+							case '\n': line++;
+								p++; continue;
+							case 0x80: .. case 0xFF:
+								len=0;
+								try{
+									auto ch=utf.decode(p[0..4],len);
+									if(isWhite(ch)) p+=len; continue;
+								}catch{} goto default;
+							default:
+								res[0].type = Tok!"!";
+								p = s;
+								line = cline;
+								break findnotinnotis;
+						}
+					}
+				};
 			
 				// simple tokens
 				mixin(caseSimpleToken());

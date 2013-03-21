@@ -94,6 +94,17 @@ mixin template Semantic(T) if(is(T==Expression)){
 		if(type is to) return this;
 		return New!ImplicitCastExp(to,this);
 	}
+	bool implicitlyConvertsTo(Type rhs){
+		if(type.implicitlyConvertsTo(rhs)) return true;
+		auto l = type.isIntegral(), r = rhs.type.isIntegral();
+		if(l && r){
+			if(l.op == Tok!"long" || l.op == Tok!"ulong") return r.getLongRange().contains(getLongRange());
+			return r.getIntRange().contains(this.getIntRange());
+		}
+		return false;
+	}
+	IntRange getIntRange(){return type.getIntRange();}
+	LongRange getLongRange(){return type.getLongRange();}
 }
 
 mixin template Semantic(T) if(is(T==LiteralExp)){
@@ -134,9 +145,32 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 				type=Type.get!Null(); break;
 			case Tok!"true", Tok!"false":
 				type=Type.get!bool(); break;
+				lit.int64=lit.type == Tok!"true";
 			default: return super.semantic(sc); // TODO: verify
 		}
 		mixin(SemEplg);
+	}
+	override IntRange getIntRange(){
+		switch(lit.type){
+			case Tok!"''":
+				if(lit.int64<128) goto case Tok!"0";
+				goto case Tok!"0U";
+			case Tok!"0", Tok!"true", Tok!"false":
+				return IntRange(cast(int)lit.int64,cast(int)lit.int64,true);
+			case Tok!"0U":
+				return IntRange(cast(uint)lit.int64,cast(uint)lit.int64,false);
+			default: return super.getIntRange();
+		}
+	}
+	override LongRange getLongRange(){
+		bool signed=true;
+		switch(lit.type){
+			case Tok!"0LU": signed=false; goto case;
+			case Tok!"''", Tok!"0", Tok!"0U", Tok!"0L":
+			case Tok!"true", Tok!"false":
+				return LongRange(lit.int64,lit.int64,signed);
+			default: return super.getLongRange();
+		}
 	}
 }
 
@@ -209,34 +243,42 @@ template Semantic(T) if(is(T X==BinaryExp!S,TokenType S) && !is(T==BinaryExp!(To
 		
 		static if(isAssignOp(S)){
 			if(auto lv=e1.isLvalue()){
-				e2=e2.implicitlyConvertTo(e1.type).semantic(sc);
+				type = e1.type;
+				e2=e2.implicitlyConvertTo(type).semantic(sc);
 				if(e2.sstate == SemState.error) sstate=SemState.error;
 				return this;
 			}else{
-				sstate=SemState.error;
 				sc.error("expression is not assignable",loc);
-				return this;
+				mixin(ErrEplg);
 			}
-		}else static if(isArithmeticOp(S) || isBitwiseOp(S)){
-			auto bt1=cast(BasicType)e1.type, bt2=cast(BasicType)e2.type;
-			auto v = Type.get!void();
-			if(bt1 && bt2 && bt1 !is v && bt2 !is v){
-				bt1=bt1.intPromote(); bt2=bt2.intPromote();
-				if(auto ty=bt1.combine(bt2)){
-					// TODO: implicit cast
-					type = ty;
-					mixin(SemEplg);
+		}else{
+			auto bt1=e1.type.getHeadUnqual().isBasicType();
+			auto bt2=e2.type.getHeadUnqual().isBasicType();
+			static if(isArithmeticOp(S) || isBitwiseOp(S)){
+				auto v = Type.get!void();
+				if(bt1 && bt2 && bt1 !is v && bt2 !is v){
+					bt1=bt1.intPromote(); bt2=bt2.intPromote();
+					if(auto ty=bt1.combine(bt2)){
+						e1 = e1.implicitlyConvertTo(ty).semantic(sc);
+						e2 = e2.implicitlyConvertTo(ty).semantic(sc);
+						type = ty;
+						mixin(SemEplg);
+					}
 				}
-			}
-		}else static if(isRelationalOp(S)){
-			auto bt1=cast(BasicType)e1.type, bt2=cast(BasicType)e2.type;
-			auto v = Type.get!void();
-			if(bt1 && bt2 && bt1 !is v && bt2 !is v){
-				if(auto ty=bt1.combine(bt2)){
-					// TODO: implicit cast
-					type = Type.get!bool();
-					if(ty.op!=Tok!"cfloat"&&ty.op!=Tok!"cdouble"&&ty.op!=Tok!"creal"){mixin(SemEplg);}
-					else{sc.error("cannot compare complex operands",loc);mixin(ErrEplg);}
+			}else static if(isRelationalOp(S)){
+				auto v = Type.get!void();
+				if(bt1 && bt2 && bt1 !is v && bt2 !is v){
+					if(auto ty=bt1.combine(bt2)){
+						e1 = e1.implicitlyConvertTo(ty).semantic(sc);
+						e2 = e2.implicitlyConvertTo(ty).semantic(sc);
+						type = Type.get!bool();
+						if(ty.op!=Tok!"cfloat"&&ty.op!=Tok!"cdouble"&&ty.op!=Tok!"creal"){
+							mixin(SemEplg);
+						}else{
+							sc.error("cannot compare complex operands",loc);
+							mixin(ErrEplg);
+						}
+					}
 				}
 			}
 		}
@@ -247,6 +289,32 @@ template Semantic(T) if(is(T X==BinaryExp!S,TokenType S) && !is(T==BinaryExp!(To
 			sc.error(format("incompatible types for binary "~TokChars!S~": '%s' and '%s'",e1.type,e2.type),loc);
 			mixin(ErrEplg);
 		}
+	}
+	override IntRange getIntRange(){
+		static if(isArithmeticOp(S) || isBitwiseOp(S)){
+			return mixin(`e1.getIntRange()`~TokChars!S~`e2.getIntRange()`);
+		}else static if(S==Tok!"," || isAssignOp(S)){
+			return e2.getIntRange(); 
+		}else static if(isRelationalOp(S)){
+			// TODO: relational operators
+			return super.getIntRange();
+		}else static if(isLogicalOp(S)){
+			// TODO: logical operators
+			return super.getIntRange();
+		}else return super.getIntRange(); // '~'
+	}
+	override LongRange getLongRange(){
+		static if(isArithmeticOp(S) || isBitwiseOp(S)){
+			return mixin(`e1.getLongRange()`~TokChars!S~`e2.getLongRange()`);
+		}else static if(S==Tok!"," || isAssignOp(S)){
+			return e2.getLongRange(); 
+		}else static if(isRelationalOp(S)){
+			// TODO: relational operators
+			return super.getLongRange();
+		}else static if(isLogicalOp(S)){
+			// TODO: logical operators
+			return super.getLongRange();
+		}else return super.getLongRange(); // '~'
 	}
 }
 
@@ -297,12 +365,53 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		mixin(SemPrlg);
 		mixin(SemChld!q{e});
 		if(!ty) {
-			type=e.type; // TODO: STC casting
-			return this;
+			if(!stc) type = e.type.getHeadUnqual(); // TODO: works differently for classes...
+			else type = e.type.applySTC(stc);
+		}else{
+			type=ty.typeSemantic(sc);
+			mixin(PropErr!q{type});
 		}
-		type=ty.typeSemantic(sc);
-		mixin(PropErr!q{type});
 		mixin(SemEplg);
+	}
+	IntRange getIntRange(){
+		auto ty = e.type.getHeadUnqual().isIntegral();
+		auto nt = type.getHeadUnqual().isIntegral();
+		int size=nt.bitSize();
+		if(!ty||!nt) return type.getIntRange();
+		int osiz=ty.bitSize();
+		bool signed=nt.isSigned();
+		if(size<osiz){ // narrowing conversion
+			if(osiz==64){
+				auto r = e.getLongRange();
+				return r.narrow(signed, size);
+			}else{
+				auto r = e.getIntRange();
+				return r.narrow(signed, size);
+			}
+		}else{ // non-narrowing conversion
+			assert(osiz<64);
+			auto r=e.getIntRange();
+			if(signed) r=r.toSigned();
+			else r=r.toUnsigned();
+			return r;
+		}
+	}
+	LongRange getLongRange(){
+		auto ty = e.type.getHeadUnqual().isIntegral();
+		auto nt = type.getHeadUnqual().isIntegral();
+		if(!ty||!nt) return type.getLongRange();
+		int size=nt.bitSize();
+		int osiz=ty.bitSize();
+		bool signed=nt.isSigned();
+		LongRange r;
+		if(osiz==64) r=e.getLongRange();
+		else{
+			auto or=e.getIntRange();
+			r=LongRange(or.min, or.max, true);
+		}
+		if(signed) r=r.toSigned();
+		else r=r.toUnsigned();
+		return r;
 	}
 }
 
@@ -314,10 +423,7 @@ class ImplicitCastExp: CastExp{ // semantic node
 		ty=type=ty.semantic(sc).isType();
 		assert(type && 1); // if not a type the program is in error
 		if(type.sstate == SemState.error){sstate = SemState.error; return this;}
-		if(e.type.implicitlyConvertsTo(type)) return this;
-		if(e.type.isIntegral() && type.isIntegral()){ // value range propagation
-			
-		}
+		if(e.implicitlyConvertsTo(type)) return this;
 		sstate = SemState.error;
 		sc.error(format("cannot implicitly convert expression '%s' of type '%s' to '%s'",e,e.type,type),e.loc); // TODO: replace toString with actual representation
 		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
@@ -364,33 +470,45 @@ mixin template Semantic(T) if(is(T==Type)){
 	private static auto __funcliteralTQ(){string r;
 		foreach(x; typeQualifiers~["pointer","dynArr"]){ // getConst, getImmutable, getShared, getInout, getPointer, getDynArr. remember to keep getArray in sync.
 			r ~= 
-`			protected Type `~x~`Type;
-			Type get`~upperf(x)~`(){
+`			private Type `~x~`Type;
+			final Type get`~upperf(x)~`(){
 				if(`~x~`Type) return `~x~`Type;
-				return `~x~`Type=`~upperf(x)~`Ty.create(this);
+				return `~x~`Type=get`~upperf(x)~`Impl();
 			}
+			protected Type get`~upperf(x)~`Impl(){return `~upperf(x)~`Ty.create(this);}
 			Type getTail`~upperf(x)~`(){return this;}
 			Type in`~upperf(x)~`Context(){return this;}
 `;		}
 		return r;
 	}mixin(__funcliteralTQ());
 
-	Type getHeadUnqual(){return this;}
+	final Type applySTC(STC stc){
+		auto r = this;
+		r = r.applySTC(stc);
+		if(stc&STCconst)     r = r.getConst();
+		if(stc&STCimmutable) r = r.getImmutable();
+		if(stc&STCshared)    r = r.getShared();
+		if(stc&STCinout)     r = r.getInout();
+		return r;
+	}
 
-	bool implicitlyConvertsTo(Type rhs){
-		return this.refConvertsTo(rhs.getHeadUnqual());
+	Type getHeadUnqual(){return this;} // TODO: make lazy
+
+	override bool implicitlyConvertsTo(Type rhs){
+		return this.refConvertsTo(rhs.getHeadUnqual(),0);
 	}
 
 	// bool isSubtypeOf(Type rhs){...}
 
 	/* stronger condition than subtype relationship.
-	   a reference to a this must be a subtype of
-	   a reference to an rhs.
-	   TODO: find better function name and rename
+	   a 'num'-times reference to a this must be a subtype of
+	   a 'num'-times reference to an rhs.
 	*/
-	bool refConvertsTo(Type rhs){
+	bool refConvertsTo(Type rhs, int num){
 		if(this is rhs) return true;
-		if(auto d=rhs.isConstTy()) return refConvertsTo(d.ty.getTailConst());
+		if(num < 2){
+			if(auto d=rhs.isConstTy()) return refConvertsTo(d.ty.getTailConst(), 0);
+		}
 		return false;
 	}
 	
@@ -405,10 +523,10 @@ mixin template Semantic(T) if(is(T==Type)){
 		return null;
 	}
 
-	final protected Type refMostGeneral(Type rhs){ // TODO: merge with above
+	final protected Type refMostGeneral(Type rhs, int num){ // TODO: merge with above
 		if(rhs is this) return this;
-		bool l2r=this.refConvertsTo(rhs);
-		bool r2l=rhs.refConvertsTo(this);
+		bool l2r=this.refConvertsTo(rhs, num);
+		bool r2l=rhs.refConvertsTo(this, num);
 		if(l2r ^ r2l){
 			if(l2r) return rhs;
 			return this;
@@ -426,8 +544,21 @@ mixin template Semantic(T) if(is(T==Type)){
 		if(unqual !is rhs) return unqual.combine(this);
 		return null;
 	}
+	
+	Type refCombine(Type rhs, int num){
+		if(auto d=rhs.isQualifiedTy()) return d.refCombine(this, num);
+		if(auto r = refMostGeneral(rhs, num)) return r;
+		if(num < 2){
+			// TODO: more efficient if rhs.getConst() instead of rhs?
+			if(num) return getConst().refCombine(rhs.getConst(), 0);
+			auto tconst = getTailConst();
+			if(this !is tconst) return tconst.refCombine(rhs.getTailConst(), 0);
+		}
+		return null;
+	}
 
-
+	override IntRange getIntRange(){return IntRange.full(true);}
+	override LongRange getLongRange(){return LongRange.full(true);}
 }
 
 mixin template Semantic(T) if(is(T==BasicType)){
@@ -462,25 +593,40 @@ mixin template Semantic(T) if(is(T==BasicType)){
 		 Tok!"ifloat":-1,Tok!"idouble":-1,Tok!"ireal":-1,Tok!"cfloat":-2,Tok!"cdouble":-2,Tok!"creal":-2];
 
 	override BasicType isIntegral(){return strength[op]>=0 && strength[op]<=5 ? this : null;}
-
-	
+	final int bitSize()in{assert(!!isIntegral());}body{
+		switch(op){
+			case Tok!"bool", Tok!"char", Tok!"byte", Tok!"ubyte":
+				return 8;
+			case Tok!"wchar", Tok!"short", Tok!"ushort":
+				return 16;
+			case Tok!"dchar", Tok!"int", Tok!"uint":
+				return 32;
+			case Tok!"long", Tok!"ulong":
+				return 64;
+			default: return -1;
+		}
+	}
+	final bool isSigned()in{assert(!!isIntegral());}body{
+		switch(op){
+			case Tok!"bool", Tok!"ubyte", Tok!"ushort", Tok!"dchar", Tok!"uint", Tok!"ulong":
+				return false;
+			default: return true;
+		}
+	}
 
 	override bool implicitlyConvertsTo(Type rhs){
-		if(auto bt=cast(BasicType)rhs){ // transitive closure of TDPL p44
+		if(auto bt=rhs.getHeadUnqual().isBasicType()){ // transitive closure of TDPL p44
 			if(op == Tok!"void") return false;
 			if(strength[op]>=0 && strength[bt.op]>=0) return strength[op]<=strength[bt.op];
 			if(strength[bt.op]==-2) return true;
-		}else{
-			auto unqualified=rhs.getHeadUnqual();
-			if(rhs is unqualified) return false;
-			return implicitlyConvertsTo(unqualified);
+			return strength[op] == -1 && strength[bt.op] == -1; // both must be imaginary
 		}
-		assert(0); // TODO: shouldn't be necessary, file bug
+		return false;
 	}
 
 	override BasicType combine(Type rhs){
-		if(this is rhs) return this;
-		if(auto bt=cast(BasicType)rhs){
+		if(this is rhs.getHeadUnqual()) return this;
+		if(auto bt=rhs.getHeadUnqual().isBasicType()){
 			if(strength[op]>=0&&strength[bt.op]>=0){
 				if(strength[op]<4&&strength[bt.op]<4) return Type.get!int();
 				if(strength[op]<strength[bt.op]) return bt;
@@ -554,7 +700,32 @@ mixin template Semantic(T) if(is(T==BasicType)){
 		if(op==Tok!"cfloat" && bt.op==Tok!"float") return Type.get!cfloat();
 		if(op!=Tok!"creal" && bt.op!=Tok!"real") return Type.get!cdouble();
 		return Type.get!creal();		
-	}	
+	}
+
+	override IntRange getIntRange(){
+		switch(op){
+			mixin({
+				string r;
+				foreach(x;["dchar", "uint"])
+					r~=`case Tok!"`~x~`": return IntRange(`~x~`.min,`~x~`.max,false);`;
+				foreach(x;["bool","byte","ubyte","char","short","ushort","wchar","int"])
+					r~=`case Tok!"`~x~`": return IntRange(`~x~`.min,`~x~`.max,true);`;
+				return r;
+			}()~`default: return super.getIntRange();`);
+		}
+	}
+	override LongRange getLongRange(){
+		switch(op){
+			case Tok!"ulong": return LongRange(ulong.min,ulong.max,false);
+			mixin({
+				string r;
+				foreach(x;["bool","byte","ubyte", "char","short","ushort","wchar","int","dchar","uint","long"])
+					r~=`case Tok!"`~x~`": return LongRange(`~x~`.min,`~x~`.max,true);`;
+				return r;
+			}()~`default: return super.getLongRange();`);
+		}
+	}
+	
 }
 
 mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy)||is(T==InoutTy)){
@@ -595,54 +766,82 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		return getHeadUnqual().implicitlyConvertsTo(rhs.getHeadUnqual());
 	}
 
-	override bool refConvertsTo(Type rhs){
+	override bool refConvertsTo(Type rhs, int num){
+		if(this is rhs) return true;
 		if(auto d=mixin(`rhs.is`~T.stringof)())
-			return mixin(`ty.getTail`~qual)().refConvertsTo(mixin(`d.ty.getTail`~qual)());
-		else static if(is(T==ImmutableTy) || is(T==InoutTy)){
-			if(rhs is rhs.getConst()){// rhs.isConstTy does not capture everything
-				return mixin(`ty.getTail`~qual)().refConvertsTo(rhs.getHeadUnqual());
-			}	
+			// const and immutable imply covariance
+			static if(is(T==ConstTy) || is(T==ImmutableTy)){
+				return mixin(`ty.getTail`~qual)().refConvertsTo(mixin(`d.ty.getTail`~qual)(), 0);
+			}else{
+				// shared and inout do not imply covariance unless they are also const:
+				auto nn = this is getConst() ? 0 : num;
+				return mixin(`ty.getTail`~qual)().refConvertsTo(mixin(`d.ty.getTail`~qual)(),nn);
+			}
+		static if(is(T==ImmutableTy)||is(T==InoutTy))if(num < 2){
+			static if(is(T==ImmutableTy)){
+				if(rhs is rhs.getConst()){
+					// immutable(Sub)* implicitly converts to
+					// [const|inout const|shared const|shared inout const](Super)*
+					return ty.getTailImmutable().refConvertsTo(rhs.getHeadUnqual(), 0);
+				}
+			}else static if(is(T==InoutTy)){
+				// inout(Sub)* implicitly converts to const(Super)*
+				if(auto d=rhs.isConstTy()){
+					return ty.inConstContext().getTailInout().refConvertsTo(d.ty.getTailConst(), 0);
+				}
+			}
 		}
-		static if(is(T==ConstTy)) return false;
-		else return super.refConvertsTo(rhs);
+		return false;
 	}
 
-	static if(!is(T==SharedTy)){
-		override Type combine(Type rhs){
-			if(this is rhs) return this;
-			if(auto r = mostGeneral(rhs)) return r;
-			auto lhs = getHeadUnqual();
-			rhs = rhs.getHeadUnqual();
-			if(auto r = lhs.combine(rhs)) return r;
-			return null;
+	override Type combine(Type rhs){
+		if(this is rhs) return this;
+		// special rules apply to basic types:
+		if(rhs.isBasicType()) return getHeadUnqual().combine(rhs);
+		if(auto r = mostGeneral(rhs)) return r;
+		auto lhs = getHeadUnqual();
+		rhs = rhs.getHeadUnqual();
+		if(auto r = lhs.combine(rhs)) return r;
+		return null;
+	}
+
+	override Type refCombine(Type rhs, int num){
+		if(auto r = refMostGeneral(rhs, num)) return r;
+		static if(is(T==ConstTy)||is(T==ImmutableTy)){
+			auto r = rhs.getConst();
+			if(rhs is r) return null;
+			return refCombine(r,num);
+		}else{
+			auto l=getConst(), r=rhs.getConst();
+			if(this is l && rhs is r) return null; // avoid infinite recursion
+			return l.refCombine(r,num);
 		}
 	}
 
-	override Type getConst() {
+	override IntRange getIntRange(){return ty.getIntRange();}
+	override LongRange getLongRange(){return ty.getLongRange();}
+
+
+	override protected Type getConstImpl() {
 		static if(is(T==ConstTy)||is(T==ImmutableTy)) return this;
 		else{ // (must be SharedTy)
-			if(constType) return constType;
-			static if(is(T==SharedTy)) return constType=ty.getConst().getShared();
-			else static if(is(T==InoutTy)) return constType=ty.getConst().getInout();
+			static if(is(T==SharedTy)) return ty.getConst().getShared();
+			else static if(is(T==InoutTy)) return ty.getConst().getInout();
 		}
 	}
-	override Type getImmutable(){
+	override protected Type getImmutableImpl(){
 		static if(is(T==ImmutableTy)) return this;
-		else if(immutableType) return immutableType;
-		else return immutableType=ty.getImmutable();
+		else return ty.getImmutable();
 	}
-	override Type getShared(){
+	override protected Type getSharedImpl(){
 		static if(is(T==ImmutableTy) || is(T==SharedTy)) return this;
-		else return super.getShared();
+		else return super.getSharedImpl();
 	}
 
 	static if(!is(T==ConstTy)){
-		override Type getInout(){
+		override protected Type getInoutImpl(){
 			static if(is(T==InoutTy)||is(T==ImmutableTy)) return this;
-			else{ // (must be SharedTy)
-				if(inoutType) return inoutType;
-				return inoutType=ty.getInout().getShared();
-			}
+			else return ty.getInout().getShared(); // (must be SharedTy)
 		}
 	}
 
@@ -734,30 +933,52 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 		e=ty=e.typeSemantic(sc);
 		Type r;
 		mixin(PropErr!q{e});
-		static if(is(T==ArrayTy)) r=ty.getArray(size);
+		static if(is(T==ArrayTy)) r=ty.getArray(length);
 		else r = mixin("ty.get"~T.stringof[0..$-2]~"()");
 		sstate = SemState.completed;
 		return r;
 	}
 
-	override bool implicitlyConvertsTo(Type rhs){
-		auto a = getHeadUnqual(), b = rhs.getHeadUnqual();
-		if(a is b) return true;
-		return a.refConvertsTo(b);
+	static if(is(T==ArrayTy)){ // static arrays are value types
+		// TODO: implement this
+	}else{
+		// this adds one indirection for pointers and arrays
+		override bool refConvertsTo(Type rhs, int num){
+			if(auto c=mixin(`rhs.is`~T.stringof)())
+				return ty.refConvertsTo(c.ty,num+!is(T==ArrayTy));
+			return super.refConvertsTo(rhs,num);
+		}
+		override Type combine(Type rhs){
+			if(auto r = mostGeneral(rhs)) return r;
+			auto unqual = rhs.getHeadUnqual();
+			return unqual.refCombine(this, 0);
+			return null;
+		}
+		override Type refCombine(Type rhs, int num){
+			if(auto c=mixin(`rhs.is`~T.stringof)())
+				if(auto d=ty.refCombine(c.ty,num+!is(T==ArrayTy)))
+					return mixin(`d.`~puthead);
+			return super.refCombine(rhs,num);
+		}
 	}
-
-	override bool refConvertsTo(Type rhs){
-		if(auto c=mixin(`rhs.is`~T.stringof)()) return ty.refConvertsTo(c.ty);
-		return super.refConvertsTo(rhs);
-	}
-
-	override Type combine(Type rhs){
-		if(auto r = mostGeneral(rhs)) return r;
-		return null;
-	}
-
-	mixin GetTailOperations!("ty","get"~(is(T==ArrayTy)?"Array(size)":typeof(this).stringof[0..$-2]~"()"));
+	private enum puthead = "get"~(is(T==ArrayTy)?"Array(length)":typeof(this).stringof[0..$-2]~"()");
+	mixin GetTailOperations!("ty", puthead);
 }
+
+mixin template Semantic(T) if(is(T==NullPtrTy)||is(T==EmptyArrTy)){
+	override bool implicitlyConvertsTo(Type rhs){
+		rhs = rhs.getHeadUnqual();
+		static if(is(T==NullPtrTy)){
+			// TODO: add || rhs.isClassTy()
+			if(rhs.isPointerTy() || rhs.isDynArrTy()) return true;
+		}else{ // EmptyArrTy
+			if(rhs.isDynArrTy()) return true;
+		}
+		if(auto arr = rhs.isArrayTy()) return arr.length == 0;
+		return false;
+	}
+}
+
 
 mixin template Semantic(T) if(is(T==TypeofExp)){
 	override Type semantic(Scope sc){
@@ -877,18 +1098,16 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		}else if(init){ // deduce type
 			init=init.semantic(sc);
 			type=init.type;
+			if(type is Type.get!Null()) type = Type.get!(void*)();
+			else if(type is Type.get!EmptyArray()) type = Type.get!(void[])();
 		}
 		if(sstate == SemState.pre) sc.insert(this);
 		if(!type||type.sstate==SemState.error)mixin(ErrEplg); // deliberately don't propagate init's semantic 'error' state if possible
 
 		if(auto ty=cast(Type)type){ // TODO: remove cast
 			// TODO: quick hack, make prettier
-			if(stc&STCconst) ty=ty.getConst();
-			if(stc&STCimmutable) ty=ty.getImmutable();
-			if(stc&STCshared) ty=ty.getShared();
-			if(stc&STCinout) ty=ty.getInout(); // TODO: check validity
 			if(init) init=init.implicitlyConvertTo(ty).semantic(sc);
-			type = ty.semantic(sc);
+			type = ty; // TODO: check validity (eg. inout)
 		}else assert(0, "type is not a Type!");
 
 		mixin(SemEplg);
@@ -1000,6 +1219,16 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					if(bdy){mixin(SemChld!q{bdy});}
 					return this;
 				default: break;
+
+				// for debugging. TODO: remove
+				case "__range":
+					if(args.length!=2) break;
+					args[1]=args[1].semantic(sc);
+					import std.stdio;
+					auto ty=args[1].type.isIntegral();
+					if(ty&&ty.bitSize()<=32) stderr.writeln(args[1].getIntRange());
+					stderr.writeln(args[1].getLongRange());
+					return this;
 			}
 		}
 		sc.error(format("unrecognized pragma '%s'",args[0].loc.rep),args[0].loc); // TODO: maybe remove this
