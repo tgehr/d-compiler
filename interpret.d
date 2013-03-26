@@ -232,7 +232,7 @@ mixin template Interpret(T) if(is(T==DollarExp)){
 			// TODO: this could be done by rewriting dollar exp
 			// instead of saving a value in the existing exp
 			void perform(Symbol self){
-				if(self.isStrong)
+				if(self.isFunctionLiteral)
 				if(auto fd=self.meaning.isFunctionDef)
 					runAnalysis!DollarResolve(fd, value);
 			}
