@@ -170,6 +170,7 @@ mixin template Interpret(T) if(is(T==Symbol)){
 	override Variant interpretV(){
 		if(auto vd = meaning.isVarDecl()){
 			assert(meaning.sstate == SemState.completed);
+			assert(vd.init, text(this," ",loc));
 			return vd.init.interpretV();
 		}
 		assert(0);

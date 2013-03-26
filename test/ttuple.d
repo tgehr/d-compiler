@@ -53,9 +53,9 @@ void checkTpl(){
 	t.foo[0]=2; // TODO!
 }
 
-/+
-/+
-alias Seq Seq;
++/
+
+// alias Seq Seq;
 
 auto seqparm(A,B,C...)(Seq!(A,B,C) args){
 	return args[0]+args[1]+args[2]+args[$-1];
@@ -77,7 +77,7 @@ pragma(msg, "$ 3: ", Seq!(1,2,3)[1..$]);
 pragma(msg, "$ 4: ", Seq!(int,int,int)[1..$]);
 
 void convErrMsg(){
-	Seq!(int, double) a=Seq!(1.0,2);
+	Seq!(int, double) a=Seq!(1.0,2); // error
 }
 
 static assert(!is(Seq!(int, double)==int));

@@ -910,6 +910,7 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 
 	override bool templateParameterEquals(Expression rhs){
 		if(!type.equals(rhs.type)) return false;
+		if(!rhs.isConstant()) return false;
 		return interpretV()==rhs.interpretV();
 	}
 
