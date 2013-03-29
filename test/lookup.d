@@ -1,3 +1,25 @@
+struct TestInheritLookup{
+	class A{
+		static if(B.x) enum a = "success!";
+		pragma(msg, B.z);
+		static assert(B.z=="=D");
+	}
+	
+	class B: A{
+		enum x = true;
+		enum y = a;
+		static if(y=="success!") enum z = "=D";
+		pragma(msg, y);
+	}
+
+	template Seq(T...){ alias T Seq; }
+	class X{
+		enum y=2;
+	}
+	class Y : Seq!(X,1,int){ // error
+		auto x = y; // ok
+	}
+}
 
 template hasSave(R){
 	enum hasSave=is(typeof({

@@ -1,3 +1,17 @@
+struct TestInvalidInheritance{
+	class A{ int string; } // error
+	template Mixin(string s){
+		mixin("alias "~s~" Mixin;");
+	}
+	class D: Mixin!({D d = new E; return d.foo();}()){
+		int foo(int x){ return 2;}
+		string foo(){ return "X"; }
+	}
+	class E: D{
+		override foo(int x){ return super.foo(x); }
+		override string foo(){ return "A"; }
+	}
+}
 
 struct TestVirtualCall{
 	class A{ string foo(){ return "B"; }}
@@ -16,12 +30,12 @@ struct TestVirtualCall{
 	}
 	class D: X!(){
 		int foo(int x){ X!() y=new X!(); return x+y.bar();}
-		override .string foo(){ /+ TODO: make work without the '.'+/
+		override string foo(){
 			return "B";
 		}
 	}
 	class E: D{
-		override .string foo(){
+		override string foo(){
 			return "C";
 		}
 		override foo(int x){ return super.foo(x); }
