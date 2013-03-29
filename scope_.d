@@ -43,11 +43,11 @@ class DoesNotExistDecl: Declaration{
 abstract class Scope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
-	private void potentialAmbiguity(Identifier decl, Identifier lookup){
+	protected void potentialAmbiguity(Identifier decl, Identifier lookup){
 		//error(format("declaration of '%s' results in potential ambiguity", decl), decl.loc);
 		// note("offending symbol lookup", lookup.loc);
 		error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
-		note("this lookup should have succeeded if it was valid", lookup.loc);
+		note(format("this lookup should have %s if it was valid", lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
 	}
 
 	bool insert(Declaration decl)in{
@@ -101,7 +101,7 @@ abstract class Scope{ // SCOPE
 	}
 
 	// scope where the identifier will be resolved next
-	Dependent!Scope getUnresolved(Identifier ident){
+	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
 		mixin(LookupHere!q{auto d; this, ident, null});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
 			return null.independent!Scope;
@@ -233,10 +233,10 @@ class NestedScope: Scope{
 		return r.independent;
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident){
+	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
 		mixin(LookupHere!q{auto d; this, ident, null});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
-			return parent.getUnresolved(ident);
+			return parent.getUnresolved(ident, noHope);
 		return this.independent!Scope;
 	}
 
@@ -299,16 +299,26 @@ private:
 	AggregateDecl aggr;
 }
 
-template AggregateParentsInOrderTraversal(string bdy,string raggr="raggr", string parent="parent"){
+template AggregateParentsInOrderTraversal(string bdy,string raggr="raggr", string parent="parent",bool weak=false){
 	enum AggregateParentsInOrderTraversal = mixin(X!q{
 		static if(is(typeof(return) A : Dependent!T,T)) alias T R;
 		else static assert(0);
 		for(size_t i=0; i<@(raggr).parents.length; i++){
-			@(raggr).findFirstNParents(i+1);
-			if(@(raggr).parents[i].needRetry)
-				return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
+			@(raggr).findFirstNParents(i+1,@(weak.to!string));
 			if(@(raggr).parents[i].sstate==SemState.error)
 				continue;
+			static if(@(weak.to!string)){
+				mixin(Rewrite!q{@(raggr).parents[i]});
+				if(@(raggr).parents[i].sstate != SemState.completed){
+					@(raggr).parents[i].needRetry = true;
+					return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
+				}
+				
+			}else{
+				if(@(raggr).parents[i].needRetry){
+					return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
+				}
+			}
 			assert(cast(AggregateTy)@(raggr).parents[i]
 			       && cast(ReferenceAggregateDecl)(cast(AggregateTy)@(raggr).parents[i]).decl);
 			auto @(parent) = cast(ReferenceAggregateDecl)cast(void*)
@@ -325,31 +335,47 @@ class InheritScope: AggregateScope{
 
 	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
 		// dw("looking up ",ident," in ", this);
+		if(raggr.shortcutScope){
+			auto dep = raggr.shortcutScope.lookupHere(ident, null);
+			auto val = dep.value;
+			if(!dep.dependee && val && typeid(val) is typeid(DoesNotExistDecl))
+				return raggr.shortcutScope.lookup(ident, alt);
+		}
 		mixin(LookupHere!q{auto d; super, ident, alt});
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
 		// if sstate is 'completed', DoesNotExistDecls do not need to be generated
 		if(!d && raggr.sstate == SemState.completed ||
 		   d && typeid(d) is typeid(DoesNotExistDecl))
-		mixin(AggregateParentsInOrderTraversal!q{
+		mixin(AggregateParentsInOrderTraversal!(q{
 			auto lkup = parent.asc.lookupHere(ident, null);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
 			if(parent.sstate != SemState.completed && !d ||
 			   d && typeid(d) !is typeid(DoesNotExistDecl)) break;
-		});
+		},"raggr","parent",true));
 		if(!d) d = alt;
 		return d.independent;
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident){
+	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
 		mixin(LookupHere!q{auto d; super, ident, null});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
-		mixin(AggregateParentsInOrderTraversal!q{
-			if(auto lkup = parent.asc.getUnresolved(ident).prop) return lkup;
-		});
+		Dependent!Scope traverse(){
+			mixin(AggregateParentsInOrderTraversal!(q{
+				if(auto lkup = parent.asc.getUnresolved(ident, noHope).prop) return lkup;
+			},"raggr","parent",true));
+			return null.independent!Scope;
+		}
+		if(noHope){
+			auto tr = traverse();
+			if(!tr.dependee && tr.value) return tr;
+			if(!raggr.shortcutScope) raggr.initShortcutScope(parent);
+			return raggr.shortcutScope.getUnresolved(ident, noHope);
+		}
 		// TODO: this is a hack
-		return ident.recursiveLookup?parent.getUnresolved(ident):null.independent!Scope;
+		if(auto tr = traverse().prop) return tr;
+		return ident.recursiveLookup?parent.getUnresolved(ident, noHope):null.independent!Scope;
 	}
 }
 
@@ -384,8 +410,8 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 	override bool inexistent(Identifier ident){
 		return parent.inexistent(ident);
 	}
-	override Dependent!Scope getUnresolved(Identifier ident){
-		return parent.getUnresolved(ident);
+	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+		return parent.getUnresolved(ident, noHope);
 	}
 }
 

@@ -619,6 +619,17 @@ class CTFERetryException: Exception{Node node;this(Node n){super("");node = n;}}
 class UnwindException: Exception{this(){super("");}}
 class SilentUnwindException: Exception{this(){super("");}}
 
+void dependentCTFE(T)(Dependent!T node){
+	if(node.dependee){
+		if(node.dependee.node.needRetry){
+			throw new CTFERetryException(node.dependee.node);
+		}else{
+			assert(node.dependee.node.sstate == SemState.error);
+			throw new UnwindException;
+		}
+	}
+}
+
 // bytecode interpreter for functions
 import expression, declaration, statement;
 
@@ -1689,10 +1700,13 @@ Ltailcall:
 					// changing its layout. In this case, restart the computation
 					tmpstack.push(AggregateDecl.getVersion());
 					// TODO: allow detailed discovery of circular dependencies
+					auto inContext=sym.inContext;
+					sym.inContext=Expression.InContext.fieldExp;
 					sym.semantic(sym.scope_);
+					sym.inContext=inContext;
 					Expression e = sym;
 					mixin(Rewrite!q{e});
-					assert(!!cast(Symbol)e);
+					assert(!!cast(Symbol)e, text(e));
 					sym = cast(Symbol)cast(void*)e;
 					if(sym.needRetry||tmpstack.pop()!=AggregateDecl.getVersion()){
 						// TODO: make as unlikely as possible
@@ -3909,54 +3923,38 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 				lkupIdents[decl]=ident;
 			}
 			auto ident = lkupIdents[decl];
-
-			if(!ident.meaning && ident.sstate != SemState.failed){
-				ident.recursiveLookup = false;
-				auto lkupd = ident.lookup(asc);
-				if(lkupd.dependee){
-					if(lkupd.dependee.node.needRetry){
-						throw new CTFERetryException(lkupd.dependee.node);
-					}else{
-						assert(lkupd.dependee.node.sstate == SemState.error);
-						throw new UnwindException;
+			
+			if(!ident.meaning){
+				Dependent!FunctionDecl traverse(ReferenceAggregateDecl raggr){
+					auto own = raggr.asc.lookupHere(ident, null);
+					own.dependentCTFE();
+					if(auto ovs = own.value.isOverloadSet()){
+						mixin(FindOverrider!q{auto fod;ovs,decl});
+						if(fod) return fod.independent;
 					}
-				}
-				if(ident.needRetry){
-					static class LkupNode: Node{
-						Scope sc;
-						Identifier ident;
-						this(Scope sc, Identifier ident){
-							this.sc=sc;
-							this.ident=ident;
-							needRetry = true;
-						}
-						override void semantic(Scope _){
-							mixin(Lookup!q{_; ident, sc});
-							mixin(SemEplg);
-						}
-						override @property string kind(){
-							return ident.kind;
-						}
-						override string toString(){
-							return ident.toString();
-						}
-						override void _doAnalyze(scope void delegate(Node) dg){ assert(0); }
-						override inout(LkupNode) ddup()inout{ assert(0); }
+					if(!raggr.parents.length) return null.independent!FunctionDecl;
+					raggr.findFirstNParents(1, true);
+					mixin(Rewrite!q{raggr.parents[0]});
+					if(raggr.parents[0].sstate != SemState.completed){
+						raggr.parents[0].needRetry = true;
+						return Dependee(raggr.parents[0], raggr.scope_).dependent!FunctionDecl;
 					}
-					throw new CTFERetryException(New!LkupNode(scope_, ident));
+					if(auto ty=raggr.parents[0].isType())
+					if(auto at=ty.isAggregateTy()){
+						if(auto cd=at.decl.isClassDecl())
+							return traverse(cd);
+					}
+					return null.independent!FunctionDecl;
 				}
+				auto x = traverse(this);
+				x.dependentCTFE();
+				if(!x.value){ throw new UnwindException; }
+				dynSymbols[decl]=createSymbol(x.value); // TODO!
 			}
-			assert(ident.meaning || ident.sstate == SemState.failed);
-			auto res = ident.meaning;
-			assert(cast(OverloadSet)res);
-			auto ovs = cast(OverloadSet)cast(void*)res;
-			mixin(FindOverrider!q{auto ov; ovs, decl});
-			if(!ov){ throw new UnwindException; } // TODO: error message
-			dynSymbols[decl]=createSymbol(ov); // TODO!
 		}
 		return dynSymbols[decl];
 	}
-
+	
 	override bool isLayoutKnown(){
 		if(auto p = parentClass()) if(parentVers != getVersion()) return false;
 		return super.isLayoutKnown();

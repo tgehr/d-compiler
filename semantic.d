@@ -363,12 +363,12 @@ enum SemPrlgDontSchedule=q{
 	if(sstate == SemState.error||sstate == SemState.completed||rewrite){mixin(SemRet);}
 	//dw(cccc++); if(!champ||cccc>champ.cccc) champ=this;
 	//dw(champ);
-	debug scope(failure){
+	/+debug scope(failure){
 		if(loc.line) write("here! ",loc," ",typeid(this));
 		else write("here! ",toString()," ",typeid(this));
 		static if(is(typeof(meaning))) write(" meaning: ",meaning," ",typeid(this.meaning)," ",meaning.sstate);
 		writeln();
-	}
+	}+/
 };
 enum SemPrlg=SemPrlgDontSchedule~q{
 	Scheduler().add(this,sc);
@@ -4469,8 +4469,8 @@ class GaggingScope: NestedScope{
 		return parent.lookupHere(ident, alt);
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident){
-		return parent.getUnresolved(ident);
+	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+		return parent.getUnresolved(ident, noHope);
 	}
 
 	override bool inexistent(Identifier ident){
@@ -5113,8 +5113,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 
 	override void noHope(Scope sc){
 		if(meaning) return;
-		// TODO: there must be a better way to react when the scope is unavailable
-		mixin(GetUnresolved!q{auto unresolved; sc, this});
+		auto unresolved=sc.getUnresolved(this, true).force;
 		if(!unresolved.inexistent(this))
 			mixin(ErrEplg);
 	}
@@ -5261,6 +5260,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChld!q{e1});
+		mixin(PropErr!q{e2});
 		Type scopeThisType;
 		auto msc = e1.getMemberScope();
 
@@ -5444,7 +5444,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	override void noHope(Scope sc){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
-			mixin(GetUnresolved!q{auto unresolved; e1.getMemberScope(), i});
+			auto unresolved = e1.getMemberScope().getUnresolved(i, true).force;
 			if(!unresolved.inexistent(i))
 				mixin(ErrEplg);
 		}
@@ -8304,6 +8304,39 @@ private:
 mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	Expression[] rparents = null; // the expressions that the current parents originated from
 
+	ShortcutScope shortcutScope; // store for forbidden inherited symbols
+	                     // TODO: could be used to look up inherited members faster
+	private static class ShortcutScope : NestedScope{
+		ReferenceAggregateDecl raggr;
+		this(ReferenceAggregateDecl raggr, Scope parent){
+			super(parent);
+			this.raggr=raggr;
+		}
+		public override void potentialAmbiguity(Identifier decl, Identifier lookup){
+			error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
+			note(format("this lookup on subclass '%s' should have %s if it was valid", raggr.name,lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
+		}
+	}
+
+	void initShortcutScope(Scope parent){
+		shortcutScope = new ShortcutScope(this, parent);
+	}
+
+	private Dependent!void fillShortcutScope(){
+		if(!shortcutScope) return indepvoid;
+		mixin(AggregateParentsInOrderTraversal!(q{			
+			foreach(decl; &parent.bdy.traverseInOrder){
+				if(decl.name && decl.name.ptr){
+					if(auto d=shortcutScope.lookupHere(decl.name, null).value){
+						if(typeid(d) is typeid(DoesNotExistDecl))
+							shortcutScope.potentialAmbiguity(decl.name, d.name);
+					}
+				}
+			}
+		},"this"));
+		return indepvoid;
+	}
+
 	enum VtblState{
 		fresh,
 		inherited,
@@ -8450,30 +8483,34 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 	}
 	// scopes need access to this. (maybe those should be moved here instead)
-	public final void findFirstNParents(size_t n)in{assert(n<=parents.length);}body{
+	public final void findFirstNParents(size_t n,bool weak=false)in{
+		assert(n<=parents.length);
+	}body{
+		if(!rparents) rparents = parents.map!(a=>a.ddup).array; // uncontrolled gc allocation
 		if(n<=knownParents) return;
 		alias scope_ sc;
-		if(!rparents) rparents = parents.map!(a=>a.ddup).array; // uncontrolled gc allocation
 		foreach(i,ref x; parents[knownParents..n]){
-			auto ty=x.typeSemantic(sc);
-			mixin(Rewrite!q{x});
 			if(x.sstate == SemState.error) continue;
-			if(ty){
-				void check(Type ty){
-					auto agg = ty.isAggregateTy();
-					if(!agg && ty.sstate == SemState.completed ||
-					   agg&&!agg.decl.isReferenceAggregateDecl()){
-						sc.error("base specifier must name a class or interface",
-						         rparents[knownParents+i].loc);
-						x = New!ErrorTy();
-					}
-				}
-				if(auto tpl=ty.isTypeTuple()) foreach(Type y;tpl) check(y);
-				else check(ty);
-			}
+			if(!weak) x.semantic(sc);
+			mixin(Rewrite!q{x});
 		}
 		parents = Tuple.expand(parents, rparents);
+		auto knownBefore = knownParents;
 		updateKnownParents(); // valid because only prior unknown parents can cause expansion
+		foreach(i, ref x; parents[knownBefore..knownParents]){
+			if(x.sstate == SemState.error) continue;
+			assert(x.sstate == SemState.completed);
+			auto ty = x.typeSemantic(sc);
+			if(ty){
+				auto agg = ty.isAggregateTy();
+				if(!agg && ty.sstate == SemState.completed ||
+				   agg&&!agg.decl.isReferenceAggregateDecl()){
+					sc.error("base specifier must name a class or interface",
+					         rparents[knownBefore+i].loc);
+					x = New!ErrorTy();
+				}
+			}
+		}
 		assert(parents.length==rparents.length,text(parents," ",rparents));
 	}
 
@@ -8502,6 +8539,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 
 	final override void finishInheritance(){
 		mixin CreateBinderForDependent!("CheckCircularInheritance", "checkCircularInheritance");
+		mixin CreateBinderForDependent!("FillShortcutScope", "fillShortcutScope");
+
 		mixin(CheckCircularInheritance!q{_;this});
 		mixin(InheritVtbl!q{ClassDecl _; this});
 		if(!parents.length) goto Lvtbl;
@@ -8568,8 +8607,11 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				mixin(SetErr!q{fun});
 			}
 		}
-		foreach(decl; &bdy.traverseInOrder) mixin(PropErr!q{decl});
+		//if(auto parent = parentClass())
+		//mixin(PropRetry!q{parent});
+		mixin(FillShortcutScope!q{_;this});
 		mixin(PropErr!q{rparents});
+		foreach(decl; &bdy.traverseInOrder) mixin(PropErr!q{decl});
 	}
 
 	// TODO: make resolution faster (?)
@@ -8858,6 +8900,18 @@ class OverloadSet: Declaration{ // purely semantic node
 		alias util.all all;
 		import std.range;
 		if(fd.stc & STCnonvirtual) return false.independent;
+
+		// analyze function types
+		fun.analyzeType();
+		mixin(Rewrite!q{fun.type});
+		fd.analyzeType();
+		mixin(Rewrite!q{fd.type});
+		if(fun.type.sstate==SemState.error) return Dependee(fun.type, fd.scope_).dependent!bool;
+		if(fd.type.sstate==SemState.error) return Dependee(fd.type, fd.scope_).dependent!bool;
+		if(fun.type.needRetry) return Dependee(fun.type, fd.scope_).dependent!bool;
+		if(fd.type.needRetry) return Dependee(fd.type, fd.scope_).dependent!bool;
+		// end analyzing types
+		
 		// STC parent may be freely introduced, but will be here to stay
 		bool mayOverride(STC parent, STC child){
 			return !(fd.type.stc&parent) || fun.type.stc&child;
