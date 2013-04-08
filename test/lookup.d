@@ -1,4 +1,16 @@
 
+struct TestIllegalInheritance{
+	class A { auto foo(){ return "A"; } alias int string; } // error
+	
+	template ID(alias a){ alias a ID; }
+	template P(){ alias ID!(mixin(new C().foo())) P; }
+	class C : P!(){
+		override string foo(){ return x; }
+	}
+	enum x = "A";
+	alias immutable(char)[] string;
+}
+
 struct TestCircInheritLookup{
 	enum foo = 2;
 	class A : B{ int bar=foo; }
