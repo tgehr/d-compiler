@@ -1,8 +1,4 @@
 
-/+
-class A : B{}
-class B : A{ int x=y; }
-+/
 
 /+
 class A { auto foo(){ return "A"; } alias int string; } // TODO: error

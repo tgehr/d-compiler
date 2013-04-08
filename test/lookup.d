@@ -1,3 +1,10 @@
+
+struct TestCircInheritLookup{
+	enum foo = 2;
+	class A : B{ int bar=foo; }
+	class B : A{ int x=y; } // error
+}
+
 struct TestInheritLookup{
 	class A{
 		static if(B.x) enum a = "success!";
