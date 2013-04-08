@@ -333,7 +333,14 @@ class InheritScope: AggregateScope{
 	@property ref ReferenceAggregateDecl raggr(){ return *cast(ReferenceAggregateDecl*)&aggr; }
 	this(ReferenceAggregateDecl decl) in{assert(!!decl.scope_);}body{ super(decl); }
 
+	// circular inheritance can lead to circular parent scopes
+	// therefore we need to detect circular lookups in InheritScopes
+	private bool onstack = false;
+
 	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
+		if(onstack) return New!DoesNotExistDecl(ident).independent!Declaration;
+		onstack = true; scope(exit) onstack = false;
+
 		// dw("looking up ",ident," in ", this);
 		if(raggr.shortcutScope){
 			auto dep = raggr.shortcutScope.lookupHere(ident, null);
@@ -358,10 +365,13 @@ class InheritScope: AggregateScope{
 		return d.independent;
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){		
 		mixin(LookupHere!q{auto d; super, ident, null});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
 		Dependent!Scope traverse(){
+			if(onstack) return null.independent!Scope;
+			onstack = true; scope(exit) onstack = false;
+
 			mixin(AggregateParentsInOrderTraversal!(q{
 				if(auto lkup = parent.asc.getUnresolved(ident, noHope).prop) return lkup;
 			},"raggr","parent",true));
