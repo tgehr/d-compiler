@@ -299,7 +299,7 @@ template RevEpoLkup(string e){
 				if(ident.sstate == SemState.failed){
 					// show lookup error
 					ident.sstate = SemState.begin;
-					mixin(SemChld!q{@(e)});
+					mixin(SemChldPar!q{@(e)});
 				}
 
 				if(ident.sstate != SemState.error && ident.meaning){
