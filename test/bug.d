@@ -1,25 +1,4 @@
 
-/+
-
-struct Exp(string code, A...){
-	A a; 
-	auto eval(){ return mixin(code); }
-	auto opBinary(string op,B)(B b){
-		return Exp!("(a[0].eval()"~op~"a[1].eval())",typeof(this),B)(this,b);
-	}
-}
-auto eval(A)(A a){ return a; }
-auto val(A)(A a){ return Exp!("a[0]",A)(a); }
-auto var()(string name){ return Exp!("d[a[0]].eval(d)",string)(name); }
-
-//import std.stdio;
-void main(){
-	//(1.val+2.val*"x".var).eval(["x":22.val]).writeln;
-	//1.val;
-	Exp!("a[0]",int)(1);
-}
-+/
-
 /+struct FoFo{
 	struct S2{
 		void x()(int a) { }

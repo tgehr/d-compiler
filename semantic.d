@@ -479,6 +479,14 @@ mixin template Semantic(T) if(is(T==ErrorDecl)||is(T==ErrorExp)||is(T==ErrorStm)
 	override void presemantic(Scope sc){assert(0);}
 }
 
+enum InContext:ubyte{
+	none,
+	addressTaken,
+	called,
+	instantiated,
+	passedToTemplateAndOrAliased,
+	fieldExp,
+}
 
 // expressions
 mixin template Semantic(T) if(is(T==Expression)){
@@ -488,14 +496,6 @@ mixin template Semantic(T) if(is(T==Expression)){
 	}
 
 	// run before semantic if the expression occurs in a specified context
-	protected enum InContext:ubyte{
-		none,
-		addressTaken,
-		called,
-		instantiated,
-		passedToTemplateAndOrAliased,
-		fieldExp,
-	}
 	void isInContext(InContext inContext){ }
 	// TODO: those are not strictly necessary:
 	final void willTakeAddress(){ isInContext(InContext.addressTaken); }
@@ -612,13 +612,14 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 	bool isDirectlyAllocated(){ return false; }
 
-	Expression clone(Scope sc, const ref Location loc)in{
+	Expression clone(Scope sc, InContext inContext, const ref Location loc)in{
 		assert(sstate == SemState.completed);
 	}body{
 		Expression r;
 		if(isConstFoldable()) r=cloneConstant();
 		else r=ddup();
 		r.loc = loc;
+		r.isInContext(inContext);
 		return r;
 	}
 
@@ -1028,6 +1029,7 @@ mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
 mixin template Semantic(T) if(is(T==IndexExp)){
 	DollarScope ascope;
 	mixin DollarExp.DollarProviderImpl!e;
+	mixin ContextSensitive;
 
 	override void semantic(Scope sc_){
 		{alias sc_ sc;mixin(SemPrlg);}
@@ -1065,7 +1067,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 				sc.error(format("tuple index %s is out of bounds [0%s..%d%s)",a[0].toString(),Size_t.suffix,et.length,Size_t.suffix),a[0].loc);
 				mixin(ErrEplg);
 			}
-			auto r=et.index(sc,loc,n);
+			auto r=et.index(sc,inContext,loc,n);
 			mixin(RewEplg!q{r});
 		}else{
 			mixin(SemChld!q{a});
@@ -1193,7 +1195,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 				sc.error(format("tuple index %s is out of bounds [0%s..%d%s)",a[0].toString(),Size_t.suffix,tp.length,Size_t.suffix),a[0].loc);
 				mixin(ErrEplg);
 			}
-			return tp.index(sc,loc,n).typeSemantic(sc);
+			return tp.index(sc,inContext,loc,n).typeSemantic(sc);
 		}
 		// TODO: DMD considers 16777215 as the upper bound for static array size
 		assert(!!ty);
@@ -1532,8 +1534,8 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	// this is necessary to make template delegate literals work correctly
 	// the scope of the symbol must be adjusted
-	override Expression clone(Scope sc, const ref Location loc){
-		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,loc));
+	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
+		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,InContext.addressTaken,loc));
 		r.loc = loc;
 		r.semantic(sc);
 		return r;
@@ -2213,7 +2215,7 @@ class TemplateInstanceDecl: Declaration{
 }
 
 interface Tuple{
-	Expression index(Scope sc, const ref Location loc, ulong index)
+	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index)
 		in{assert(index<length);}
 	Expression slice(Scope sc, const ref Location loc, ulong a, ulong b)
 		in{assert(a<=b && b<length);}
@@ -2291,7 +2293,7 @@ class ExpTuple: Expression, Tuple{
 	}body{
 		// TODO: gc allocation
 		this.exprs = new Expression[exprs.length];
-		foreach(i, ref x; this.exprs) x=exprs[i].clone(sc, loc);
+		foreach(i, ref x; this.exprs) x=exprs[i].clone(sc, InContext.passedToTemplateAndOrAliased, loc);
 		exprs=Tuple.expand(exprs);
 	}
 
@@ -2301,7 +2303,7 @@ class ExpTuple: Expression, Tuple{
 	}body{
 		// TODO: gc allocation
 		exprs = new Expression[cast(size_t)len];
-		foreach(ref x; exprs) x=exp.clone(sc,loc);
+		foreach(ref x; exprs) x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc);
 	}
 
 	override Tuple isTuple(){return this;}
@@ -2317,10 +2319,10 @@ class ExpTuple: Expression, Tuple{
 		}
 	}
 
-	Expression index(Scope sc, const ref Location loc, ulong index){
+	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
-		auto r=exprs[cast(size_t)index].clone(sc,loc);
+		auto r=exprs[cast(size_t)index].clone(sc,inContext,loc);
 
 		if(auto s=r.isSymbol()){
 			if(s.accessCheck<accessCheck){
@@ -2363,9 +2365,9 @@ class ExpTuple: Expression, Tuple{
 		mixin(SemEplg);
 	}
 
-	override ExpTuple clone(Scope sc, const ref Location loc){
+	override ExpTuple clone(Scope sc, InContext inContext, const ref Location loc){
 		auto r = ddup();
-		foreach(ref x; r.exprs) x = x.clone(sc,loc);
+		foreach(ref x; r.exprs) x = x.clone(sc,InContext.passedToTemplateAndOrAliased,loc);
 		r.loc = loc;
 		r.sstate = SemState.begin;
 		r.semantic(sc);
@@ -2431,8 +2433,8 @@ class MultiReturnValueExp: Expression{
 		assert(0);
 	}
 
-	override MultiReturnValueExp clone(Scope sc, const ref Location loc){
-		auto r=New!MultiReturnValueExp(call, exp.clone(sc,loc));
+	override MultiReturnValueExp clone(Scope sc, InContext inContext, const ref Location loc){
+		auto r=New!MultiReturnValueExp(call, exp.clone(sc,inContext,loc));
 		r.loc = loc;
 		r.semantic(sc);
 		return r;
@@ -2498,7 +2500,7 @@ class TypeTuple: Type, Tuple{
 	}
 
 	override Tuple isTuple(){return this;}
-	Expression index(Scope sc,const ref Location loc, ulong index){
+	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
 		return types[cast(size_t)index];
@@ -2693,7 +2695,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 					fd.sstate = SemState.pre;
 					fd.scope_ = null;
 					lit.meaning = fd.templatizeLiteral(sc,lit.loc);
-					lit.inContext = Expression.InContext.none;
+					lit.inContext = InContext.none;
 					lit.meaning.semantic(sc);
 					mixin(Rewrite!q{lit.meaning});
 					assert(lit.meaning.sstate == SemState.completed && !lit.meaning.needRetry);
@@ -3804,11 +3806,12 @@ class Symbol: Expression{ // semantic node
 	static Symbol circ = null;
 	private static Symbol[] clist = [];
 
-	override Expression clone(Scope sc, const ref Location loc){
+	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
 		Symbol r=ddup();
 		r.sstate = SemState.begin;
 		r.scope_ = null;
 		r.loc = loc;
+		r.inContext = inContext;
 		r.semantic(sc);
 		return r;
 	}
@@ -3857,7 +3860,7 @@ class Symbol: Expression{ // semantic node
 			else{
 				// assert(!!al.aliasee.isType());
 				sstate = SemState.begin;
-				auto r=al.getAliasee(scope_, accessCheck, loc);
+				auto r=al.getAliasee(scope_, accessCheck, inContext, loc);
 				mixin(RewEplg!q{r});
 			}
 		}
@@ -5761,7 +5764,7 @@ mixin template Semantic(T) if(is(T==Type)){
 		return r;
 	}
 
-	override Type clone(Scope,const ref Location) { return this; }
+	override Type clone(Scope,InContext,const ref Location) { return this; }
 
 	final protected Type checkVarDeclError(Scope sc, VarDecl me)in{assert(sc);}body{
 		if(me.name)
@@ -7929,11 +7932,12 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				tc.vds = new VarDecl[cast(size_t)len];
 				foreach(i, ref x;tc.vds){
 					auto id  = name?New!Identifier("__tuple_"~name.name~"_"~to!string(i)):null;
-					auto ini = init&&et?et.index(sc,init.loc,i):null;
-					x = newVarDecl(stc, tp.index(sc,loc,i), id, ini);
+					auto ini = init&&et?et.index(sc,InContext.none,init.loc,i):null;
+					x = newVarDecl(stc, tp.index(sc,InContext.none,loc,i), id, ini);
 					x.sstate = SemState.begin;
 					x.loc = loc;
 					x.scope_=scope_;
+					x.isField=isField;
 				}
 			}
 			mixin(SemChld!q{tc.vds});
@@ -7944,6 +7948,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 					sym.accessCheck = AccessCheck.none;
 					sym.loc = loc; // TODO: fix
 					sym.scope_=scope_;
+					sym.willAlias();
 					x = sym;
 				}
 			}
@@ -8229,11 +8234,11 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		return null;
 	}
 
-	Expression getAliasee(Scope sc, AccessCheck check, const ref Location loc)in{
+	Expression getAliasee(Scope sc, AccessCheck check, InContext inContext, const ref Location loc)in{
 		assert(sstate == SemState.completed);
 		assert(!aliasee.isSymbol());
 	}body{
-		auto r=aliasee.clone(sc, loc);
+		auto r=aliasee.clone(sc, inContext, loc);
 		if(auto et=r.isExpTuple()) et.accessCheck=check;
 		// templated delegate literal expressions
 		if(auto add=r.isAddressExp()){

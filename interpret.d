@@ -1701,7 +1701,7 @@ Ltailcall:
 					tmpstack.push(AggregateDecl.getVersion());
 					// TODO: allow detailed discovery of circular dependencies
 					auto inContext=sym.inContext;
-					sym.inContext=Expression.InContext.fieldExp;
+					sym.inContext=InContext.fieldExp;
 					sym.semantic(sym.scope_);
 					sym.inContext=inContext;
 					Expression e = sym;
