@@ -1,4 +1,15 @@
 
+struct TestMemberTuple1(A...){
+	A a; 
+	auto foo()const{
+		static assert(is(typeof(a[0])==const(int)));
+		return a[0];
+	}
+}
+int testMemberTuple1(){
+	TestMemberTuple1!int a;
+}
+
 int testZeroArgs(){
 	int x;
 	int foo(){ return x; }
