@@ -11,7 +11,7 @@ auto fun(){return "a function";}
 auto fun(T...)(T args){return 1;}
 template fun(a...){auto fun(T...)(T args){return 2;}}
 template fun(a...){template fun(b...){auto fun(T...)(T args){return 3;}}}
-static assert(fun(0)==1);
+static assert(fun(0)==1); // TODO: should this work?
 static assert(fun()=="a function");
 //pragma(msg, fun!2);
 

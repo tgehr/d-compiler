@@ -2931,6 +2931,8 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		|| !(cast(TemplateInstanceDecl)cast(void*)inst).completedMatching){
 			mixin(SemChld!q{inst});
 		}
+		if(sc) semantic(sc);
+		else needRetry = true;
 		mixin(SemRet);
 	}
 
@@ -4359,7 +4361,6 @@ mixin template Semantic(T) if(is(T==CallExp)){
 			// fun was rewritten as a @property call
 			mixin(MatchCall!q{fun; fun, sc, loc, args});
 			assert(fun is null);
-			mixin(ErrEplg);
 			mixin(ErrEplg);
 		}
 
@@ -9409,7 +9410,8 @@ class FunctionOverloadMatcher: SymbolMatcher{
 					// this creates identifiers without location, as we don't want those
 					// to show up in circular dependency traces
 					// TODO: accessCheck?
-					eponymous[i]=New!(BinaryExp!(Tok!"."))(New!Symbol(x), New!Identifier(x.name.name));
+					auto be=New!(BinaryExp!(Tok!"."))(New!Symbol(x), New!Identifier(x.name.name));
+					(eponymous[i]=be).willCall();
 					continue;
 				}
 			}
