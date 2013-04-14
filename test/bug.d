@@ -1,25 +1,17 @@
 
-/+
-struct ReturnTypeLambdaParameterIfti{
+
+/+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
 	void main() {
 		foo((int a)=>a, b=>1.0); // foo!(double function(int))
 	}
-}
-+/
+}+/
 
 /+struct UndefinedIdentifierError{
 	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message
 	pragma(msg, foo(a=>1,a=>1.0));
-}
-+/
+}+/
 
-/+
-struct TemplatedParserHack(T){
-	this(int a[]){}
-}
-pragma(msg, TemplatedParserHack!int); // TODO: fix assertion failure
-+/
 /+
 struct TemplatedConstructor(T){
 	this(T)(T arg){}

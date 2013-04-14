@@ -8046,13 +8046,11 @@ protected:
 mixin template Semantic(T) if(is(T==CArrayDecl)||is(T==CArrayParam)){
 
 	override void semantic(Scope sc){
-		while(postfix !is name){
-			assert(!!cast(IndexExp)postfix, postfix.toString()~" "~name.toString());
-			auto id = cast(IndexExp)cast(void*)postfix;
+		for(;;)if(auto id=postfix.isIndexExp()){
 			postfix = id.e;
 			id.e = rtype;
 			rtype = id;
-		}
+		}else break;
 		super.semantic(sc);
 	}
 }

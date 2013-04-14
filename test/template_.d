@@ -38,6 +38,11 @@ struct MatchLevels{
 	mixin(generate()); // TODO!
 }
 
+struct TemplatedParserHack(T){
+	this(int a[]){}
+}
+pragma(msg, TemplatedParserHack!int);
+
 
 template Ambiguous(int a){ enum Ambiguous = "moo"; }
 template Ambiguous(int a){enum Ambiguous = "foo"; }
