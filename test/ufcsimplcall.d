@@ -1,3 +1,14 @@
+template forward(args...){
+	@property forward()(){ return args[0]; }
+}
+
+bool testforward(){
+	int a = 1;
+	int b = 1;
+	return a == forward!b;
+}
+static assert(testforward());
+
 struct SS{
 	template T(int x){ }
 	template T(alias a){ }

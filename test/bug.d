@@ -11,21 +11,6 @@
 	pragma(msg, foo(a=>1,a=>1.0));
 }+/
 
-
-/+
-template forward(args...)
-{
-	@property forward()(){ return args[0]; }
-}
-
-void main()
-{
-	int a = 1;
-	int b = 1;
-	assert(a == forward!b); // TODO: should work
-}+/
-
-
 /+template foot(alias a){
 	auto foot(){
 		return a();
