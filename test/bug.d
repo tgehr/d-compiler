@@ -29,8 +29,6 @@ void main() {
 int cdep(){ enum x=cdep2(); return x;}
 int cdep2(){ return cdep(); }+/
 
-/+auto intarrlen = int[].length;+/
-
 /+// TODO: this must work! (need notion of potential indirections to support this)
 pragma(msg, {
 	string x = "123";

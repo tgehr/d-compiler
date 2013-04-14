@@ -5502,8 +5502,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			}
 			// error message duplicated in Symbol.semantic
 			sc.error(format("need 'this' to access %s '%s'",
-			                e2.kind,e2.loc.rep),loc);
-			sc.note(format("%s was declared here",e2.kind),e2.meaning.loc);
+			                e2.meaning?e2.kind:"member",e2.loc.rep),loc);
+			if(e2.meaning) sc.note(format("%s was declared here",e2.kind),e2.meaning.loc);
 			mixin(ErrEplg);
 		}
 		// successfully resolved non-tuple field expression that
@@ -5605,14 +5605,14 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			}else switch(name){
 				case "ptr":
 					type = elt.getPointer();
-					if(accessCheck == AccessCheck.all){
+					if(accessCheck != AccessCheck.none){
 						thisCheck(sc, this_, ty);
 						return true;
 					}
 					goto Lnorewrite;
 				case "length":
 					type = Type.get!Size_t();
-					if(accessCheck == AccessCheck.all){
+					if(accessCheck != AccessCheck.none){
 						thisCheck(sc, this_, ty);
 						return true;
 					}
