@@ -1,3 +1,8 @@
+
+auto foo(A,B,T...)(B z, T a, A b){pragma(msg, B," ",T," ",A);return 1;}
+pragma(msg, foo(1,2,3)); // TODO
+
+
 template ID(alias d){ alias d ID; }
 template boz(int a){ alias ID!(x=>x+a) boz; }
 template boo(){ alias boz!2 boo; }
