@@ -1,3 +1,10 @@
+/+@property int bar()=>2;
+
+struct PoorErrorMessage{
+static foo(){ return bar(); // TODO: fix error message
+}
+pragma(msg, foo());
+}+/
 
 /+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
@@ -67,25 +74,6 @@ pragma(msg, ElementType!(int));
 template ElementType(T=S,S=T){ alias typeof({T t; return t[0];}()) ElementType; } // display error message
 +/
 
-// make compile
-/+
-auto indexOf3(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, const V v){
-	for(typeof(c.length) i=0;i<c.length;i++)
-		if(a(c[i],v)) return i;
-	return -1;
-}
-
-static assert(indexOf3("aba", 'b')==1);
-+/
-/+
-auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
-	for(typeof(c.length) i=0;i<c.length;i++)
-		if(c[i]==v) return i;
-	return -1;
-}
-static assert(indexOf2("aba",'b')==1); // spurious error message+/
-
-
 /+improve error messages!+/
 
 /+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
@@ -108,7 +96,7 @@ auto testcallCC(){
 	assert(callCC(&f,3)(x=>x)==4);
 	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
 }+/
-/+
+
 // ok now
 struct MixinAccessCheck{
 	struct S{

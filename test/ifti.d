@@ -1,6 +1,97 @@
+struct TestTypeConstructorMatching{
+	static foo(T)(const(T)[] a){
+		pragma(msg, T);
+		return cast(T)a.length;
+	}
+	pragma(msg, foo([1,2,3]));
+	static assert(is(typeof(foo([1,2,3]))==int));
+	pragma(msg, foo(cast(const)cast(shared)[1,2,3]));
+	static assert(is(typeof(foo(cast(const)cast(shared)[1,2,3]))==shared(int)));
+	pragma(msg, foo(cast(shared)[1,2,3]));
+	static assert(is(typeof(foo(cast(shared)[1,2,3]))==shared(int)));
+
+	pragma(msg, foo(cast(immutable)[1,2,3]));
+	static assert(is(typeof(foo(cast(immutable)[1,2,3]))==int));
+
+	static bar(T)(inout(T)[] a){
+		return cast(T)a.length;
+	}
+	static assert(is(typeof(bar(cast(immutable)[1,2,3]))==int));
+	static assert(is(typeof(bar(cast(shared)[1,2,3]))==shared(int)));
+	static assert(is(typeof(bar(cast(const)[1,2,3]))==int));
+	static assert(is(typeof(bar(cast(const shared)[1,2,3]))==shared(int)));
+	void iiiooo()inout{
+		static assert(is(typeof(bar(cast(inout)[1,2,3]))==int));
+		static assert(is(typeof(this.bar(cast(inout)[1,2,3]))==int));
+		static assert(is(typeof(bar(cast(const)[1,2,3]))==int));
+		static assert(is(typeof(bar(cast(const inout)[1,2,3]))==int));
+		static assert(is(typeof(bar(cast(immutable)[1,2,3]))==int));
+		static assert(is(typeof(bar(cast(shared)[1,2,3]))==shared(int)));
+		static assert(is(typeof(bar(cast(const shared)[1,2,3]))==shared(int)));
+		static assert(is(typeof(bar(cast(inout shared)[1,2,3]))==shared(int)));
+		static assert(is(typeof(bar(cast(const inout shared)[1,2,3]))==shared(int)));
+	}
+	static baz(T)(T[] a, T[] b){ return cast(T)(a.length+b.length); }
+	static assert(is(typeof(baz(cast(immutable)[1],cast(const)[2]))==const(int)));
+	static assert(is(typeof(baz(cast(shared)[1],cast(immutable)[2]))==shared(const(int))));
+	static assert(!is(typeof(baz(cast(const)[1],cast(shared)[2]))));
+
+
+	// // TODO: the rules are not so clear for those cases:
+	static qux1(T)(const(T)[] a, T[] b){ return cast(T)(a.length+b.length); }
+	static assert(is(typeof(qux1(cast(immutable)[1],cast(immutable)[2]))==const(int)));
+	static qux2(T)(T[] a, immutable(T)[] b){ return cast(T)(a.length+b.length); }
+	static assert(is(typeof(qux2(cast(immutable)[1],cast(immutable)[2]))==const(int)));
+}
+
+auto indexOf3(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, const V v){
+	for(typeof(c.length) i=0;i<c.length;i++)
+		if(a(c[i],v)) return i;
+	return -1;
+}
+
+static assert(indexOf3("aba", cast(const)'b')==1);
+
+
+auto indexOf2(alias a=(a,b)=>a==b, T...)(const(T)[] c, const T v){
+	for(typeof(c.length) i=0;i<c.length;i++)
+		if(c[i]==v) return i;
+	return -1;
+}
+static assert(indexOf2("aba",'b')==1); // error
+
+
+
+
+struct TestAdvancedTupleMatching{
+	static foo(A,B,T...)(B z, T a, A b){pragma(msg, "foo: ",B," ",T," ",A);return 1;}
+	pragma(msg, foo(1,3));
+	pragma(msg, foo(1,2,3));
+	pragma(msg, foo(1,2,3,4));
+
+	static bar(A,AA,B,BB,T...)(B delegate(BB) z, T a, A delegate(AA) b){ return z(b(0)); }
+	pragma(msg, bar((int x)=>x+1,(int y)=>y+2));
+	pragma(msg, bar((int x)=>x+1,1,(int y)=>y+2));
+	pragma(msg, bar((int x)=>x+1,1,2,(int y)=>y+2));
+
+	static qux(A...,B,C...)(A a, B b,C c){
+		pragma(msg, "qux: ",A," ",B," ",C);
+		static assert(!c.length);
+		return 333;
+	}
+	pragma(msg, qux(1));
+	pragma(msg, qux(1,2,3,4));
+	pragma(msg, qux(1,2));
+	pragma(msg, qux(1,2,3));
+}
+
+struct TestVoidTemplateParam{
+	auto foo(T...)(T a){pragma(msg, B," ",T," ",A);return 1;}
+	pragma(msg, foo(cast(void)1)); // error
+}
 
 auto foo(A,B,T...)(B z, T a, A b){pragma(msg, B," ",T," ",A);return 1;}
-pragma(msg, foo(1,2,3)); // TODO
+pragma(msg, foo(1,2,3));
 
 
 template ID(alias d){ alias d ID; }
@@ -21,6 +112,7 @@ auto deduceLengthFromLit(T,int n)(T[n] a){ return a; }
 pragma(msg, typeof(deduceLengthFromLit([1,2,3]))); // TODO (?)
 
 
+
 template G(S,T){ alias T delegate(S) G; }
 
 C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){
@@ -29,23 +121,24 @@ C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){
 }
 pragma(msg, foo(1, x=>2.0*x, x=>toString(cast(int)x)));
 
-
 auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
 static assert(testTupleExpandIFTI(1,2,3,4)==4);
 
 /+ TODO: match template instantiations +/
-struct A(T, int N){ }
-
-struct B(T, int N, int M){ alias B!(T, N, 1) C; }
-
-alias B!(int, 2, 2) b_t;
-
-void foo(T, int N)(in A!(T,N), in B!(T,N,1)){}
-
-void matchTemplateInstantiation(){
-	A!(int,2) a;
-	B!(int,2,1) b;
-	foo(a, b); // TODO!
+struct TestMatchTemplateInstantiations{
+	struct A(T, int N){ }
+	
+	struct B(T, int N, int M){ alias B!(T, N, 1) C; }
+	
+	alias B!(int, 2, 2) b_t;
+	
+	static void foo(T, int N)(in A!(T,N), in B!(T,N,1)){}
+	
+	static void matchTemplateInstantiation(){
+		A!(int,2) a;
+		B!(int,2,1) b;
+		foo(a, b); // TODO!
+	}
 }
 
 

@@ -1,3 +1,13 @@
+struct StructLevelDelegateAccessCheck{
+	int y;
+	static foo(int delegate(int) dg){return dg(2);}
+	static assert(foo((int x)=>x)==2);
+	static assert(is(typeof((int x)=>x)==int function(int)));
+	static assert(foo(delegate(int x)=>x)==2);
+	static assert(is(typeof(delegate(int x)=>x)==int delegate(int)));
+	pragma(msg, foo((int x)=>y)); // error
+	pragma(msg, foo(delegate(int x)=>y)); // error
+}
 
 struct TTTTTTTTT{
 	static int fun(T)(){
