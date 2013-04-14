@@ -11,22 +11,6 @@
 	pragma(msg, foo(a=>1,a=>1.0));
 }+/
 
-/+template foot(alias a){
-	auto foot(){
-		return a();
-	}
-}
-int main(){
-	int x=2;
-	int foo(){ return x; }
-	static int bar(){
-		return foot!foo();
-	}
-	return bar();
-}
-pragma(msg, main());+/
-
-
 /+
 struct Foo(_T) {
 	alias _T T;

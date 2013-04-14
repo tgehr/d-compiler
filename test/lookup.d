@@ -14,7 +14,22 @@ struct TTTTTTTTT{
 	}
 	pragma(msg, main());
 }
-
+struct TemplateAliasParamAccessCheck2{
+	static template foot(alias a){
+		auto foot(){
+			return a();
+		}
+	}
+	static int main(){
+		int x=2;
+		int foo(){ return x; }
+		static int bar(){
+			return foot!foo(); // error
+		}
+		return bar();
+	}
+	pragma(msg, main());
+}
 struct TemplateAliasParamAccessCheck{
 	int dontTouchThis(alias a)(){
 		static struct S{
