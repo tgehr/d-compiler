@@ -303,7 +303,14 @@ template RevEpoLkup(string e){
 				}
 
 				if(ident.sstate != SemState.error && ident.meaning){
+					// constructor calls are not subject to reverse eponymous lookup
+					// reverse eponymous lookup is also not performed for reference
+					// aggregate declarations. This behaviour is copied from DMD.
+					static if(is(typeof(this)==CallExp))
+						if(ident.meaning.isAggregateDecl())
+							goto Lnorevepolkup;
 					@(e) = ident.reverseEponymousLookup(sc);
+				Lnorevepolkup:;
 				}
 			}
 		}
@@ -3018,6 +3025,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		instantiateResSemantic(sc);
 		if(!rewrite) return;
 		assert(!!cast(Expression)rewrite);
+		if((cast(Expression)cast(void*)rewrite).isType()) return;
 		auto tmp = rewrite.sstate!=SemState.completed?null.independent!Expression:
 			(cast(Expression)cast(void*)rewrite).matchCall(sc, loc, iftiArgs);
 		if(tmp.dependee||!tmp.value){
@@ -3030,8 +3038,13 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 				override void semantic(Scope sc){
 					mixin(SemPrlg);
 					mixin(SemChld!q{exp});
-					mixin(MatchCall!q{auto r; exp, sc, loc, iftiArgs});
-					if(!r) mixin(ErrEplg);
+					Expression r;
+					auto f=exp;
+					if(exp.isType()) r=exp;
+					else{
+						mixin(MatchCall!q{r; exp, sc, loc, iftiArgs});
+						if(!r) mixin(ErrEplg);
+					}
 					if(rewrite) return; // TODO: ok?
 					mixin(RewEplg!q{r});
 				}
@@ -4319,6 +4332,21 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		mixin(RevEpoNoHope!q{e});
 	}
 
+	// This is somewhat hacky
+	private void constructorRewrite(Scope sc){
+		if(auto ty=e.isType())
+		if(auto aggrty=ty.getUnqual().isAggregateTy())
+		if(auto strd=aggrty.decl.isStructDecl()){
+			// TODO: could re-use the callexp as the consCall field
+			auto r = New!StructConsExp(ty, args);
+			r.loc = loc;
+			if(tmpVarDecl) r.initOfVar(tmpVarDecl);
+			r.semantic(sc);
+			mixin(RewEplg!q{r});
+		}
+	}
+	private enum ConstructorRewrite = q{ constructorRewrite(sc); if(rewrite) return; };
+
 	override void semantic(Scope sc){ // TODO: type checking
 		// parameter passing
 		mixin(SemPrlg);
@@ -4337,28 +4365,25 @@ mixin template Semantic(T) if(is(T==CallExp)){
 				mixin(RewEplg!q{r});
 			}
 		}
-		//dw(sstate," ",map!(a=>a.needRetry)(args),args);
-		if(auto ty=e.isType())
-		if(auto aggrty=ty.getUnqual().isAggregateTy())
-		if(auto strd=aggrty.decl.isStructDecl()){
-			// TODO: could re-use the callexp as the consCall field
-			auto r = New!StructConsExp(ty, args);
-			r.loc = loc;
-			if(tmpVarDecl) r.initOfVar(tmpVarDecl);
-			r.semantic(sc);
-			mixin(RewEplg!q{r});
-		}
+
+		mixin(ConstructorRewrite);
+
 		if(fun is null){
 			mixin(MatchCall!q{fun; e, sc, loc, args});
+			// TODO: opCall
 			if(fun is null) mixin(ErrEplg);
 		}
 		mixin(SemChld!q{fun});
 		mixin(SemProp!q{e}); // catch errors generated in matchCall TODO: still relevant?
 
+		mixin(ConstructorRewrite);
+
+		//dw(sstate," ",map!(a=>a.needRetry)(args),args);
 		assert(fun && fun.type);
 		auto tt = fun.type.getHeadUnqual().getFunctionTy();
 		if(!tt){
-			// fun was rewritten as a @property call
+			// fun was rewritten (eg. @property call, class template)
+			// TODO: opCall
 			mixin(MatchCall!q{fun; fun, sc, loc, args});
 			assert(fun is null);
 			mixin(ErrEplg);

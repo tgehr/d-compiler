@@ -1,4 +1,13 @@
 
+struct TemplatedTemplateStructConstructor(T){
+	this(T)(T arg){}
+	static create(){
+		auto flt = TemplatedTemplateStructConstructor!float(2);
+		return TemplatedTemplateStructConstructor(2);
+	}
+}
+pragma(msg, TemplatedTemplateStructConstructor!int);
+
 struct TemplatedConstructor{
 	this(T)(T arg){}
 	static create(){
