@@ -1,4 +1,9 @@
 
+auto intarrlen = int[].length;     // error
+auto intarrptr = int[].ptr;        // error
+pragma(msg, typeof(int[].length)); // ok
+pragma(msg, typeof(int[].ptr));    // ok
+
 void ttt(){
 	int y=0;
 	immutable x = [1,y];
