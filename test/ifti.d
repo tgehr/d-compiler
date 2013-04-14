@@ -1,6 +1,32 @@
+struct TestAdvancedTupleMatching{
+	static foo(A,B,T...)(B z, T a, A b){pragma(msg, "foo: ",B," ",T," ",A);return 1;}
+	pragma(msg, foo(1,3));
+	pragma(msg, foo(1,2,3));
+	pragma(msg, foo(1,2,3,4));
+
+	static bar(A,AA,B,BB,T...)(B delegate(BB) z, T a, A delegate(AA) b){ return z(b(0)); }
+	pragma(msg, bar((int x)=>x+1,(int y)=>y+2));
+	pragma(msg, bar((int x)=>x+1,1,(int y)=>y+2));
+	pragma(msg, bar((int x)=>x+1,1,2,(int y)=>y+2));
+
+	static qux(A...,B,C...)(A a, B b,C c){
+		pragma(msg, "qux: ",A," ",B," ",C);
+		static assert(!c.length);
+		return 333;
+	}
+	pragma(msg, qux(1));
+	pragma(msg, qux(1,2,3,4));
+	pragma(msg, qux(1,2));
+	pragma(msg, qux(1,2,3));
+}
+
+struct TestVoidTemplateParam{
+	auto foo(T...)(T a){pragma(msg, B," ",T," ",A);return 1;}
+	pragma(msg, foo(cast(void)1)); // error
+}
 
 auto foo(A,B,T...)(B z, T a, A b){pragma(msg, B," ",T," ",A);return 1;}
-pragma(msg, foo(1,2,3)); // TODO
+pragma(msg, foo(1,2,3));
 
 
 template ID(alias d){ alias d ID; }
@@ -19,6 +45,7 @@ auto func(T)(T[2] arg){ return arg; }
 static assert(is(typeof(func([1,2]))==int[2]));
 auto deduceLengthFromLit(T,int n)(T[n] a){ return a; }
 pragma(msg, typeof(deduceLengthFromLit([1,2,3]))); // TODO (?)
+/+
 
 
 template G(S,T){ alias T delegate(S) G; }
@@ -29,23 +56,24 @@ C foo(A,B,C)(A x, G!(A,B) a, G!(B,C) b){
 }
 pragma(msg, foo(1, x=>2.0*x, x=>toString(cast(int)x)));
 
-
 auto testTupleExpandIFTI(T...)(Seq!(int,int) a,T args){ return a[0]+args[0]; }
 static assert(testTupleExpandIFTI(1,2,3,4)==4);
 
 /+ TODO: match template instantiations +/
-struct A(T, int N){ }
-
-struct B(T, int N, int M){ alias B!(T, N, 1) C; }
-
-alias B!(int, 2, 2) b_t;
-
-void foo(T, int N)(in A!(T,N), in B!(T,N,1)){}
-
-void matchTemplateInstantiation(){
-	A!(int,2) a;
-	B!(int,2,1) b;
-	foo(a, b); // TODO!
+struct TestMatchTemplateInstantiations{
+	struct A(T, int N){ }
+	
+	struct B(T, int N, int M){ alias B!(T, N, 1) C; }
+	
+	alias B!(int, 2, 2) b_t;
+	
+	static void foo(T, int N)(in A!(T,N), in B!(T,N,1)){}
+	
+	static void matchTemplateInstantiation(){
+		A!(int,2) a;
+		B!(int,2,1) b;
+		foo(a, b); // TODO!
+	}
 }
 
 

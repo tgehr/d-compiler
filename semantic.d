@@ -1,6 +1,6 @@
 // Written in the D programming language.
 
-import std.array, std.conv, std.algorithm, std.string;
+import std.array, std.conv, std.algorithm, std.range, std.string;
 
 import lexer, parser, expression, statement, declaration, scope_, util;
 
@@ -1877,7 +1877,7 @@ class TemplateInstanceDecl: Declaration{
 		auto funparams = fdecl.type.params;
 
 		// because of tuples, the array may change its size in one iteration
-		iftiEponymousParameters=iftiEponymousParameters[0..funparams.length];
+		iftiEponymousParameters.length=funparams.length;
 		iftiEponymousParameters.assumeSafeAppend(); // ok
 		foreach(i,ref t;iftiEponymousParameters) t=funparams[i].ddup();
 
@@ -1920,8 +1920,7 @@ class TemplateInstanceDecl: Declaration{
 		foreach(ref x;iftiArgs) mixin(SemChld!q{x});
 
 		bool resolvedSome = false;
-
-		foreach(i,ref a;iftiArgs[0..min($,iftiEponymousParameters.length)])
+		foreach(i,a;iftiArgs[0..min($,iftiEponymousParameters.length)])
 		if(auto ae = a.isAddressExp())
 		if(ae.isUndeducedFunctionLiteral()){
 			if(!iftiEponymousParameters[i].type) continue;
@@ -1948,23 +1947,39 @@ class TemplateInstanceDecl: Declaration{
 
 		// if this behaviour should be changed, remember to edit
 		// FunctionTy.typeMatch as well
-		foreach(i,ref a;iftiEponymousParameters[0..min($,iftiArgs.length)]){
-			if(!a.type) continue;
+		//foreach(i,ref a;iftiEponymousParameters[0..min($,iftiArgs.length)]){
+		auto numt = iftiEponymousParameters.filter!((a){
+				if(!a.type) return false; // TODO: eliminate possibility?
+				auto mt=a.type.isMatcherTy();
+				return mt && mt.which==WhichTemplateParameter.tuple;
+			}).walkLength;
+		for(size_t i=0,j=0;i<iftiEponymousParameters.length&&j<=iftiArgs.length;){
+			auto a=iftiEponymousParameters[i];
+			if(!a.type) break; // TODO: eliminate possibility?
 			auto mt = a.type.isMatcherTy();
 			if(mt && mt.which==WhichTemplateParameter.tuple){
-				if(i+1==iftiEponymousParameters.length){
-					//TODO: gc allocation
-					auto types = map!(_=>_.type.getHeadUnqual())(iftiArgs[i..$]).array();
-					// mt.typeMatch(New!TypeTuple(types));
-					mixin(TypeMatch!q{_; mt, New!TypeTuple(types)});
-				}
-				break;
+				auto num=min(iftiArgs.length-j,
+				             numt+iftiArgs.length-iftiEponymousParameters.length);
+				if(numt+iftiArgs.length<iftiEponymousParameters.length) num=0;
+				// TODO: the following is somewhat ad-hoc.
+				// the reason it is here is because we cannot create a parameter of type
+				// Seq!void
+				alias util.any any;
+				if(any!(a=>a.type is Type.get!void())(iftiArgs[j..j+num])) break;
+				//TODO: gc allocation
+				auto types = map!(_=>_.type.getHeadUnqual())(iftiArgs[j..j+num]).array();
+				// mt.typeMatch(New!TypeTuple(types));
+				mixin(TypeMatch!q{_; mt, New!TypeTuple(types)});
+				i++;
+				j+=num;
+				continue;
 			}else if(a.type.isTuple()) break;
+			if(j==iftiArgs.length) break;
 
-			auto iftiType = iftiArgs[i].type.getHeadUnqual();
+			auto iftiType = iftiArgs[j].type.getHeadUnqual();
 
 			if(iftiType is Type.get!void()){
-				if(auto ae = iftiArgs[i].isAddressExp()){
+				if(auto ae = iftiArgs[j].isAddressExp()){
 					if(ae.isUndeducedFunctionLiteral()){
 						auto sym = cast(Symbol)cast(void*)ae.e;
 						assert(!!cast(FunctionDef)sym.meaning);
@@ -1976,8 +1991,8 @@ class TemplateInstanceDecl: Declaration{
 
 			//a.type.typeMatch(iftiType);
 			mixin(TypeMatch!q{_; a.type, iftiType});
+			i++,j++;
 		}
-
 		//dw(iftiEponymousParameters);
 		//dw(matcherTypes);
 		foreach(i,x; matcherTypes){
@@ -5738,13 +5753,24 @@ mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 		mixin(SemPrlg);
 		auto dg=New!FunctionDef(STC.init,fty,New!Identifier(uniqueIdent("__dgliteral")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, which==Kind.none);
 		auto decl=sc.getDeclaration();
-		if(which==Kind.function_ || !decl || decl.isAggregateDecl())
-			dg.stc |= STCstatic;
+
 		dg.sstate = SemState.begin;
 		dg.scope_ = sc; // Symbol will use this scope to reason for analyzing DG
-		Expression e=New!Symbol(dg, true, true);
-		e.loc=dg.loc=loc;
-		e = New!(UnaryExp!(Tok!"&"))(e);
+		auto sym=New!Symbol(dg, true, true);
+		if(which==Kind.function_ || !decl) dg.stc |= STCstatic;
+		else if(decl.isAggregateDecl()){
+			// aggregate-scope delegate literals are always
+			// executed at compile time, hence no access check
+			// is needed for them
+			sym.accessCheck=AccessCheck.none;
+			dg.stc |= STCstatic;
+			if(which==Kind.delegate_){
+				dg.deduceStatic=true;
+				dg.canBeStatic=false;
+			}
+		}
+		sym.loc=dg.loc=loc;
+		Expression e = New!(UnaryExp!(Tok!"&"))(sym);
 		e.brackets++;
 		e.loc=loc;
 		e.semantic(sc);
@@ -5752,7 +5778,6 @@ mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 		if(auto enc=sc.getDeclaration()) if(auto fd=enc.isFunctionDef()){
 			fd.nestedFunctionLiteral(dg);
 		}
-
 		auto r = e;
 		mixin(PropErr!q{r});
 		mixin(RewEplg!q{r});
@@ -9926,7 +9951,10 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 
 		mixin(PropErr!q{});
 		mixin(PropErr!q{type, bdy});
-		if(deduceStatic && canBeStatic) stc |= STCstatic;
+		if(deduceStatic){
+			if(canBeStatic) stc |= STCstatic;
+			else stc &= ~STCstatic; // struct/class member delegates
+		}
 		mixin(SemEplg);
 	}
 
