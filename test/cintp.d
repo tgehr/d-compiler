@@ -48,7 +48,6 @@ string execLenses(){
 }
 pragma(msg, "execLenses: ",execLenses());
 
-
 /+
 struct TestPartialEvaluation{
 	static foo(string f){
@@ -226,8 +225,8 @@ int testStructMemberAliasParam(){
 	struct S{
 		int y;
 		void bar(int x){ foo!((ref a)=>a=x)(); }
-		void foo(alias a)(){ a(x); }
-		void baz(alias a)(){ a(y); } // TODO!
+		void foo(alias a)(){ a(x); } // TODO
+		void baz(alias a)(){ a(y); }
 	}
 	S s;
 	s.bar(2);
@@ -293,6 +292,17 @@ struct Dynamic{
 		return d.b==2?foo(d):"fail";
 	}() == "int b = 2;");
 }
+
+struct TestStaticImmutableAndEnumFields{
+	static immutable int c=222; // // TODO: should it work without static?
+	enum x = 333;
+	static int foo(int){
+		TestStaticImmutableAndEnumFields s;
+		return c+x;
+	}
+}
+static assert(TestStaticImmutableAndEnumFields.foo(3)==555);
+pragma(msg, "TestStaticImmutableAndEnumFields.foo: ", TestStaticImmutableAndEnumFields.foo(3));
 
 auto testStruct2(){
 	static struct S{

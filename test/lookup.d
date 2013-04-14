@@ -1,4 +1,53 @@
 
+struct TTTTTTTTT{
+	static int fun(T)(){
+		T s;
+		return s.f();
+	}
+	
+	static int main() {
+		int x=2;
+		void f(){}
+		struct R { int f() { return x; } }
+		auto m = fun!(R)();
+		return m;
+	}
+	pragma(msg, main());
+}
+
+struct TemplateAliasParamAccessCheck{
+	int dontTouchThis(alias a)(){
+		static struct S{
+			int foo(){
+				pragma(msg, typeof(a(2)));
+				static assert(is(typeof({return a(2);}))); // no access check inside typeof
+				a(2); // error
+				return 2;
+			}
+		}
+		S s;
+		return s.foo();
+	}
+
+	int nanana(){
+		int x=3;
+		auto goo(T)(T a)=>a+x;
+		return dontTouchThis!(a=>a+x)();
+	}
+}
+
+struct TemplateFunctionInstanceAccessCheck{
+	struct S2{
+		void x()(int a) { }
+		void y() const {
+			x(42); // error
+			auto u=&x!(); // error
+			pragma(msg, typeof(&x!())); // ok
+			static assert(is(typeof(&x!())==void delegate(int)));
+		}
+	}
+}
+
 struct TestIllegalInheritance{
 	class A { auto foo(){ return "A"; } alias int string; } // error
 	

@@ -3596,7 +3596,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 				       meaning.scope_.getFrameNesting());
 
 				auto diff = scope_.getFrameNesting() - meaning.scope_.getFrameNesting();
-				//dw(this," ",loc," ",scope_.getFrameNesting()," ",meaning.scope_.getFrameNesting());
+
 				bld.emitUnsafe(Instruction.pushcontext, this);
 				bld.emitConstant(diff);
 			}
@@ -3813,9 +3813,11 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 	void updateLayout()in{assert(!isLayoutKnown());}body{
 		size_t off=initialOffset();
 		// TODO: unions, anonymous structs/unions etc.
+		// TODO: the traversal of vardecls is repeated below, factor out into range
 		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
 				if(vd.sstate != SemState.completed) continue; // TODO: ok?
+				if(vd.stc&(STCstatic|STCenum)) continue;
 				if(auto aggrty=vd.type.isAggregateTy()){
 					if(auto decl=aggrty.decl.isValueAggregateDecl()){
 						decl.subscribeForLayoutChanges(this);
@@ -3871,6 +3873,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		foreach(d;&bdy.traverseInOrder){
 			if(auto vd=d.isVarDecl()){
 				if(vd.sstate != SemState.completed) continue; // TODO: ok?
+				if(vd.stc&(STCstatic|STCenum)) continue;
 				size_t len, off = vd.getBCLoc(len);
 				if(len!=-1){
 					if(vd.init) vd.init.byteCompile(bld);

@@ -1453,8 +1453,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 								if(inoutRes==InoutRes.immutable_)
 									inoutRes=InoutRes.inoutConst;
 								
-								auto accessCheck=fe?fe.accessCheck:s.accessCheck;
-								if(fd.needsAccessCheck(accessCheck)){
+								if(fd.needsAccessCheck(fe.accessCheck)){
 									mixin(RefConvertsTo!q{
 										auto compat;
 										this_.type,
@@ -1747,12 +1746,13 @@ class TemplateInstanceDecl: Declaration{
 		assert(paramScope && paramScope.parent is paramScope.iparent);
 	}body{
 		Scope instanceScope = parent.scope_;
+		
+		if(!(parent.stc&STCstatic)) return; // TODO: fix!
 
 		int maxn = -1;
 		foreach(i,x;args){
-			if(i<parent.tuplepos && parent.params[i].which != WhichTemplateParameter.alias_)
-				continue;
 			Declaration decl = null;
+			if(auto addr=x.isAddressExp()) x=addr.e; // delegate literals
 			if(auto sym = x.isSymbol()) decl=sym.meaning;
 			else if(auto ty = x.isType()) // DMD 2.060 does not do this:
 				if(auto at = ty.isAggregateTy()) decl=at.decl;
@@ -1764,18 +1764,12 @@ class TemplateInstanceDecl: Declaration{
 				continue;
 			auto n = decl.scope_.getFrameNesting();
 			if(n>=maxn){
-				assert(n>maxn||instanceScope==scope_
-				       ||instanceScope==decl.scope_);
 				maxn=n;
+				if(!decl.scope_.isNestedIn(instanceScope)){
+					instanceScope = parent.scope_;
+					break; // TODO: fix!
+				}
 				instanceScope = decl.scope_;
-			}
-		}
-		if(!(parent.stc&STCstatic)){ // TODO: fix!
-			for(auto d=instanceScope.getDeclaration();;){
-				if(!d){instanceScope = parent.scope_; break;}
-				if(d.scope_ !is parent.scope_) break;
-				if(d.stc&STCstatic){instanceScope = parent.scope_; break;}
-				d = d.scope_.getDeclaration();
 			}
 		}
 		paramScope.iparent = instanceScope;
@@ -2033,7 +2027,11 @@ class TemplateInstanceDecl: Declaration{
 
 		auto instanceScope = paramScope.iparent;
 		bdy.stc|=parent.stc;
-		if(instanceScope !is parent.scope_) bdy.stc&=~STCstatic;
+		if(instanceScope !is parent.scope_){
+			bdy.stc&=~STCstatic;
+			foreach(decl;&bdy.traverseInOrder)
+				decl.stc&=~STCstatic;
+		}
 		bdy.presemantic(bdyscope);
 		assert(bdy.scope_ is bdyscope);
 		auto decl=instanceScope.getDeclaration();
@@ -2871,35 +2869,38 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 		Expression container = null;
 		auto sym = e.isSymbol();
+		AccessCheck accessCheck;
 		if(!sym){
 			if(auto fld = e.isFieldExp()){
 				container = fld.e1;
 				sym = fld.e2;
+				accessCheck = fld.accessCheck;
 			}else{
 				// TODO: this error message has a duplicate in Declaration.matchInstantiation
 				sc.error(format("can only instantiate templates, not %s%ss",e.kind,e.kind[$-1]=='s'?"e":""),loc);
 				mixin(ErrEplg);
 			}
-		}
+		}else accessCheck=sym.accessCheck;
+
 		foreach(i,ref x; args){
 			TemplateDecl.finishArgumentPreparation(sc, x);
 			mixin(PropRetry!q{x});
 		}
 		mixin(SemChld!q{args});
 
-		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym);
-		instantiateSemantic(sc,container,sym);
+		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);
+		instantiateSemantic(sc,container,sym,accessCheck);
 	}
 
 	Expression[] iftiArgs;
 	mixin ContextSensitive;
 
-	private void IFTIsemantic(Scope sc, Expression container, Symbol sym){
+	private void IFTIsemantic(Scope sc, Expression container, Symbol sym, AccessCheck accessCheck){
 		mixin(SemChld!q{e,args});
 		type = type.get!void();
 		// the state will be reset in matchCallHelper
 		if(!inst) mixin(SemEplg);
-		finishSemantic(sc, container, sym);
+		finishSemantic(sc, container, sym, accessCheck);
 	}
 
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type th_, Expression[] funargs, ref MatchContext context){
@@ -2934,16 +2935,16 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	}
 
 
-	private void instantiateSemantic(Scope sc, Expression container, Symbol sym){
+	private void instantiateSemantic(Scope sc, Expression container, Symbol sym, AccessCheck accessCheck){
 		if(!inst){
 			inst = sym.meaning.matchInstantiation(sc, loc, this, args);
 			if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 		}
 		assert(!!inst);
-		finishSemantic(sc, container, sym);
+		finishSemantic(sc, container, sym, accessCheck);
 	}
 
-	private void finishSemantic(Scope sc, Expression container, Symbol sym){
+	private void finishSemantic(Scope sc, Expression container, Symbol sym, AccessCheck accessCheck){
 		if(!inst.isTemplateInstanceDecl
 		|| !(cast(TemplateInstanceDecl)cast(void*)inst).completedMatching){
 			mixin(PropErr!q{inst});
@@ -2966,26 +2967,24 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 		mixin(PropErr!q{args});
 		// ! changing meaning of 'sym'
-		auto acheck = sym.accessCheck;
 		if(!inst.finishedInstantiation()) inst.finishInstantiation(true); // start analysis
 		if(sc.handler.showsEffect&&inst.isGagged) inst.ungag();
 		sym = New!Symbol(inst);
 		sym.loc = loc;
-		sym.accessCheck = acheck;
+		sym.accessCheck = accessCheck;
 		transferContext(sym);
 		inst.instantiation = sym; // transfer ownership
 
 		if(container){
 			auto res = New!(BinaryExp!(Tok!"."))(container, sym);
 			res.loc = loc;
-			res.accessCheck = acheck;
 			this.res = res;
 		}else res = sym;
 
 		// for eponymous template trick: attempt lookup and don't perform trick if it fails
 		eponymous=New!Identifier(decl.name.name);
 		eponymous.loc=loc;
-		eponymous.accessCheck = acheck;
+		eponymous.accessCheck=accessCheck;
 		semantic(sc); // no indefinite recursion because 'res' is now set
 	}
 
@@ -4120,7 +4119,7 @@ class Symbol: Expression{ // semantic node
 	}
 
 	override AccessCheck deferredAccessCheck(){
-		if(!meaning.needsAccessCheck(accessCheck)) return AccessCheck.none;
+		if(meaning.isTemplateInstanceDecl()) return accessCheck;
 		return super.deferredAccessCheck();
 	}
 
@@ -5510,7 +5509,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	}
 	override AccessCheck deferredAccessCheck(){
 		if(isTuple()) return AccessCheck.all;
-		if(!e2.meaning.needsAccessCheck(accessCheck)) return accessCheck;
+		if(!e2.meaning.needsAccessCheck(accessCheck)) return e1.deferredAccessCheck();
 		return super.deferredAccessCheck();
 	}
 
@@ -8771,9 +8770,10 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 
 	override void presemantic(Scope sc){
 		if(sstate != SemState.pre) return;
-		if(auto aggr=sc.getAggregate())
-			if(aggr.isValueAggregateDecl()||isValueAggregateDecl())
-				stc|=STCstatic;
+		if(auto decl=sc.getDeclaration())
+			if(auto aggr=decl.isAggregateDecl())
+				if(aggr.isValueAggregateDecl()||isValueAggregateDecl())
+					stc|=STCstatic;
 
 		super.presemantic(sc);
 
