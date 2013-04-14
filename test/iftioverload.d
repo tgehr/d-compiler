@@ -9,7 +9,7 @@ template ambig(T){
 	static if(true) bool ambig(double x){return false;}
 }
 
-pragma(msg, ambig!int(2)); // TODO: error
+pragma(msg, ambig!int(2)); // error
 
 bool noambig(T)(double x){return true;}
 bool noambig()(double x){return false;}

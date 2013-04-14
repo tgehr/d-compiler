@@ -1,10 +1,6 @@
 
-/+template ID(alias d){ alias d ID; }
-template boo(){ alias ID!(x=>2) boo;}
-
-pragma(msg, boo!()(2));+/
-
-/+struct ReturnTypeLambdaParameterIfti{
+/+
+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
 	void main() {
 		foo((int a)=>a, b=>1.0); // foo!(double function(int))

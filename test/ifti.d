@@ -1,3 +1,8 @@
+template ID(alias d){ alias d ID; }
+template boz(int a){ alias ID!(x=>x+a) boz; }
+template boo(){ alias boz!2 boo; }
+static assert(boo(2)==4 && boo!()(3)==5);
+pragma(msg, "callthroughalias: ", boo(2)+boo!()(3));
 
 int ambigtmplfun(double a)(int b){ return 1; }
 int ambigtmplfun(int a)(double b){ return 2; }
