@@ -1,5 +1,4 @@
 
-
 /+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
 	void main() {
@@ -12,15 +11,7 @@
 	pragma(msg, foo(a=>1,a=>1.0));
 }+/
 
-/+
-struct TemplatedConstructor(T){
-	this(T)(T arg){}
-	static create(){
-		return TemplatedConstructor(2); // TODO: should work
-	}
-}
-pragma(msg, TemplatedConstructor!int);
-+/
+
 /+
 template forward(args...)
 {
