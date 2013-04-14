@@ -1950,13 +1950,13 @@ class TemplateInstanceDecl: Declaration{
 		//foreach(i,ref a;iftiEponymousParameters[0..min($,iftiArgs.length)]){
 		auto numt = iftiEponymousParameters.filter!((a){
 				if(!a.type) return false; // TODO: eliminate possibility?
-				auto mt=a.type.isMatcherTy();
+				auto mt=a.type.getHeadUnqual().isMatcherTy();
 				return mt && mt.which==WhichTemplateParameter.tuple;
 			}).walkLength;
 		for(size_t i=0,j=0;i<iftiEponymousParameters.length&&j<=iftiArgs.length;){
 			auto a=iftiEponymousParameters[i];
 			if(!a.type) break; // TODO: eliminate possibility?
-			auto mt = a.type.isMatcherTy();
+			auto mt = a.type.getHeadUnqual().isMatcherTy();
 			if(mt && mt.which==WhichTemplateParameter.tuple){
 				auto num=min(iftiArgs.length-j,
 				             numt+iftiArgs.length-iftiEponymousParameters.length);
@@ -5995,13 +5995,8 @@ mixin template Semantic(T) if(is(T==Type)){
 		mixin(RefConvertsTo!q{bool l2r; this, rhs, num});
 		mixin(RefConvertsTo!q{bool r2l; rhs, this, num});
 
-		if(l2r ^ r2l){
-			r = r2l ? this : rhs;
-			if(!num){
-				STC stc = this.getHeadSTC() & rhs.getHeadSTC();
-				r = r.getHeadUnqual().applySTC(stc);
-			}
-		}
+		if(l2r ^ r2l) r = r2l ? this : rhs;
+
 		return r.independent;
 	}
 
@@ -6027,7 +6022,10 @@ mixin template Semantic(T) if(is(T==Type)){
 		return null.independent!Type;
 	}
 
-	Dependent!Type unify(Type rhs){ return combine(rhs); }
+	Dependent!Type unify(Type rhs){
+		if(rhs.isQualifiedTy()) return rhs.unify(this);
+		return combine(rhs);
+	}
 
 	/* members
 	 */
@@ -6873,14 +6871,22 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 
 	override Dependent!void typeMatch(Type from){
 		assert(!!from);
-		static if(is(T==ConstTy)){
-			if(auto imm = from.isImmutableTy()) from=imm.ty;
-			else if(auto ccc = from.isConstTy()) from=ccc.ty;
-			else if(auto ino = from.isInoutTy()) from=ino.ty;
+		static if(is(T==ConstTy)||is(T==InoutTy)){
+			if(auto im=from.isImmutableTy()) from=im.ty;
+			else{
+				from=from.inConstContext();
+				static if(is(T==InoutTy)) from=from.inInoutContext();
+			}
 		}else if(auto ccc = mixin(`from.is`~qual~`Ty()`)) from=ccc.ty;
-		//mixin(`ty.getTail`~qual~`().typeMatch`)(from);
 		mixin(TypeMatch!q{_;mixin(`ty.getTail`~qual~`()`), from});
 		return indepvoid;
+	}
+
+	override Dependent!Type unify(Type rhs){
+		auto stc=getHeadSTC();
+		auto rstc=rhs.getHeadSTC();
+		mixin(Unify!q{auto unqual;getHeadUnqual(),rhs.getHeadUnqual()});
+		return unqual.applySTC(stc).refCombine(unqual.applySTC(rstc),0);
 	}
 
 	override bool hasPseudoTypes(){
@@ -9699,6 +9705,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		//mixin(SemProp!q{type});
 		if(auto nr=type.needRetry) { needRetry = nr; mixin(SemRet); }
 		mixin(PropErr!q{type});
+		if(stc&STCstatic) this_ = null;
 		mixin(MatchCallHelper!q{auto r; type, sc, loc, this_, args, context});
 		return (r ? this : Declaration.init).independent;
 	}
