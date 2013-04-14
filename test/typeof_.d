@@ -1,12 +1,16 @@
-struct S{
+class S{
 	template s(){
-		int s = 2;
+		int s = 2; // TODO: error
 	}
-	struct G{
+	int x;
+	void foo(){
+		s!()=3;
+	}
+	class G{
 		//pragma(msg, typeof(s));
 		void foo(){
-			pragma(msg, S.s!());// TODO
-			s!();
+			// pragma(msg, S.s!());
+			x = 2; // TODO
 		}
 	}
 	static void foo(){

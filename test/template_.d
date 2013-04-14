@@ -320,9 +320,9 @@ class TemplatedLocalVariable{
 	}
 	static void fooz(){
 		TemplatedLocalVariable s;
-		TemplatedLocalVariable.foo!().z=2; // TODO!
+		TemplatedLocalVariable.foo!().z=2;
 		s.foo!(33).z=2; // error
-		foo!().z=2;
+		foo!().z=2;     // TODO (shouldn't show anything)
 		s.foo!().z=2;
 	}
 	void bar(){
@@ -537,7 +537,7 @@ struct S{
 			alias c TT;
 		}
 	}
-	immutable int c=222;
+	static immutable int c=222; // // TODO: should it work without static?
 	pragma(msg, a);
 	//int a;
 	//int foo(){return a+2;}
