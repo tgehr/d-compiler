@@ -6,6 +6,8 @@ import lexer, parser, expression, scope_, semantic, visitors, util;
 
 import analyze;
 
+import rope_;
+
 abstract class Statement: Node{
 	override @property string kind(){return "statement";}
 

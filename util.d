@@ -341,7 +341,7 @@ bool any(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool)
 	return false;
 }
 bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
-	foreach(/+auto+/ref x;range) if(!a(x)) return false;
+	foreach(x;range) if(!a(x)) return false;
 	return true;
 }
 

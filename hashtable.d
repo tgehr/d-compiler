@@ -293,7 +293,7 @@ size_t FNV(size_t data, size_t start=fnvb){
 size_t FNVred(R)(R i){
 	if(!i.length) return fnvb;
 	auto r = FNV(i[0].templateParameterToHash());
-	foreach(x; i[1..$]) r = FNV(x.templateParameterToHash(), r);
+	foreach(x; i[1../*$*/i.length]) r = FNV(x.templateParameterToHash(), r); // TODO: update compiler, then dollar will work for ropes
 	return r;
 }
 

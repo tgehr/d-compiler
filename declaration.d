@@ -8,6 +8,7 @@ import lexer, parser, expression, statement, type, scope_, semantic, visitors, u
 import analyze;
 
 import variant;
+import rope_;
 import interpret, error; // byteCompile
 
 abstract class Declaration: Statement{

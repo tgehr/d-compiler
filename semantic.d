@@ -2039,8 +2039,9 @@ class TemplateInstanceDecl: Declaration{
 				alias util.any any;
 				if(any!(a=>a.type is Type.get!void())(iftiArgs[j..j+num])) break;
 				//TODO: gc allocation
-				auto types = map!(_=>_.type.getHeadUnqual())(iftiArgs[j..j+num]).array();
+				auto types = map!(_=>_.type.getHeadUnqual())(iftiArgs[j..j+num]).rope;
 				// mt.typeMatch(New!TypeTuple(types));
+				// TODO: this might be expensive:
 				mixin(TypeMatch!q{_; mt, New!TypeTuple(types)});
 				i++;
 				j+=num;
@@ -2310,6 +2311,7 @@ class TemplateInstanceDecl: Declaration{
 	mixin Visitors;
 }
 
+import rope_;
 interface Tuple{
 	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index)
 		in{assert(index<length);}
@@ -2320,10 +2322,12 @@ interface Tuple{
 
 	int opApply(scope int delegate(Expression) dg);
 
-
 	static Expression[] expand(T...)(Expression[] a, ref T replicate){
-		// TODO: this is very naive and inefficient
-		Expression[] r;
+		return expand(a.rope,replicate).array; // TODO: this is a roundabout way to do this.
+	}
+
+	static Rope!Expression expand(T...)(Rope!Expression a, ref T replicate){
+		Rope!Expression r;
 		T rep;
 		typeof(r.length) index = 0;
 		foreach(i,x;a){
@@ -2334,7 +2338,7 @@ interface Tuple{
 					et.accessCheckSymbols();
 					r~=a[index..i]~et.exprs;
 				}else if(auto tt=x.isTypeTuple())
-					r~=a[index..i]~cast(Expression[])tt.types;
+					r~=a[index..i]~tt.types.generalize!Expression; // TODO: ok?
 				foreach(j,ref rr;rep){
 					rr~=replicate[j][index..i];
 					foreach(k;0..tp.length) rr~=replicate[j][i];
@@ -2346,7 +2350,7 @@ interface Tuple{
 			foreach(j,ref rr;rep) rr~=replicate[j][index..$];
 			foreach(j,rr;rep) replicate[j]=rr;// bug: simple assignment does not work
 		}
-		return index?r~=a[index..$]:a;
+		return index?r~=a[index..a.length]:a; // TODO: dollar
 	}
 
 	static VarDecl[] expand()(Scope sc, VarDecl[] a) in{ //templated as workaround
@@ -2388,18 +2392,22 @@ class ExpTuple: Expression, Tuple{
 		assert(all!(_=>_.sstate==SemState.completed)(exprs));
 	}body{
 		// TODO: gc allocation
-		this.exprs = new Expression[exprs.length];
-		foreach(i, ref x; this.exprs) x=exprs[i].clone(sc, InContext.passedToTemplateAndOrAliased, loc);
-		exprs=Tuple.expand(exprs);
+		auto array = new Expression[exprs.length];
+		foreach(i, ref x; array) x=exprs[i].clone(sc, InContext.passedToTemplateAndOrAliased, loc);
+		this.exprs=Tuple.expand(array.ropeCapture);
 	}
 
 	this(Scope sc, ulong len, Expression exp)in{
 		assert(exp.sstate == SemState.completed);
 		assert(len<=size_t.max);
 	}body{
-		// TODO: gc allocation
-		exprs = new Expression[cast(size_t)len];
-		foreach(ref x; exprs) x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc);
+		exprs = std.range.repeat(exp,cast(size_t)len).map!(x=>x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc)).rope;
+	}
+
+	/+private+/ this(Scope sc, Rope!Expression exprs, Type type){// TODO: report DMD bug
+		this.exprs=exprs;
+		this.type=type;
+		sstate = SemState.completed;
 	}
 
 	override Tuple isTuple(){return this;}
@@ -2432,7 +2440,9 @@ class ExpTuple: Expression, Tuple{
 		assert(a<=b && b<=length);
 	}body{
 		assert(sstate == SemState.completed);
-		return New!ExpTuple(sc,exprs[cast(size_t)a..cast(size_t)b]);
+		assert(cast(TypeTuple)type);
+		auto types = (cast(TypeTuple)cast(void*)type).types;
+		return New!ExpTuple(sc,exprs[cast(size_t)a..cast(size_t)b],New!TypeTuple(types[cast(size_t)a..cast(size_t)b]));
 	}
 	@property ulong length(){ return exprs.length;}
 
@@ -2446,24 +2456,18 @@ class ExpTuple: Expression, Tuple{
 		alias util.all all;
 		// the empty tuple is an expression except if a type is requested
 		if(exprs.length && all!(_=>cast(bool)_.isType())(exprs)){
-			auto r=New!TypeTuple(cast(Type[])exprs);
+			auto r=New!TypeTuple(cast(Rope!Type)exprs); // TODO: ok?
 			assert(r.sstate == SemState.completed);
 			mixin(RewEplg!q{r});
 		}
-		// TODO: gc allocation
-		Type[] tt = new Type[exprs.length];
-		foreach(i,x;exprs){
-			if(auto ty=x.isType()) tt[i]=ty;
-			else tt[i]=x.type;
-		}
+		auto tt = exprs.map!(x=>x.isType() ? assert(cast(Type)x), cast(Type)cast(void*)x : x.type).rope;
 		type = New!TypeTuple(tt);
 		dontConstFold();
 		mixin(SemEplg);
 	}
 
 	override ExpTuple clone(Scope sc, InContext inContext, const ref Location loc){
-		auto r = ddup();
-		foreach(ref x; r.exprs) x = x.clone(sc,InContext.passedToTemplateAndOrAliased,loc);
+		auto r = New!ExpTuple(sc, exprs.map!(x => x.clone(sc,InContext.passedToTemplateAndOrAliased,loc)).rope, type);
 		r.loc = loc;
 		r.sstate = SemState.begin;
 		r.semantic(sc);
@@ -2505,7 +2509,7 @@ class ExpTuple: Expression, Tuple{
 	}
 
 private:
-	Expression[] exprs;
+	Rope!Expression exprs;
 }
 
 // TODO: inherit from comma expression as soon as tuple expansion works with it
@@ -2582,7 +2586,7 @@ mixin template TupleImplConvTo(alias exprs){
 
 
 class TypeTuple: Type, Tuple{
-	this(Type[] types)in{
+	this(Rope!Type types)in{
 		alias util.all all;
 		assert(all!(_=>_.sstate==SemState.completed)(types));
 		assert(all!(_=>!_.isTuple())(types));
@@ -2643,7 +2647,7 @@ class TypeTuple: Type, Tuple{
 				mixin(Combine!q{auto r; types[i], tpl.types[i]});
 				ts[i]=r;
 			}
-			return New!TypeTuple(ts).independent!Type;
+			return New!TypeTuple(ts.ropeCapture).independent!Type;
 		}
 		return null.independent!Type;
 	}
@@ -2667,7 +2671,7 @@ class TypeTuple: Type, Tuple{
 	}
 
 private:
-	Type[] types;
+	Rope!Type types;
 }
 
 
@@ -6506,9 +6510,12 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 					//TODO: gc allocation
 					alias util.all all;
 					if(i+1==params.length&&all!(_=>_.type !is null)(ft.params[i..$])){
-						auto types = map!(_=>_.type)(ft.params[i..$]).array();
+						import rope_;
+						auto types = rope(map!(_=>_.type)(ft.params[i..$]));
 						//mt.typeMatch(New!TypeTuple(types));
+						// TODO: this might be expensive:
 						mixin(TypeMatch!q{_; mt, New!TypeTuple(types)});
+
 					}
 					break;
 				}

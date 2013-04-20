@@ -8,6 +8,7 @@ import scope_, semantic, visitors, vrange, util;
 import analyze;
 
 import variant;
+import rope_;
 
 // Node champ;
 
