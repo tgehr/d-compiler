@@ -14,6 +14,9 @@ enum binaryOps=mixin({string r="[";
 	}());
 
 
+enum overloadableUnary = ["-","+","~","*","++","--"];
+enum overloadableBinary = ["+","-","*","/","%","^^","&","|","^","<<",">>",">>>","~","in"];
+
 // expression parser:
 
 // left binding power
@@ -158,3 +161,4 @@ bool isArithmeticOp(TokenType op){
 			return false;
 	}
 }
+

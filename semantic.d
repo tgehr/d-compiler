@@ -142,7 +142,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 			r~=mixin(X!q{
 				static if(is(typeof(@(t)): Node)){
 					@(Doit!t)
-					if(@(t).sstate != SemState.completed) mixin(PropRetryNoRew!q{sc=@(sc);@(t)});
+					if(@(t).sstate != SemState.completed) mixin(PropRetryNoRew!q{@(t)});
 					else{
 						static if(is(typeof(@(t)): Expression) && !is(typeof(@(t)):Type)
 						          &&(!is(typeof(this):Expression)||is(typeof(this):Type))){
@@ -152,7 +152,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 				}else{
 					foreach(ref x;@(t)){
 						@(Doit!q{x})
-						if(x.sstate != SemState.completed) mixin(PropRetryNoRew!q{sc=@(sc);x});
+						if(x.sstate != SemState.completed) mixin(PropRetryNoRew!q{x});
 						else{
 							static if(is(typeof(x): Expression) && !is(typeof(x):Type)
 							          &&(!is(typeof(this):Expression)||is(typeof(this):Type)))
@@ -650,6 +650,10 @@ mixin template Semantic(T) if(is(T==Expression)){
 		return false;
 	}
 
+	final bool canMutate(){
+		return isLvalue() && type.isMutable();
+	}
+
 	bool checkMutate(Scope sc, ref Location l){
 		if(checkLvalue(sc,l)){
 			if(type.isMutable()) return true;
@@ -866,6 +870,13 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 		return r;
 	}
 
+	static Expression polyStringFactory(string value){
+		Expression r = factory(Variant(value), Type.get!string());
+		assert(cast(LiteralExp)r);
+		(cast(LiteralExp)cast(void*)r).lit.type = Tok!"``";
+		return r;
+	}
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		type = value.getType();
@@ -1028,15 +1039,65 @@ mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
 				mixin(SemEplg);
 			}
 		}else mixin(ErrEplg);
+		// TODO: (complicated) operator overloading
 		sc.error(format("type '%s' does not support postfix "~TokChars!op,e.type),loc);
 		mixin(ErrEplg);
 	}
+}
+
+mixin template OpOverloadMembers(int alternatives=1){
+	Expression opoverload=null;
+	Expression oofun=null;
+	GaggingScope oosc=null;
+}
+
+template BuildOpOver(string opover,string e, string name, string tmargs){
+	enum BuildOpOver = mixin(X!q{
+		if(!@(opover)){
+			auto id=New!Identifier("@(name)");
+			id.loc=loc;
+			@(opover)=New!(BinaryExp!(Tok!"."))(@(e),id);
+			@(opover).loc=loc;
+			@({
+				if(tmargs.length) return mixin(X!q{
+					@(opover)=New!TemplateInstanceExp(@(opover),@(tmargs));
+					@(opover).loc=loc;
+				});
+				return "";
+			}());
+		}
+
+	});
+}
+
+template OpOverload(string name, string tmargs="", string args="", string e="e", string sc="sc"){
+	enum OpOverload = mixin(X!q{
+		@(BuildOpOver!("opoverload",e,name,tmargs));
+		if(!oosc) oosc=New!GaggingScope(@(sc));
+		opoverload.willCall();
+		mixin(SemChldPar!q{sc=oosc;opoverload});
+		auto args = @(args);
+		if(!oofun&&opoverload.sstate==SemState.completed){
+			mixin(MatchCall!q{oofun; opoverload, @(sc), loc, args});
+			if(!oofun) mixin(SetErr!q{opoverload});
+		}
+		if(oofun){
+			mixin(SemChldPar!q{sc=oosc;oofun});
+			oosc=null;
+			auto r=New!CallExp(oofun,args);
+			r.loc=loc;
+			r.semantic(sc);
+			mixin(RewEplg!q{r});
+		}
+	});
 }
 
 mixin template Semantic(T) if(is(T==IndexExp)){
 	DollarScope ascope;
 	mixin DollarExp.DollarProviderImpl!e;
 	mixin ContextSensitive;
+
+	mixin OpOverloadMembers;
 
 	override void semantic(Scope sc_){
 		{alias sc_ sc;mixin(SemPrlg);}
@@ -1095,7 +1156,8 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 			}else if(ty is Type.get!EmptyArray()){
 				type = Type.get!void();
 				isEmpty = true;
-			}else{ // TODO: operator overloading
+			}else{
+				mixin(OpOverload!("opIndex","","a","e","sc_"));
 				sc.error(format("'%s' is not indexable", e.type),loc);
 				mixin(ErrEplg);
 			} // it is a dynamic array, an array or pointer type
@@ -1238,6 +1300,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 
 	DollarScope ascope;
 	mixin DollarExp.DollarProviderImpl!e;
+	mixin OpOverloadMembers;
 
 	override void semantic(Scope sc_){
 		{alias sc_ sc; mixin(SemPrlg);}
@@ -1273,7 +1336,9 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 			}else if(ty is Type.get!EmptyArray()){
 				type = Type.get!void();
 				isEmpty = true;
-			}else{ // TODO: operator overloading
+			}else{
+				// TODO: this gc allocates
+				mixin(OpOverload!("opSlice","",q{[l,r]},"e","sc_"));
 				sc.error(format("'%s' is not sliceable",e.type),loc);
 				mixin(ErrEplg);
 			} // it is a dynamic array, an array or pointer type
@@ -1397,7 +1462,9 @@ mixin template Semantic(T) if(is(T==AssertExp)){
 }
 
 mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
+	static if(overloadableUnary.canFind(TokChars!S)) mixin OpOverloadMembers;
 	static if(is(T _==UnaryExp!S,TokenType S)):
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		static if(S==Tok!"&") e.willTakeAddress();
@@ -1416,20 +1483,17 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				mixin(SemEplg);
 			}
 		}else static if(S==Tok!"++" || S==Tok!"--"){
-			if(e.checkMutate(sc,loc)){
+			if(e.canMutate()){
 				auto v = Type.get!void();
 				if(ty.isBasicType()&&e !is v&&ty !is Type.get!bool()||ty.isPointerTy()){
 					type = e.type;
 					mixin(SemEplg);
 				}
-			}else mixin(ErrEplg);
+			}
 		}else static if(S==Tok!"*"){
 			if(auto p=ty.isPointerTy()){
 				type = p.ty;
 				mixin(SemEplg);
-			}else{
-				sc.error(format("cannot dereference expression '%s' of non-pointer type '%s'",e.loc.rep,e.type),loc);
-				mixin(ErrEplg);
 			}
 		}else static if(S==Tok!"&"){
 			if(auto lv = e.isLvalue()){
@@ -1491,12 +1555,20 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				mixin(ErrEplg);
 			}
 		}else static assert(0);
-		// TODO: operator overloading
+		static if(overloadableUnary.canFind(TokChars!S)){
+			// TODO: this gc allocates
+			mixin(OpOverload!("opUnary",q{
+				[LiteralExp.polyStringFactory(TokChars!S)]
+			},q{(Expression[]).init}));
+		}
 		// TODO: array ops
-		static if(S!=Tok!"++" && S!=Tok!"--"){
-			sc.error(format("invalid argument type '%s' to unary "~TokChars!S,e.type),loc);
+		static if(S==Tok!"*"){
+			sc.error(format("cannot dereference expression '%s' of non-pointer type '%s'",e.loc.rep,e.type),loc);
+		}else static if(S==Tok!"++" || S==Tok!"--"){
+			if(e.checkMutate(sc,loc)) // TODO: it would be better to first check if the type is fully off
+				sc.error(format("type '%s' does not support prefix "~TokChars!S,e.type),loc);
 		}else{
-			sc.error(format("type '%s' does not support prefix "~TokChars!S,e.type),loc);
+			sc.error(format("invalid argument type '%s' to unary "~TokChars!S,e.type),loc);
 		}
 		mixin(ErrEplg);
 	}
@@ -2171,7 +2243,11 @@ class TemplateInstanceDecl: Declaration{
 		assert(!constraint||constraint.type is Type.get!bool());
 		assert(!constraint||constraint.isConstant() && constraint.interpretV());
 		assert(bdy !is parent.bdy);
-		mixin(SemChld!q{sc=bdy.scope_;bdy});
+
+		scope(exit) if(sstate == SemState.error)
+            sc_.note("instantiated here",instantiation.loc);// TODO: improve
+
+		{alias sc_ sc;mixin(SemChld!q{sc=bdy.scope_;bdy});}
 		mixin(SemEplg);
 	}
 
@@ -2883,6 +2959,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(auto r=e.isUFCSCallExp()){
 			auto tmpl = New!TemplateInstanceExp(r.e,args);
 			tmpl.loc = loc;
+			tmpl.willCall();
 			r.instantiate(tmpl, inContext==InContext.called);
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
@@ -2929,7 +3006,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		assert(!th_);
 		enum SemRet = q{ return this.independent!Expression; };
 		assert(inContext==InContext.called);
-		assert(sstate == SemState.completed);
+		assert(sstate == SemState.completed || sstate == SemState.begin);
 		sstate = SemState.begin;
 		iftiArgs = funargs;
 
@@ -2991,11 +3068,12 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 		mixin(PropErr!q{args});
 		// ! changing meaning of 'sym'
-		if(!inst.finishedInstantiation()) inst.finishInstantiation(true); // start analysis
+		if(!inst.finishedInstantiation()) inst.finishInstantiation(!matchOnly); // start analysis?
 		if(sc.handler.showsEffect&&inst.isGagged) inst.ungag();
 		sym = New!Symbol(inst);
 		sym.loc = loc;
 		sym.accessCheck = accessCheck;
+		if(matchOnly) sym.makeWeak(); // do not propagate errors
 		transferContext(sym);
 		inst.instantiation = sym; // transfer ownership
 
@@ -3085,16 +3163,34 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		}
 	}
 
+	public final void matchingOnly(){
+		matchOnly = true;
+	}
+
 private:
 	Expression res;
 	Identifier eponymous;
 	Declaration inst;
+
+	bool matchOnly = false;
 }
 
 mixin template Semantic(T) if(is(T==ABinaryExp)){
 }
 mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryExp!(Tok!"."))){
 	static if(is(T _==BinaryExp!S,TokenType S)):
+
+	static if(overloadableBinary.canFind(TokChars!S) || TokChars!S[$-1]=='=' &&
+	          overloadableBinary.canFind(TokChars!S[0..$-1])||S==Tok!"=="||S==Tok!"!="){
+		mixin OpOverloadMembers;
+		static if(overloadableBinary.canFind(TokChars!S)){
+			Expression opoverloadR;
+			Expression oofunR;
+		}
+	}
+	static if(S==Tok!"!in"){
+		Expression opin;
+	}
 
 	static if(S==Tok!"||"||S==Tok!"&&") bool lazyConditionalSemantic = false;
 
@@ -3135,7 +3231,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		}~SemEplg;
 		static if(isAssignOp(S)){
 			// TODO: properties, array ops \ ~=
-			if(e1.checkMutate(sc,loc)){
+			if(e1.canMutate()){
 				type = e1.type;
 				static if(S==Tok!"~="){
 					if(auto tt=type.isDynArrTy()){
@@ -3143,19 +3239,14 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						mixin(ImplConvertsTo!q{auto e2toelt; e2, elt});
 						if(e2toelt) e2=e2.implicitlyConvertTo(elt);
 						else e2=e2.implicitlyConvertTo(type);
-					}else{
-						if(e1.finishDeduction(sc) && e2.finishDeduction(sc))
-						// TODO: operator overloading
-							sc.error(format("cannot append to expression of type '%s'", type),loc);
-						mixin(ErrEplg);
-					}
+					}else goto Lnomatch;
 				}else static if(S==Tok!"+=" || S==Tok!"-="){
 					if(auto tt=type.isPointerTy()){
 						auto s_t = Type.get!Size_t();
 						assert(tt.getSizeof() == s_t.getSizeof());
 						e2=e2.implicitlyConvertTo(s_t);
 					}else e2=e2.implicitlyConvertTo(type);
-				}else e2=e2.implicitlyConvertTo(type);
+					}else e2=e2.implicitlyConvertTo(type);
 				mixin(SemChld!q{e2});
 				mixin(ConstFold!q{e2});
 				/+if(e2.implicitlyConvertsTo(type)){
@@ -3166,11 +3257,40 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					mixin(ErrEplg);
 				}+/
 				mixin(.SemEplg); // don't const fold lhs
-			}else mixin(ErrEplg);
-			//sc.error(format("expression '%s' is not assignable",e1.loc.rep),loc);
-		}else static if(S==Tok!"in"||S==Tok!"!in"){
-			type = Type.get!bool();
-			super.semantic(sc);// TODO: implement
+			}else{
+			Lnomatch:
+				// TODO: opEquals
+				static if(overloadableBinary.canFind(TokChars!S[0..$-1])&&TokChars!S[$-1]=='='){
+					mixin(OpOverload!("opOpAssign",q{
+								[LiteralExp.polyStringFactory(TokChars!S[0..$-1])]
+									},"[e2]","e1"));
+				}
+				if(!e1.checkMutate(sc,loc)) mixin(ErrEplg);
+				static if(S==Tok!"~="){
+					if(e1.finishDeduction(sc) && e2.finishDeduction(sc)){
+						// TODO: allocation
+						sc.error(format("cannot append to expression of type '%s'", type),loc);
+					}
+				}
+				mixin(ErrEplg);
+			}
+		//sc.error(format("expression '%s' is not assignable",e1.loc.rep),loc);
+		}else static if(S==Tok!"in"){
+			// TODO
+		}else static if(S==Tok!"!in"){
+			if(!opin){
+				opin = New!(BinaryExp!(Tok!"in"))(e1,e2);
+				opin.loc=loc;
+			}
+			mixin(SemChld!q{opin});
+			auto bl = Type.get!bool();
+			mixin(ConvertsTo!q{bool conv; opin, bl});
+			if(conv){
+				auto r = New!(UnaryExp!(Tok!"!"))(opin);
+				r.loc=loc;
+				r.semantic(sc);
+				mixin(RewEplg!q{r});
+			}
 		}else static if(isRelationalOp(S)){
 			Type ty = null;
 			//bool conv1 = e2.implicitlyConvertsTo(e1.type);
@@ -3473,10 +3593,82 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			type=e2.type;
 			mixin(SemEplg);
 		}else{
-			// TODO: operator overloading
-			if(e1.finishDeduction(sc) && e2.finishDeduction(sc))
-				sc.error(format("incompatible types '%s' and '%s' for binary "~TokChars!S,e1.type,e2.type),loc);
-			mixin(ErrEplg);
+			if(!e1.finishDeduction(sc) || !e2.finishDeduction(sc)) goto Lerr;
+
+			// operator overloading with opBinary and opBinaryRight
+			static if(overloadableBinary.canFind(TokChars!S)){
+				// TODO: this allocates on every iteration
+				mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
+				      q{[LiteralExp.polyStringFactory(TokChars!S)]}));
+				mixin(BuildOpOver!("opoverload","e1","opBinary",
+				      q{[LiteralExp.polyStringFactory(TokChars!S)]}));
+				if(!oosc) oosc=New!GaggingScope(sc);
+
+				opoverloadR.willCall();
+				opoverload.willCall();
+				if(auto ti=opoverloadR.isTemplateInstanceExp()) ti.matchingOnly();
+				if(auto ti=opoverload.isTemplateInstanceExp()) ti.matchingOnly();
+
+				mixin(SemChldPar!q{sc=oosc;opoverloadR});
+				mixin(SemChldPar!q{sc=oosc;opoverload});
+
+				if(!oofun&&opoverload.sstate==SemState.completed){
+					bool other = opoverloadR.sstate==SemState.completed;
+					if(opoverload.isUFCSCallExp()) other = true;
+					auto oofund=opoverload.matchCall(other?oosc:sc, loc, [e2]);
+					if(oofund.dependee.node){
+						mixin(PropRetry!q{oofund.dependee.node});
+						if(!other) mixin(PropErr!q{oofund.dependee.node});
+					}
+					oofun=oofund.value;
+					if(!oofun) mixin(SetErr!q{opoverload});
+				}
+				if(oofun) mixin(SemChldPar!q{sc=oosc;oofun});
+
+				if(!oofunR&&opoverloadR.sstate==SemState.completed){
+					auto oofunRd=opoverloadR.matchCall(oosc, loc, [e1]);
+					if(oofunRd.dependee.node){
+						mixin(PropRetry!q{oofunRd.dependee.node});
+					}
+					oofunR=oofunRd.value;
+					if(!oofunR) mixin(SetErr!q{opoverloadR});
+				}
+				if(oofunR) mixin(SemChldPar!q{sc=oosc;oofunR});
+
+				MatchContext context, contextR;
+				Expression r;
+
+				if(oofunR && oofunR.sstate == SemState.completed)
+					oofunR.matchCallHelper(oosc, loc, null, [e1], contextR).force;
+				else contextR.match=Match.none;
+				if(oofun && oofun.sstate == SemState.completed)
+					oofun.matchCallHelper(oosc, loc, null, [e1], context).force;
+				else context.match=Match.none;
+				if(contextR.match!=context.match){
+					if(contextR.match>context.match){
+						opoverloadR=null;
+						mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
+						      q{[LiteralExp.polyStringFactory(TokChars!S)]}));
+						r=New!CallExp(opoverloadR,[e1]);
+						r.loc=loc;
+					}else{
+						r=New!CallExp(oofun,[e2]);
+						r.loc=loc;
+					}
+				}else if(context.match!=Match.none){
+					// TODO: consider specialization
+					sc.error(format(mixin(X!"Both '%s.opBinary!\"@(TokChars!S)\"(%s)' and '%s.opBinaryRight!\"@(TokChars!S)\"(%s)' are equally well matching operator overloads"),e1.loc.rep,e2.loc.rep,e2.loc.rep,e1.loc.rep),loc);
+					mixin(ErrEplg);
+				}
+				oosc=null;
+				if(r){r.semantic(sc);mixin(RewEplg!q{r});}
+			}
+			static if(S==Tok!"in"){
+				type = Type.get!bool();
+				super.semantic(sc);// TODO: implement
+			}
+			sc.error(format("incompatible types '%s' and '%s' for binary "~TokChars!S,e1.type,e2.type),loc);
+		Lerr:mixin(ErrEplg);
 		}
 	}
 
@@ -3764,6 +3956,7 @@ class Symbol: Expression{ // semantic node
 
 	// TODO: compress all these bools into a bitfield?
 	bool isStrong;// is symbol dependent on semantic analysis of its meaning
+	bool isWeak;
 	bool isFunctionLiteral; // does symbol own 'meaning'
 	bool isSymbolMatcher;
 	mixin ContextSensitive;
@@ -3799,6 +3992,9 @@ class Symbol: Expression{ // semantic node
 	void makeStrong(){
 		if(!isStrong) sstate = SemState.begin;
 		isStrong = true;
+	}
+	void makeWeak(){
+		isWeak = true;
 	}
 
 	private enum CircErrMsg=q{if(circ){circErrMsg(); mixin(SemCheck);}};
@@ -3981,9 +4177,7 @@ class Symbol: Expression{ // semantic node
 			if(tm.sstate != SemState.started){
 				mixin(MeaningSemantic);
 				mixin(CircErrMsg);
-				if(meaning.sstate == SemState.error)
-					sc.note("instantiated here",loc);
-				mixin(SemProp!q{sc=meaning.scope_;meaning});
+				if(!isWeak) mixin(SemProp!q{sc=meaning.scope_;meaning});
 			}
 			type=Type.get!void();
 		}else if(auto ov=meaning.isOverloadSet()){
@@ -4306,6 +4500,7 @@ class UFCSCallExp: CallExp{
 mixin template Semantic(T) if(is(T==UFCSCallExp)){
 	this(Expression exp, Expression this_, bool incomplete)in{
 		assert(exp.isSymbol() || exp.isType());
+		assert(exp.sstate == SemState.completed);
 	}body{
 		super(exp, [this_]);
 		this.incomplete = incomplete;
@@ -4320,6 +4515,7 @@ mixin template Semantic(T) if(is(T==UFCSCallExp)){
 	}
 	final void instantiate(TemplateInstanceExp e, bool stillIncomplete)in{
 		assert(incomplete);
+		//assert(e.sstate == SemState.completed && e.inContext == InContext.called);
 	}body{
 		e.loc=this.e.loc.to(e.loc);
 		this.e=e;
@@ -4337,6 +4533,44 @@ mixin template Semantic(T) if(is(T==UFCSCallExp)){
 	override string toString(){
 		assert(e.toString().startsWith("."));
 		return args[0].toString()~e.toString()~"("~join(map!(to!string)(args[1..$]),",")~")";
+	}
+
+	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
+		if(!incomplete) return super.matchCallHelper(sc,loc,this_,args,context);
+		// TODO: this allocates
+		//if(e.sstate != SemState.completed) return this.independent!Expression; // TODO: this is a hack
+		auto nargs=this.args~args;
+		mixin(MatchCallHelper!q{auto m; e,sc,loc,this_,nargs,context});
+		if(!m) return null.independent!Expression;
+		if(m.sstate == SemState.completed)
+			return this.independent!Expression;
+		static class MatchCallWhenReady: Expression{
+			Expression exp;
+			Expression[] nargs;
+			this(Expression e, const ref Location l, Expression[] nargs){
+				exp = e; loc = l; this.nargs=nargs;
+			}
+			override void semantic(Scope sc){
+				mixin(SemPrlg);
+				mixin(SemChld!q{exp});
+				Expression r;
+				auto f=exp;
+				if(exp.isType()) r=exp;
+				else{
+					mixin(MatchCall!q{r; exp, sc, loc, nargs});
+					if(!r) mixin(ErrEplg);
+				}
+				if(rewrite) return; // TODO: ok?
+				r = New!UFCSCallExp(r,nargs[0],true);
+				r.loc = loc;
+				r.semantic(sc);
+				mixin(RewEplg!q{r});
+			}
+			override string toString(){ return exp.toString(); }
+		}
+		auto r = New!MatchCallWhenReady(m, loc, nargs);
+		r.semantic(sc);
+		return r.independent!Expression;
 	}
 }
 
@@ -8606,7 +8840,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		assert(parents[0].sstate==SemState.error||!!cast(AggregateTy)parents[0]);
 		bool hasExplicitBaseClass = false;
 		if(parents[0].sstate != SemState.error){
-			mixin(SemChld!q{sc=scope_;rparents[0]});
+			{alias scope_ sc;mixin(SemChld!q{rparents[0]});}
 			hasExplicitBaseClass = !!(cast(AggregateTy)cast(void*)parents[0]).decl.isClassDecl();
 		}else rparents[0].sstate = SemState.error;
 
@@ -8622,7 +8856,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				             );
 				mixin(SetErr!q{rparents[1+i]});
 			}
-			mixin(SemChldPar!q{sc=scope_;rparents[1+i]});
+			{alias scope_ sc;mixin(SemChldPar!q{rparents[1+i]});}
 		}
 		bool[FunctionDecl] hiders;
 	Lvtbl:
@@ -9664,10 +9898,10 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 				static if(x!="@disable") r|=mixin("STC"~x);
 			return r;
 		}();
-		type.stc|=mask&stc;
+		type.stc|=mask&stc&~(STCauto);
 	}
 
-	void analyzeType(){ type.semantic(scope_); }
+	void analyzeType(){ propagateSTC(); type.semantic(scope_); }
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -9905,6 +10139,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 
 	override void analyzeType(){
 		assert(!!scope_);
+		propagateSTC();
 		if(!fsc){
 			fsc = New!FunctionScope(scope_, this);
 			foreach(p; type.params){
