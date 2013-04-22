@@ -2318,7 +2318,7 @@ interface Tuple{
 	Expression slice(Scope sc, const ref Location loc, ulong a, ulong b)
 		in{assert(a<=b && b<length);}
 
-	@property ulong length();
+	@property size_t length();
 
 	int opApply(scope int delegate(Expression) dg);
 
@@ -2397,11 +2397,14 @@ class ExpTuple: Expression, Tuple{
 		this.exprs=Tuple.expand(array.ropeCapture);
 	}
 
-	this(Scope sc, ulong len, Expression exp)in{
+	this(Scope sc, size_t len, Expression exp)in{
 		assert(exp.sstate == SemState.completed);
 		assert(len<=size_t.max);
 	}body{
-		exprs = std.range.repeat(exp,cast(size_t)len).map!(x=>x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc)).rope;
+		// exprs = std.range.repeat(exp,cast(size_t)len).map!(x=>x.clone(sc, InContext.passedToTemplateAndOrAliased, loc)).rope; // TODO: report DMD bug
+		auto exprsa = new Expression[cast(size_t)len];
+		foreach(ref x;exprsa) x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc);
+		exprs = exprsa.ropeCapture;
 	}
 
 	/+private+/ this(Scope sc, Rope!Expression exprs, Type type){// TODO: report DMD bug
@@ -2444,7 +2447,7 @@ class ExpTuple: Expression, Tuple{
 		auto types = (cast(TypeTuple)cast(void*)type).types;
 		return New!ExpTuple(sc,exprs[cast(size_t)a..cast(size_t)b],New!TypeTuple(types[cast(size_t)a..cast(size_t)b]));
 	}
-	@property ulong length(){ return exprs.length;}
+	@property size_t length(){ return exprs.length;}
 
 	int opApply(scope int delegate(Expression) dg){
 		foreach(x; exprs) if(auto r = dg(x)) return r;
@@ -2460,14 +2463,24 @@ class ExpTuple: Expression, Tuple{
 			assert(r.sstate == SemState.completed);
 			mixin(RewEplg!q{r});
 		}
-		auto tt = exprs.map!(x=>x.isType() ? assert(cast(Type)x), cast(Type)cast(void*)x : x.type).rope;
+		// auto tt = exprs.map!(x=>x.isType() ? assert(cast(Type)x), cast(Type)cast(void*)x : x.type).rope; // TODO: report DMD bug
+		auto tta = new Type[exprs.length];
+		foreach(i,ref x;tta){
+			if(auto ty=exprs[i].isType()) x = ty;
+			else x = exprs[i].type;
+		}
+		auto tt = tta.ropeCapture;
 		type = New!TypeTuple(tt);
 		dontConstFold();
 		mixin(SemEplg);
 	}
 
 	override ExpTuple clone(Scope sc, InContext inContext, const ref Location loc){
-		auto r = New!ExpTuple(sc, exprs.map!(x => x.clone(sc,InContext.passedToTemplateAndOrAliased,loc)).rope, type);
+		// auto r = New!ExpTuple(sc, exprs.map!(x => x.clone(sc,InContext.passedToTemplateAndOrAliased,loc)).rope, type); // TODO: report DMD bug
+		auto exprsa = new Expression[exprs.length];
+		foreach(i,ref x;exprsa) x = exprs[i].clone(sc,InContext.passedToTemplateAndOrAliased,loc);
+
+		auto r = New!ExpTuple(sc, exprsa.rope, type);
 		r.loc = loc;
 		r.sstate = SemState.begin;
 		r.semantic(sc);
@@ -2611,7 +2624,7 @@ class TypeTuple: Type, Tuple{
 		assert(sstate == SemState.completed);
 		return New!TypeTuple(types[cast(size_t)a..cast(size_t)b]);
 	}
-	@property ulong length(){ return types.length;}
+	@property size_t length(){ return types.length;}
 
 	// workaround for lacking delegate contravariance
 	final override int opApply(scope int delegate(Expression) dg){

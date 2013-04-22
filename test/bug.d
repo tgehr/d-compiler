@@ -1,3 +1,10 @@
+/+@property int bar()=>2;
+
+struct PoorErrorMessage{
+static foo(){ return bar(); // TODO: fix error message
+}
+pragma(msg, foo());
+}+/
 
 /+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
