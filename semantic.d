@@ -150,15 +150,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 						}
 					}
 				}else{
-					foreach(ref x;@(t)){
-						@(Doit!q{x})
-						if(x.sstate != SemState.completed) mixin(PropRetryNoRew!q{x});
-						else{
-							static if(is(typeof(x): Expression) && !is(typeof(x):Type)
-							          &&(!is(typeof(this):Expression)||is(typeof(this):Type)))
-								if(x.sstate == SemState.completed) mixin(ConstFold!q{sc=@(sc);x});
-						}
-					}
+					foreach(ref x;@(t)) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
 					static if(is(typeof(@(t)): Expression[])){
 						pragma(msg, typeof(this)," @(t)");
 						@(t)=Tuple.expand(@(t));
@@ -2322,13 +2314,10 @@ interface Tuple{
 
 	int opApply(scope int delegate(Expression) dg);
 
-	static Expression[] expand(T...)(Expression[] a, ref T replicate){
-		return expand(a.rope,replicate).array; // TODO: this is a roundabout way to do this.
-	}
-
-	static Rope!Expression expand(T...)(Rope!Expression a, ref T replicate){
-		Rope!Expression r;
-		T rep;
+	static T expand(T,S...)(T a, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!X,X)){
+		T r;
+		S rep;
+		static if(is(T _:X[],X))enum isarray=true;else enum isarray=false;
 		typeof(r.length) index = 0;
 		foreach(i,x;a){
 			if(!x) continue;
@@ -2336,9 +2325,16 @@ interface Tuple{
 				foreach(y; tp) y.loc=x.loc;
 				if(auto et=x.isExpTuple()){
 					et.accessCheckSymbols();
-					r~=a[index..i]~et.exprs;
-				}else if(auto tt=x.isTypeTuple())
-					r~=a[index..i]~tt.types.generalize!Expression; // TODO: ok?
+					static if(isarray){
+						auto exprs=et.exprs.array;
+						if(et.scope_) foreach(ref exp;exprs) exp=exp.clone(et.scope_,InContext.passedToTemplateAndOrAliased,et.loc);
+					}else auto exprs=et.exprs;
+					r~=a[index..i]~exprs;
+				}else if(auto tt=x.isTypeTuple()){
+					static if(isarray) T tts=tt.types.generalize!Expression.array;
+					else T tts=tt.types.generalize!Expression;
+					r~=a[index..i]~tts; // TODO: ok?
+				}
 				foreach(j,ref rr;rep){
 					rr~=replicate[j][index..i];
 					foreach(k;0..tp.length) rr~=replicate[j][i];
@@ -2387,27 +2383,33 @@ class ExpTuple: Expression, Tuple{
 		assert(all!(_=>_.sstate==SemState.completed)(exprs));
 	}
 
+	private Scope scope_;
 	this(Scope sc, Expression[] exprs)in{
 		alias util.all all;
+		assert(sc);
 		assert(all!(_=>_.sstate==SemState.completed)(exprs));
 	}body{
 		// TODO: gc allocation
-		auto array = new Expression[exprs.length];
-		foreach(i, ref x; array) x=exprs[i].clone(sc, InContext.passedToTemplateAndOrAliased, loc);
-		this.exprs=Tuple.expand(array.ropeCapture);
+		this.scope_ = sc;
+		this.exprs = exprs.ropeCapture;
 	}
 
 	this(Scope sc, size_t len, Expression exp)in{
 		assert(exp.sstate == SemState.completed);
 		assert(len<=size_t.max);
+		assert(sc);
 	}body{
 		// exprs = std.range.repeat(exp,cast(size_t)len).map!(x=>x.clone(sc, InContext.passedToTemplateAndOrAliased, loc)).rope; // TODO: report DMD bug
+		this.scope_ = sc;
 		auto exprsa = new Expression[cast(size_t)len];
 		foreach(ref x;exprsa) x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc);
 		exprs = exprsa.ropeCapture;
 	}
 
-	/+private+/ this(Scope sc, Rope!Expression exprs, Type type){// TODO: report DMD bug
+	/+private+/ this(Scope sc, Rope!Expression exprs, Type type)in{
+		assert(sc);
+	}body{// TODO: report DMD bug
+		this.scope_=sc;
 		this.exprs=exprs;
 		this.type=type;
 		sstate = SemState.completed;
@@ -2477,10 +2479,11 @@ class ExpTuple: Expression, Tuple{
 
 	override ExpTuple clone(Scope sc, InContext inContext, const ref Location loc){
 		// auto r = New!ExpTuple(sc, exprs.map!(x => x.clone(sc,InContext.passedToTemplateAndOrAliased,loc)).rope, type); // TODO: report DMD bug
-		auto exprsa = new Expression[exprs.length];
+		/+auto exprsa = new Expression[exprs.length];
 		foreach(i,ref x;exprsa) x = exprs[i].clone(sc,InContext.passedToTemplateAndOrAliased,loc);
+		auto r = New!ExpTuple(sc, exprsa.ropeCapture, type);+/
 
-		auto r = New!ExpTuple(sc, exprsa.rope, type);
+		auto r = New!ExpTuple(sc, exprs, type); // TODO: why does this not work?
 		r.loc = loc;
 		r.sstate = SemState.begin;
 		r.semantic(sc);
