@@ -1,4 +1,10 @@
 
+bool lvalue(T)(lazy ref T v){
+	return is(typeof(&v));
+}
+int i;
+static assert(lvalue(i));// TODO: ok
+
 /+struct ReturnTypeLambdaParameterIfti{
 	void foo(T)(T a, T b) { }
 	void main() {
