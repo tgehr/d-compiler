@@ -49,6 +49,7 @@ template Rope(T){
 			return this = this ~ rhs;
 		}
 		Rope opSlice(size_t a, size_t b)in{assert(a<=b && b<=length);}body{
+			if(a==b) return Rope([]);
 			if(isArray()) return Rope(array[a..b]);
 			return Rope((*rope)[a..b]);
 		}
@@ -56,16 +57,23 @@ template Rope(T){
 			if(isArray()) return array[i];
 			return (*rope)[i];
 		}
-		Rope opIndexAssign(size_t i, T t){
+		Rope opIndexAssign(T t,size_t i){
 			if(isArray()) array[i]=t;
-			return Rope(*(*(*rope)[0..i]~new RopeImpl([t]))~(*rope)[i+1..length]);
+			return this[0..i]~Rope(new RopeImpl([t]))~this[i+1..length];
+		}
+		Rope opSliceAssign(Rope r, size_t a, size_t b){
+			if(isArray()&&r.isArray()){
+				array[a..b]=r.array[];
+				return this;
+			}
+			return this[0..a]~r~this[b..length]; // TODO: dollar
 		}
 
-		int opApply(int delegate(T) dg){
+		int opApply(scope int delegate(T) dg){
 			if(isArray()){foreach(x;array) if(auto r=dg(x)) return r; return 0; }
 			return rope.opApply(dg);
 		}
-		int opApply(int delegate(size_t,T) dg){
+		int opApply(scope int delegate(size_t,T) dg){
 			if(isArray()){foreach(i,x;array) if(auto r=dg(i,x)) return r; return 0; }
 			return rope.opApply(dg);
 		}
@@ -118,16 +126,46 @@ template Rope(T){
 			return new RopeImpl((*l)[a..l.length],(*r)[0..b-l.length]);
 		}
 
-		int opApply(int delegate(T) dg){
+		int opApply(scope int delegate(T) dg){
 			if(tag==Tag.Array){foreach(x;array) if(auto r=dg(x)) return r; return 0; }
 			if(auto r=l.opApply(dg)) return r;
 			return r.opApply(dg);
 		}
-		int opApply(int delegate(size_t,T) dg,size_t start=0){
-			if(tag==Tag.Array){foreach(i,x;array) if(auto r=dg(i,x)) return r; return 0; }
+		int opApply(scope int delegate(size_t,T) dg,size_t start=0){
+			if(tag==Tag.Array){foreach(i,x;array) if(auto r=dg(start+i,x)) return r; return 0; }
 			if(auto r=l.opApply(dg)) return r;
 			return r.opApply(dg,l.length);
 		}
+
+		// in-place update.
+		int unsafeByRef(scope int delegate(ref T) dg,size_t start=0){
+			if(tag==Tag.Array){foreach(ref x;array) if(auto r=dg(x)) return r; return 0; }
+			if(auto r=l.unsafeByRef(dg)) return r;
+			return r.unsafeByRef(dg,l.length);
+		}
+		int unsafeByRef(scope int delegate(size_t,ref T) dg,size_t start=0){
+			if(tag==Tag.Array){foreach(i,ref x;array) if(auto r=dg(start+i,x)) return r; return 0; }
+			if(auto r=l.unsafeByRef(dg)) return r;
+			return r.unsafeByRef(dg,l.length);			
+		}
 	}
 }
+
+// in-place update.
+struct UnsafeByRef(T){
+	Rope!T enc;
+	int opApply(scope int delegate(size_t,ref T) dg){
+		with(enc){
+			if(isArray()){foreach(i,ref x;array) if(auto r=dg(i,x)) return r; return 0; }
+			return rope.unsafeByRef(dg);
+		}
+	}
+	int opApply(scope int delegate(ref T) dg){
+		with(enc){
+			if(isArray()){foreach(ref x;array) if(auto r=dg(x)) return r; return 0; }
+			return rope.unsafeByRef(dg);
+		}
+	}
+}
+auto unsafeByRef(T)(Rope!T enc){ return UnsafeByRef!T(enc); }
 

@@ -380,8 +380,9 @@ class CallExp: TemporaryExp{
 }
 class TemplateInstanceExp: Expression{
 	Expression e;
-	Expression[] args;
-	this(Expression exp, Expression[] a){e=exp; args=a;}
+	Rope!Expression args;
+	this(Expression exp, Rope!Expression a){e=exp; args=a;}
+	this(Expression exp, Expression[] a){this(exp,a.ropeCapture);}
 	override string toString(){return _brk(e.toString()~"!"~(args.length!=1?"(":"")~join(map!(to!string)(args),",")~(args.length!=1?")":""));}
 
 	mixin DownCastMethod;

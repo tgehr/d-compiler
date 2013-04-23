@@ -337,7 +337,7 @@ auto maybe(alias a, T)(T arg){
 
 import std.range;
 bool any(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
-	foreach(/+auto+/ref x;range) if(a(x)) return true;
+	foreach(x;range) if(a(x)) return true;
 	return false;
 }
 bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
