@@ -1,3 +1,17 @@
+template CommonType(T...){
+	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }()};
+	static if(is(typeof(mixin(e)))) alias typeof(mixin(e)) CommonType;
+	else alias void CommonType;
+}
+
+pragma(msg, "CommonType: ",CommonType!(double,real));
+
+/+template MAlias(A,B){ alias A delegate(B) MAlias; }
+
+auto malias(A,B)(MAlias!(A,B) dg, B arg){ return dg(arg); }
+pragma(msg, malias((int x)=>x,3));+/
+
+/+
 /+@property int bar()=>2;
 
 struct PoorErrorMessage{
