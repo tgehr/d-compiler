@@ -62,11 +62,11 @@ template Rope(T){
 			return this[0..i]~Rope(new RopeImpl([t]))~this[i+1..length];
 		}
 		Rope opSliceAssign(Rope r, size_t a, size_t b){
-			if(isArray()&&r.isArray()){
+			if(isArray()&&r.isArray()){ // TODO: bound on lengths?
 				array[a..b]=r.array[];
 				return this;
 			}
-			return this[0..a]~r~this[b..length]; // TODO: dollar
+			return this=this[0..a]~r~this[b..length]; // TODO: dollar
 		}
 
 		int opApply(scope int delegate(T) dg){

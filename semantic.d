@@ -1879,7 +1879,7 @@ class TemplateInstanceDecl: Declaration{
 
 		// resolve non-tuple parameters
 		if(args.length>tuplepos&&tuplepos==params.length) return false;
-		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,args.length)]; // TODO: dollar		
+		resolved[0..min(tuplepos, args.length)] = args[0..min(tuplepos,args.length)]; // TODO: dollar
 		// TODO: does this work?
 		if(!paramScope){
 			paramScope = New!TemplateScope(scope_,scope_,this);
@@ -1904,7 +1904,6 @@ class TemplateInstanceDecl: Declaration{
 		if(!checkResolvedValidity()) return false;
 
 		if(matchState == MatchState.iftiStart) initializeIFTI();
-
 		return true;
 	}
 
@@ -2960,7 +2959,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-
 		// eponymous template trick
 		if(!!res){
 			if(inContext==InContext.called) iftiResSemantic(sc);

@@ -1,14 +1,4 @@
 
-bool bsearch(T)(T[] haystack, T needle){
-	if(haystack.length<=1) return (haystack~(needle+1))[0]==needle;
-	bool b = haystack[$/2]>needle;
-	pragma(msg, T," ",typeof(haystack));
-	return bsearch!T(haystack[b?0:$/2..b?$/2:$], needle);
-}
-pragma(msg, "bsearch2: ",bsearch!float([0,2,5],2));
-pragma(msg, "bsearch4: ",bsearch!real([],0));
-
-
 /+template MAlias(A,B){ alias A delegate(B) MAlias; }
 
 auto malias(A,B)(MAlias!(A,B) dg, B arg){ return dg(arg); }
