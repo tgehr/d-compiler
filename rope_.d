@@ -59,7 +59,7 @@ template Rope(T){
 		}
 		Rope opIndexAssign(T t,size_t i){
 			if(isArray()) array[i]=t;
-			return this[0..i]~Rope(new RopeImpl([t]))~this[i+1..length];
+			return this=this[0..i]~Rope(new RopeImpl([t]))~this[i+1..length];
 		}
 		Rope opSliceAssign(Rope r, size_t a, size_t b){
 			if(isArray()&&r.isArray()){ // TODO: bound on lengths?

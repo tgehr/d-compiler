@@ -1902,7 +1902,6 @@ class TemplateInstanceDecl: Declaration{
 		}
 
 		if(!checkResolvedValidity()) return false;
-
 		if(matchState == MatchState.iftiStart) initializeIFTI();
 		return true;
 	}
