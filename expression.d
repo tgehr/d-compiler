@@ -378,11 +378,16 @@ class CallExp: TemporaryExp{
 	mixin DownCastMethod;
 	mixin Visitors;
 }
+
+alias Rope!(Expression,true) TemplArgs;
+alias Rope!(Type,true) TypeTemplArgs;
+alias hashRopeCapture captureTemplArgs;
+alias hashRope toTemplArgs;
+
 class TemplateInstanceExp: Expression{
 	Expression e;
-	Rope!Expression args;
-	this(Expression exp, Rope!Expression a){e=exp; args=a;}
-	this(Expression exp, Expression[] a){this(exp,a.ropeCapture);}
+	Expression[] args;
+	this(Expression exp, Expression[] a){e=exp; args=a;}
 	override string toString(){return _brk(e.toString()~"!"~(args.length!=1?"(":"")~join(map!(to!string)(args),",")~(args.length!=1?")":""));}
 
 	mixin DownCastMethod;

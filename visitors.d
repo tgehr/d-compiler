@@ -68,11 +68,6 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 						static if((!is(T==ReferenceAggregateDecl)||x!="parents"))
 						foreach(ref e;mixin("res."~x)) if(e!is null) e=e.ddup();
 					}
-					static if(is(typeof(res)==TemplateInstanceExp)){
-						auto argsa = new Expression[res.args.length];
-						foreach(i, e;res.args) if(e!is null) argsa[i]=e.ddup();
-						res.args=argsa.ropeCapture;
-					}
 				}
 			}// else{ import std.stdio; writeln("not copying "~T.stringof,".",x);}
 		}

@@ -2,16 +2,29 @@
 
 module rope_; // underscore to not conflict with the eponymous function...
 
-import std.random, std.range;
+import std.random, std.range, std.algorithm;
+import util;
 // treap-based rope container
+
+import hashtable; // TODO: is there a good way to separate those better?
 
 auto rope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R); }
 auto ropeCapture(T)(T[] arg){ return arg.Rope!T; } // transfers ownership!
 
-template Rope(T){
+auto hashRope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R,true); }
+auto hashRopeCapture(T)(T[] arg){ return arg.Rope!(T,true); } // transfers ownership!
+
+
+template Rope(T,bool withAssocHash=false){
 	// interface (owns array; can exploit array opAssign)
+	enum wah=withAssocHash;
 	struct Rope{
-		private this(T[] array){ if(array==[]) return; this.array = array; }
+		static if(wah) AssocHash hash;
+		private this(T[] array){
+			if(array==[]) return;
+			this.array = array;
+			//static if(wah) hash=array.map!(function(T a)=>!a?0:a.templateParameterToHash()).assocHashRed();
+		}
 		private this(RopeImpl* rope){ this.rope = rope; }
 		invariant(){ assert(cast(void*)rope is array.ptr); }
 		private union{
@@ -26,8 +39,8 @@ template Rope(T){
 			if(isArray()) return new RopeImpl(array);
 			return rope;
 		}
-		Rope!S generalize(S)()@trusted if(is(S==class)&&is(T==class)&&is(T:S)){
-			return cast(Rope!S)this;
+		auto generalize(S)()@trusted if(is(S==class)&&is(T==class)&&is(T:S)){
+			return cast(Rope!(S,wah))this;
 		}
 		@property size_t length(){ return isArray() ? array.length : rope.length; }
 		Rope opBinary(string op:"~")(Rope rhs){
@@ -90,12 +103,17 @@ template Rope(T){
 	private struct RopeImpl{
 		enum Tag : ubyte { Array, Concat, }
 		Tag tag;
+		static if(wah) AssocHash hash;
 		this(RopeImpl* l, RopeImpl* r){
 			tag=Tag.Concat;
 			this.l=l, this.r=r;
 			this.length = l.length+r.length;
+			static if(wah) hash=l.hash.assocCombine(r.hash);
 		}
-		this(T[] array){ this.array=array; }
+		this(T[] array){
+			this.array=array;
+			// static if(wah) hash=array.map!(function(T a)=>!a?0:a.templateParameterToHash()).assocHashRed();
+		}
 		union{
 			T[] array;
 			struct{
@@ -152,8 +170,8 @@ template Rope(T){
 }
 
 // in-place update.
-struct UnsafeByRef(T){
-	Rope!T enc;
+struct UnsafeByRef(T,bool wah){
+	Rope!(T,wah) enc;
 	int opApply(scope int delegate(size_t,ref T) dg){
 		with(enc){
 			if(isArray()){foreach(i,ref x;array) if(auto r=dg(i,x)) return r; return 0; }
@@ -167,5 +185,5 @@ struct UnsafeByRef(T){
 		}
 	}
 }
-auto unsafeByRef(T)(Rope!T enc){ return UnsafeByRef!T(enc); }
+auto unsafeByRef(T,bool wah)(Rope!(T,wah) enc){ return UnsafeByRef!(T,wah)(enc); }
 

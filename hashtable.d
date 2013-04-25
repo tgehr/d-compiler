@@ -297,6 +297,17 @@ size_t FNVred(R)(R i){
 	return r;
 }
 
+
+// (Dummy implementation!)
+struct AssocHash{
+	size_t value;
+}
+auto toHash(AssocHash h){ return h.value; }
+auto assocCombine(AssocHash a, AssocHash b){ return AssocHash(a.value+b.value); }
+auto assocHash(size_t data){ return AssocHash(data); }
+private enum assocb=assocHash(0);
+auto assocHashRed(R)(R i){ return reduce!assocCombine(assocb, i.map!assocHash); }
+
 alias Seq!(identityHash0, identityHash1) identityHash;
 
 version(none)
