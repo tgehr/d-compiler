@@ -227,7 +227,7 @@ struct CuckooMap(K, V, alias eq_, alias h0_, alias h1_){
 /+		import expression;
 		static if(is(typeof(x.k)==Expression[]))foreach(k, e; es) if(e.e){
 				dw(k," ",e.k," ",h0(e.k)," ",h1(e.k)," ",
-				   e.k.map!(_=>_.templateParameterToHash()));
+				   e.k.map!(_=>_.tmplArgToHash()));
 		}
 		dw();dw();+/
 
@@ -292,8 +292,8 @@ size_t FNV(size_t data, size_t start=fnvb){
 
 size_t FNVred(R)(R i){
 	if(!i.length) return fnvb;
-	auto r = FNV(i[0].templateParameterToHash());
-	foreach(x; i[1../*$*/i.length]) r = FNV(x.templateParameterToHash(), r); // TODO: update compiler, then dollar will work for ropes
+	auto r = FNV(i[0].tmplArgToHash());
+	foreach(x; i[1../*$*/i.length]) r = FNV(x.tmplArgToHash(), r); // TODO: update compiler, then dollar will work for ropes
 	return r;
 }
 

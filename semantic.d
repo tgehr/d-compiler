@@ -842,7 +842,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 	}body{
 		assert(0, "unsupported operation");
 	}
-	size_t templateParameterToHash(){
+	size_t tmplArgToHash(){
 		dw(this," ",typeid(this));
 		assert(0, "unsupported operation");
 	}
@@ -926,7 +926,7 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 		return interpretV()==rhs.interpretV();
 	}
 
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		assert(!!type,text("no type! ",this));
 		import hashtable;
 		return FNV(type.toHash(), value.toHash());
@@ -1012,7 +1012,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		return interpretV()==rhs.interpretV();
 	}
 
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		import hashtable;
 		return FNVred(lit);
 	}
@@ -1626,9 +1626,9 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return false;
 	}
 
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		import hashtable;
-		return FNV(e.templateParameterToHash());
+		return FNV(e.tmplArgToHash());
 	}
 
 	}
@@ -2517,7 +2517,7 @@ class ExpTuple: Expression, Tuple{
 		// if both match the instantiation => both are tuples or not tuples
 		return false;
 	}
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		import hashtable;
 		return FNVred(exprs);
 	}
@@ -2679,7 +2679,7 @@ class TypeTuple: Type, Tuple{
 		return false;
 	}
 
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		import hashtable;
 		return FNVred(types);
 	}
@@ -4475,7 +4475,7 @@ class Symbol: Expression{ // semantic node
 		return false;
 	}
 
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		import hashtable;
 		return FNV(meaning.toHash());
 	}
@@ -6319,7 +6319,7 @@ mixin template Semantic(T) if(is(T==Type)){
 		if(auto type = cast(Type)rhs) return equals(type);
 		return false;
 	}
-	override size_t templateParameterToHash(){
+	override size_t tmplArgToHash(){
 		return toHash(); // TODO!: fix!
 	}
 }

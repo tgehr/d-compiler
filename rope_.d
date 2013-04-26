@@ -23,7 +23,7 @@ template Rope(T,bool withAssocHash=false){
 		private this(T[] array){
 			if(array==[]) return;
 			this.array = array;
-			//static if(wah) hash=array.map!(function(T a)=>!a?0:a.templateParameterToHash()).assocHashRed();
+			static if(wah) hash=array.map!(function(T a)=>!a?0:a.tmplArgToHash()).assocHashRed();
 		}
 		private this(RopeImpl* rope){ this.rope = rope; }
 		invariant(){ assert(cast(void*)rope is array.ptr); }
@@ -112,7 +112,7 @@ template Rope(T,bool withAssocHash=false){
 		}
 		this(T[] array){
 			this.array=array;
-			// static if(wah) hash=array.map!(function(T a)=>!a?0:a.templateParameterToHash()).assocHashRed();
+			static if(wah) hash=array.map!(function(T a)=>!a?0:a.tmplArgToHash()).assocHashRed();
 		}
 		union{
 			T[] array;
