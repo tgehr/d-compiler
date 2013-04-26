@@ -150,12 +150,8 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 						}
 					}
 				}else{
-					static if(is(typeof(@(t))==TemplArgs)){
-						foreach(ref x;@(t).unsafeByRef()) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
-					}else{
-						foreach(ref x;@(t)) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
-					}
-					static if(is(typeof(@(t)): Expression[])||is(typeof(@(t)): TemplArgs)){
+					foreach(ref x;@(t)) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
+					static if(is(typeof(@(t)): Expression[]) && (!is(typeof(this)==TemplateInstanceExp)||"@(t)"!="args")){
 						pragma(msg, typeof(this)," @(t)");
 						@(t)=Tuple.expand(@(t));
 						//foreach(ref x;@(t)) mixin(PropRetry!q{x});
@@ -2959,7 +2955,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	TemplArgs analyzedArgs;
 	@property bool analyzedArgsInitialized(){
-		return args.length==analyzedArgs.length;
+		return analyzedArgs.length||!args.length;
 	}
 
 	override void semantic(Scope sc){
@@ -3013,8 +3009,10 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		}
 		mixin(SemChld!q{args});
 
-		if(!analyzedArgsInitialized)
+		if(!analyzedArgsInitialized){
 			analyzedArgs = args.captureTemplArgs();
+			analyzedArgs = Tuple.expand(analyzedArgs);
+		}
 
 		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);
 		instantiateSemantic(sc,container,sym,accessCheck);
