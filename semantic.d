@@ -836,7 +836,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 	LongRange getLongRange(){return type.getLongRange();}
 
 	// needed for template instantiation
-	bool templateParameterEquals(Expression rhs)in{
+	bool tmplArgEquals(Expression rhs)in{
 		assert(sstate == SemState.completed,"not completed sstate "~toString());
 		assert(rhs.sstate == SemState.completed,"rhs not completed sstate "~rhs.toString());
 	}body{
@@ -920,7 +920,7 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 		return super.getLongRange();
 	}
 
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		if(!type.equals(rhs.type)) return false;
 		if(!rhs.isConstant()) return false;
 		return interpretV()==rhs.interpretV();
@@ -1007,7 +1007,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		return true.independent;
 	}
 
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		if(!type.equals(rhs.type)) return false;
 		return interpretV()==rhs.interpretV();
 	}
@@ -1619,10 +1619,10 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		return r;
 	}
 
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		if(this is rhs) return true;
 		if(auto ae=rhs.isAddressExp())
-		   return e.templateParameterEquals(ae.e);
+		   return e.tmplArgEquals(ae.e);
 		return false;
 	}
 
@@ -2506,12 +2506,12 @@ class ExpTuple: Expression, Tuple{
 	mixin DownCastMethod;
 	mixin Visitors;
 
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		alias util.all all;
 		import std.range;
 		if(auto et = rhs.isExpTuple()){
 			if(et.length != length) return false;
-			return all!(_=>_[0].templateParameterEquals(_[1]))(zip(exprs,et.exprs));
+			return all!(_=>_[0].tmplArgEquals(_[1]))(zip(exprs,et.exprs));
 		}
 		// this is not going to happen, since template parameters are only compared
 		// if both match the instantiation => both are tuples or not tuples
@@ -2669,12 +2669,12 @@ class TypeTuple: Type, Tuple{
 	mixin DownCastMethod;
 	mixin Visitors;
 
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		alias util.all all;
 		import std.range;
 		if(auto tt = rhs.isTypeTuple()){
 			if(tt.length!=types.length) return false;
-			return all!(_=>_[0].templateParameterEquals(_[1]))(zip(types,tt.types));
+			return all!(_=>_[0].tmplArgEquals(_[1]))(zip(types,tt.types));
 		}
 		return false;
 	}
@@ -2922,7 +2922,7 @@ private:
 		import hashtable;
 		static bool eq(TemplArgs a,TemplArgs b){
 			if(a.length!=b.length) return false;
-			foreach(i;0..a.length) if(!a[i].templateParameterEquals(b[i])) return false;
+			foreach(i;0..a.length) if(!a[i].tmplArgEquals(b[i])) return false;
 			return true;
 		} // equality check
 		static size_t h0(TemplArgs a){ return FNVred(a); }      // hash
@@ -4461,7 +4461,7 @@ class Symbol: Expression{ // semantic node
 	Scope scope_;
 
 	// TemplateDecl needs this.
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		if(auto sym = rhs.isSymbol()){
 			auto decl = scope_.getDeclaration();
 			auto sdecl = sym.scope_.getDeclaration();
@@ -6315,7 +6315,7 @@ mixin template Semantic(T) if(is(T==Type)){
 	override LongRange getLongRange(){return LongRange.full(true);}
 
 	// TemplateDecl needs this.
-	override bool templateParameterEquals(Expression rhs){
+	override bool tmplArgEquals(Expression rhs){
 		if(auto type = cast(Type)rhs) return equals(type);
 		return false;
 	}
