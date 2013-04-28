@@ -2925,7 +2925,7 @@ private:
 			foreach(i;0..a.length) if(!a[i].tmplArgEquals(b[i])) return false;
 			return true;
 		} // equality check
-		static size_t h0(TemplArgs a){ return FNVred(a); }      // hash
+		static size_t h0(TemplArgs a){ return a.tmplArgToHash(); }      // hash
 
 		private HashMap!(TemplArgs,TemplateInstanceDecl, eq, h0) instances;
 

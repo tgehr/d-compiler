@@ -19,12 +19,15 @@ template Rope(T,bool withAssocHash=false){
 	// interface (owns array; can exploit array opAssign)
 	enum wah=withAssocHash;
 	struct Rope{
-		static if(wah) AssocHash hash;
+		static if(wah) private AssocHash hash;
 		private this(T[] array){
 			if(array==[]) return;
 			this.array = array;
 			static if(wah) hash=array.map!(function(T a)=>!a?0:a.tmplArgToHash()).assocHashRed();
 		}
+
+		static if(wah) size_t tmplArgToHash(){ return hash.toHash(); }
+
 		private this(RopeImpl* rope){ this.rope = rope; }
 		invariant(){ assert(cast(void*)rope is array.ptr); }
 		private union{
