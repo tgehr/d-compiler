@@ -17,7 +17,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 	size_t length;
 
 	enum initialSize = 16;
-	enum maxBucketSize = 32;
+	enum maxBucketSize = 2;
 	enum limitfactor = 32;
 	enum incrementFactor = 3;
 	enum decrementFactor = 2;
@@ -25,6 +25,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 
 
 	private void initialize(){ es = new B[](initialSize); }
+	int numrealloc;
 	private void realloc(){
 		auto ees = es;
 		es = new B[](es.length*incrementFactor+uniform(0,incrementFactor));
@@ -50,7 +51,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 	V get(K k, lazy V alt){
 		if(length){
 			foreach(ref e; es[h(k)%$])
-		        if(eq(k, e.k)) return e.v;
+				if(eq(k, e.k)) return e.v;
 		}
 		return alt;
 	}
@@ -74,7 +75,8 @@ struct HashMap(K, V, alias eq_ , alias h_){
 
 	private void insert(E x) out{assert(x.k in this, text(es[h(x.k)%$]));}body{
 		if(!es.length) initialize();
-		auto b = &es[h(x.k)%$];
+		auto hs=h(x.k);
+		auto b = &es[hs%$];
 		foreach(ref e; *b)
 			if(eq(x.k, e.k)){
 				e=x;
@@ -82,7 +84,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 			}
 		length++;
 		*b~=x;
-		if(b.length>maxBucketSize&&length*limitfactor<b.length) realloc();
+		if(b.length>maxBucketSize&&hs!=h((*b)[0].k)) realloc();
 	}
 	
 	void opIndexAssign(V v, K k){
@@ -303,7 +305,8 @@ struct AssocHash{
 	size_t value;
 }
 auto toHash(AssocHash h){ return h.value; }
-auto assocCombine(AssocHash a, AssocHash b){ return AssocHash(a.value+b.value); }
+auto assocHashCombine(AssocHash a, AssocHash b){ return AssocHash(a.value+b.value); }
+int i;
 auto assocHash(size_t data){ return AssocHash(data); }
 private enum assocb=assocHash(0);
 auto assocHashRed(R)(R i){ return reduce!assocCombine(assocb, i.map!assocHash); }

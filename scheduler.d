@@ -179,7 +179,7 @@ class Scheduler{
 		void semantic(){
 			//dw(payload);
 			foreach(nd,sc; payload){
-				// this code causes very significant slowdowns for deeply nested template instantiations
+				// this code causes very significant slowdowns for deeply nested template instantiations and often is a bottleneck for template meta-programs
 				// TODO: optimize or find a way to ensure correctness that does not depend on this
 				TemplateInstanceDecl[] tmpls; // TODO: use a SmallCollection, or just a counter
 				for(auto tmpl=sc.maybe!(a=>a.getTemplateInstance());

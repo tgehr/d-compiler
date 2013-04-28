@@ -1,4 +1,3 @@
-
 template Seq(T...){ alias T Seq; }
 template staticMap(alias F, T...){
 	static if(!T.length) alias Seq!() staticMap;

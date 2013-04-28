@@ -14,19 +14,83 @@ auto ropeCapture(T)(T[] arg){ return arg.Rope!T; } // transfers ownership!
 auto hashRope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R,true); }
 auto hashRopeCapture(T)(T[] arg){ return arg.Rope!(T,true); } // transfers ownership!
 
+struct SegTree{//(T,alias combine){// forward reference bug
+	alias AssocHash T;
+	alias assocHashCombine combine;
+
+	T[] t;
+	@property size_t length(){ return t.length/2; }
+	T get(size_t a, size_t b){
+		T get(size_t i,size_t l,size_t r){
+			if(a<=l&&r<=b) return t[i];
+			auto mid=l+(r-l)/2;
+			if(b<=mid) return get(2*i,l,mid);
+			if(a>mid) return get(2*i+1,mid+1,r);
+			return combine(get(2*i,l,mid),get(2*i+1,mid+1,r));
+		}
+		return get(1,0,length-1);
+	}
+}
+
+private size_t roundToPwrTwo(size_t v){ for(size_t t=1;t;t<<=1) v|=v>>t; return v+1; }
+
+auto buildSegTree(/+alias combine,+/R)(R rng){
+	//alias ElementType!R T;
+	alias AssocHash T;
+	alias assocHashCombine combine;
+	auto len = roundToPwrTwo(rng.length)*2;
+	auto arr = new T[len];
+	//copy(rng, arr[len/2..$]);
+	foreach(i,x;rng) arr[len/2+i]=!x?0.assocHash():x.tmplArgToHash().assocHash();
+	foreach_reverse(i;1..len/2) arr[i]=combine(arr[2*i],arr[2*i+1]);
+	return SegTree/+!(T,combine)+/(arr);
+}
+
+struct SliceSegTree{//(T,alias combine){
+	alias AssocHash T;
+	alias assocHashCombine combine;
+
+	SegTree/+!(T,combine)+/ tree;
+	T value;
+	size_t a,b;
+	this(SegTree/+!(T,combine)+/ tree, size_t a, size_t b){
+		this.tree=tree;
+		this.a=a;
+		this.b=b;
+		value=tree.get(a,b);
+	}
+	@property size_t length(){ return b-a; }
+	auto opSlice(size_t a, size_t b)in{assert(this.a+b<=this.b);}body{
+		return new SliceSegTree(tree,this.a+a,this.a+b);
+	}
+}
 
 template Rope(T,bool withAssocHash=false){
 	// interface (owns array; can exploit array opAssign)
 	enum wah=withAssocHash;
+	static if(wah) alias Seq!AssocHash Hash;
+	else alias Seq!() Hash;
 	struct Rope{
-		static if(wah) private AssocHash hash;
+		static if(wah) private SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree;
 		private this(T[] array){
 			if(array==[]) return;
 			this.array = array;
-			static if(wah) hash=array.map!(function(T a)=>!a?0:a.tmplArgToHash()).assocHashRed();
+			static if(wah){
+				tree=new SliceSegTree/+!(AssocHash,assocHashCombine)+/(buildSegTree/+!(assocHashCombine)+/(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
+			}
 		}
 
-		static if(wah) size_t tmplArgToHash(){ return hash.toHash(); }
+		static if(wah){
+			size_t tmplArgToHash(){
+				if(isArray()) return !tree?0:tree.value.toHash();
+				return rope.hash.toHash();
+			}
+			private this(T[] array, SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree){
+				if(array==[]) return;
+				this.array = array;
+				this.tree = tree;
+			}
+		}
 
 		private this(RopeImpl* rope){ this.rope = rope; }
 		invariant(){ assert(cast(void*)rope is array.ptr); }
@@ -39,7 +103,10 @@ template Rope(T,bool withAssocHash=false){
 		}
 		private @property bool isArray(){ return array.length || rope is null; }
 		private RopeImpl* toImpl(){
-			if(isArray()) return new RopeImpl(array);
+			if(isArray()){
+				static if(wah) return new RopeImpl(array,tree);
+				else return new RopeImpl(array);
+			}
 			return rope;
 		}
 		auto generalize(S)()@trusted if(is(S==class)&&is(T==class)&&is(T:S)){
@@ -47,26 +114,26 @@ template Rope(T,bool withAssocHash=false){
 		}
 		@property size_t length(){ return isArray() ? array.length : rope.length; }
 		Rope opBinary(string op:"~")(Rope rhs){
+			if(!length) return rhs;
+			if(!rhs.length) return this;
 			return Rope(*toImpl() ~ rhs.toImpl());
 		}
 		Rope opBinary(string op:"~")(T rhs){
-			return Rope(*toImpl() ~ new RopeImpl([rhs]));
+			return this ~ Rope([rhs]);
 		}
 		Rope opBinaryRight(string op:"~")(T rhs){
-			return Rope(*new RopeImpl([rhs])~toImpl());
+			return Rope([rhs])~toImpl();
 		}
 
 		Rope opOpAssign(string op:"~")(Rope rhs){
-			if(isArray()&&rhs.isArray()) array~=rhs.array;
 			return this = this ~ rhs;
 		}
 		Rope opOpAssign(string op:"~")(T rhs){
-			if(isArray()) return Rope(array~=rhs);
 			return this = this ~ rhs;
 		}
 		Rope opSlice(size_t a, size_t b)in{assert(a<=b && b<=length);}body{
 			if(a==b) return Rope([]);
-			if(isArray()) return Rope(array[a..b]);
+			if(isArray()) return Rope(array[a..b],(*tree)[a..b]);
 			return Rope((*rope)[a..b]);
 		}
 		T opIndex(size_t i){
@@ -75,13 +142,9 @@ template Rope(T,bool withAssocHash=false){
 		}
 		Rope opIndexAssign(T t,size_t i){
 			if(isArray()) array[i]=t;
-			return this=this[0..i]~Rope(new RopeImpl([t]))~this[i+1..length];
+			return this=this[0..i]~Rope([t])~this[i+1..length];
 		}
 		Rope opSliceAssign(Rope r, size_t a, size_t b){
-			if(isArray()&&r.isArray()){ // TODO: bound on lengths?
-				array[a..b]=r.array[];
-				return this;
-			}
 			return this=this[0..a]~r~this[b..length]; // TODO: dollar
 		}
 
@@ -102,20 +165,25 @@ template Rope(T,bool withAssocHash=false){
 		@property Rope save(){ return this; }
 		void popFront(){ this=this[1..length]; }
 	}
+
 	// implementation (does not own array.)
 	private struct RopeImpl{
 		enum Tag : ubyte { Array, Concat, }
 		Tag tag;
-		static if(wah) AssocHash hash;
+		static if(wah){
+			AssocHash hash;
+			SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree;
+		}
 		this(RopeImpl* l, RopeImpl* r){
 			tag=Tag.Concat;
 			this.l=l, this.r=r;
 			this.length = l.length+r.length;
-			static if(wah) hash=l.hash.assocCombine(r.hash);
+			static if(wah) hash=assocHashCombine(l.hash,r.hash);
 		}
-		this(T[] array){
+		this(T[] array, SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree){
 			this.array=array;
-			static if(wah) hash=array.map!(function(T a)=>!a?0:a.tmplArgToHash()).assocHashRed();
+			this.tree=tree;
+			hash=tree.value;
 		}
 		union{
 			T[] array;
@@ -127,7 +195,7 @@ template Rope(T,bool withAssocHash=false){
 		}
 		RopeImpl* opBinary(string op:"~")(RopeImpl* rhs){
 			if(tag==Tag.Array||rhs.tag==Tag.Array){
-				if(length+rhs.length<128) return new RopeImpl(array~rhs.array);
+				// if(length+rhs.length<128) return new RopeImpl(array~rhs.array);
 				return new RopeImpl(&this,rhs);
 			}
 			// TODO: refcount+in-place updates
@@ -141,7 +209,7 @@ template Rope(T,bool withAssocHash=false){
 		}
 		RopeImpl* opSlice(size_t a, size_t b){
 			if(a==0&&b==length) return &this;
-			if(tag==Tag.Array) return new RopeImpl(array[a..b]);
+			if(tag==Tag.Array) return new RopeImpl(array[a..b], (*tree)[a..b]);
 			if(b<=l.length) return (*l)[a..b];
 			if(l.length<=a) return (*r)[a-l.length..b-l.length];
 			return new RopeImpl((*l)[a..l.length],(*r)[0..b-l.length]);

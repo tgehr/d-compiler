@@ -1717,14 +1717,20 @@ class MatcherTy: Type{
 }
 
 
+struct TemplArgsWithTypes{
+	TemplArgs args;
+	TypeTemplArgs argTypes;
+}
+
 class TemplateInstanceDecl: Declaration{
 	TemplateDecl parent;      // template this instance was instantiated from
 
 	Expression instantiation; // an expression that is responsible for analysis
 	                          // of this instance. (either a symbol or a instantiation)
 
-	TemplArgs args;      // arguments as given by the instantiation site
-	TemplArgs resolved;  // arguments as given to the template body
+	TemplArgs args;         // arguments as given by the instantiation site
+	TypeTemplArgs argTypes; // types of the template arguments
+	TemplArgs resolved;     // arguments as given to the template body
 
 	Match match = Match.exact; // match level
 
@@ -1757,12 +1763,13 @@ class TemplateInstanceDecl: Declaration{
 		MatchState matchState = MatchState.start;
 	}
 
-	this(TemplateDecl parent, const ref Location loc, Expression expr, TemplArgs args)in{
+	this(TemplateDecl parent, const ref Location loc, Expression expr, TemplArgsWithTypes args)in{
 		assert(expr.isSymbol() || expr.isTemplateInstanceExp());
 	}body{
 		super(parent.stc, parent.name);
 		this.parent=parent;
-		this.args=args;
+		this.args=args.args;
+		this.argTypes=args.argTypes;
 		this.constraint = parent.constraint?parent.constraint.ddup():null;
 		this.bdy=parent.bdy; // NOTE: bdy is the original template body at this point!
 
@@ -1774,7 +1781,7 @@ class TemplateInstanceDecl: Declaration{
 		sstate = SemState.begin;
 	}
 
-	this(TemplateDecl parent, const ref Location loc, Expression func, TemplArgs args, Expression[] iftiArgs)in{
+	this(TemplateDecl parent, const ref Location loc, Expression func, TemplArgsWithTypes args, Expression[] iftiArgs)in{
 		assert(func.isSymbol() || func.isTemplateInstanceExp());
 	}body{
 		this(parent, loc, func, args);
@@ -1891,7 +1898,7 @@ class TemplateInstanceDecl: Declaration{
 		// but potentially less useful.
 		if(tuplepos<params.length && args.length>tuplepos){
 			auto expr = args[tuplepos..args.length]; // TODO: dollar
-			Expression et = New!ExpTuple(paramScope.iparent,expr);
+			Expression et = New!ExpTuple(paramScope.iparent,expr,New!TypeTuple(argTypes[tuplepos..args.length]));
 			et.semantic(scope_);
 			mixin(Rewrite!q{et});
 			assert(et.sstate == SemState.completed);
@@ -2483,7 +2490,6 @@ class ExpTuple: Expression, Tuple{
 
 		auto r = New!ExpTuple(sc, exprs, type); // TODO: why does this not work?
 		r.loc = loc;
-		r.sstate = SemState.begin;
 		r.semantic(sc);
 		return r;
 	}
@@ -2684,6 +2690,15 @@ class TypeTuple: Type, Tuple{
 		return FNVred(types);
 	}
 
+	static TypeTemplArgs expand(R)(R tts)if(isInputRange!R&&is(ElementType!R==Type)){
+		TypeTemplArgs r;
+		foreach(x;tts){
+			if(auto ty=x.isTypeTuple()) r~=ty.types;
+			else r~=x;
+		}
+		return r;
+	}
+
 private:
 	TypeTemplArgs types;
 }
@@ -2869,7 +2884,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 
 		auto gagged = !sc||!sc.handler.showsEffect;
 
-		static if(fullySpecified) if(auto r=store.lookup(args)){
+		static if(fullySpecified) if(auto r=store.lookup(args.args)){
 			if(!gagged&&r.isGagged()) r.ungag();
 			return r;
 		}
@@ -2893,14 +2908,14 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		return inst;
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression expr, TemplArgs args){
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression expr, TemplArgsWithTypes args){
 		auto r=matchHelper!true(sc, loc, expr, args);
 		// TODO: more explicit error message
 		if(!r && sc) sc.error("instantiation does not match template declaration",loc);
 		return r;
 	}
 
-	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgs args, Expression[] funargs){
+	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
 		if(!iftiDecl) return matchInstantiation(sc, loc, func, args);
 		auto r=matchHelper!false(sc, loc, this_, func, args, funargs);
 		// TODO: more explicit error message
@@ -2954,6 +2969,8 @@ private:
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	TemplArgs analyzedArgs;
+	TypeTemplArgs argTypes;
+
 	@property bool analyzedArgsInitialized(){
 		return analyzedArgs.length||!args.length;
 	}
@@ -3012,6 +3029,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(!analyzedArgsInitialized){
 			analyzedArgs = args.captureTemplArgs();
 			analyzedArgs = Tuple.expand(analyzedArgs);
+			argTypes = TypeTuple.expand(args.map!(a=>a.type));
 		}
 
 		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);
@@ -3050,7 +3068,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			}
 		}
 
-		inst = sym.meaning.matchIFTI(sc, loc, this_, this, analyzedArgs, funargs);
+		inst = sym.meaning.matchIFTI(sc, loc, this_, this, TemplArgsWithTypes(analyzedArgs,argTypes), funargs);
 		if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 
 		if(!inst.isTemplateInstanceDecl
@@ -3065,7 +3083,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	private void instantiateSemantic(Scope sc, Expression container, Symbol sym, AccessCheck accessCheck){
 		if(!inst){
-			inst = sym.meaning.matchInstantiation(sc, loc, this, analyzedArgs);
+			inst = sym.meaning.matchInstantiation(sc, loc, this, TemplArgsWithTypes(analyzedArgs,argTypes));
 			if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 		}
 		assert(!!inst);
@@ -8049,12 +8067,12 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		sc.error(format("%s '%s' is not callable",kind,name.toString()),loc);
 	}
 
-	Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgs args){
+	Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
 		if(sc) sc.error(format("can only instantiate templates, not %s%ss",kind,kind[$-1]=='s'?"e":""),loc);
 		return null;
 	}
 
-	Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgs args, Expression[] funargs){
+	Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
 		if(sc) sc.error(format("%s '%s' is not a function template",kind, name.name),loc);
 		return null;
 	}
@@ -9523,18 +9541,18 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgs args){
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
 		if(tdecls.length==0) return null; // TODO: error message
 		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, owner, args);
 		return New!TemplateOverloadMatcher(this, loc, owner, args);
 	}
 
-	final void instantiationError(Scope sc, const ref Location loc, TemplateInstanceDecl[] insts, TemplArgs args){
+	final void instantiationError(Scope sc, const ref Location loc, TemplateInstanceDecl[] insts, TemplArgsWithTypes args){
 		size_t c=0;
 		foreach(x;insts) if(x) c++;
 		assert(c!=1);
 		if(!c){
-			sc.error(format("no matching template for instantiation '%s!(%s)'",name,join(map!"a.toString()"(args),",")),loc);
+			sc.error(format("no matching template for instantiation '%s!(%s)'",name,join(map!"a.toString()"(args.args),",")),loc);
 			foreach(i, tdecl; tdecls){
 				if(tdecl.sstate == SemState.error) continue;
 				sc.note("candidate template not viable", tdecl.loc); // TODO: say why
@@ -9548,7 +9566,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgs args, Expression[] funargs){
+	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
 		if(tdecls.length==1) return tdecls[0].matchIFTI(sc, loc, this_, func, args, funargs);
 		return New!FunctionOverloadMatcher(this, loc, this_, func, args, funargs);
 	}
@@ -9583,8 +9601,8 @@ abstract class SymbolMatcher: Declaration{
 
 class TemplateOverloadMatcher: SymbolMatcher{
 	Declaration[] insts;
-	TemplArgs args;
-	this(OverloadSet set, const ref Location loc, Expression func, TemplArgs args){
+	TemplArgsWithTypes args;
+	this(OverloadSet set, const ref Location loc, Expression func, TemplArgsWithTypes args){
 		this.args=args;
 		super(set, loc, func);
 		// TODO: gc allocation
@@ -9677,9 +9695,9 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	}
 
 	bool matchATemplate = false;
-	TemplArgs templArgs;
+	TemplArgsWithTypes templArgs;
 
-	this(OverloadSet set, const ref Location loc, Type this_, Expression func, TemplArgs templArgs, Expression[] args){
+	this(OverloadSet set, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes templArgs, Expression[] args){
 		matchATemplate = true;
 		this.templArgs = templArgs;
 		this(set, loc, this_, func, args);
