@@ -11,86 +11,68 @@ import hashtable; // TODO: is there a good way to separate those better?
 auto rope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R); }
 auto ropeCapture(T)(T[] arg){ return arg.Rope!T; } // transfers ownership!
 
-auto hashRope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R,true); }
-auto hashRopeCapture(T)(T[] arg){ return arg.Rope!(T,true); } // transfers ownership!
-
-struct TemplArgInfo{
-	AssocHash hash;
-	bool typeOnly;
-
-	auto combine(TemplArgInfo rhs){
-		return TemplArgInfo(assocHashCombine(hash,rhs.hash),typeOnly&&rhs.typeOnly);
-	}
-}
-
-// (non-genericity because of DMD bugs. forward reference errors)
-
-struct SegTree{
-	alias TemplArgInfo S;
-
-	S[] t;
-	@property size_t length(){ return t.length/2; }
-	S get(size_t a, size_t b){
-		S get(size_t i,size_t l,size_t r){
-			if(a<=l&&r<=b) return t[i];
-			auto mid=l+(r-l)/2;
-			if(b<=mid) return get(2*i,l,mid);
-			if(a>mid) return get(2*i+1,mid+1,r);
-			return get(2*i,l,mid).combine(get(2*i+1,mid+1,r));
-		}
-		return get(1,0,length-1);
-	}
-}
+import expression;
+auto toTemplArgs(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R,TemplArgInfo); }
+auto captureTemplArgs(T)(T[] arg){ return Rope!(T,TemplArgInfo)(arg); } // transfers ownership!
 
 private size_t roundToPwrTwo(size_t v){ for(size_t t=1;t;t<<=1) v|=v>>t; return v+1; }
 
-auto buildSegTree(R)(R rng){
-	alias TemplArgInfo S;
-	auto len = roundToPwrTwo(rng.length);
-	auto arr = new S[2*len];
-	foreach(i,x;rng) arr[len+i]=TemplArgInfo(!x?0.assocHash():x.tmplArgToHash().assocHash(),!x||x.isType());
-	foreach_reverse(i;1..len) arr[i]=arr[2*i].combine(arr[2*i+1]);
-	return SegTree(arr);
-}
-
-struct SliceSegTree{
-	alias TemplArgInfo S;
-
-	SegTree tree;
-	S value;
-	size_t a,b;
-	this(SegTree tree, size_t a, size_t b){
-		this.tree=tree;
-		this.a=a;
-		this.b=b;
-		value=tree.get(a,b);
+template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
+	enum segtree=!is(S==void);
+	static if(segtree){
+		struct SegTree{
+			S[] t;
+			@property size_t length(){ return t.length/2; }
+			S get(size_t a, size_t b){
+				S get(size_t i,size_t l,size_t r){
+					if(a<=l&&r<=b) return t[i];
+					auto mid=l+(r-l)/2;
+					if(b<=mid) return get(2*i,l,mid);
+					if(a>mid) return get(2*i+1,mid+1,r);
+					return get(2*i,l,mid).combine(get(2*i+1,mid+1,r));
+				}
+				return get(1,0,length-1);
+			}
+		}
+		auto buildSegTree(R)(R rng){
+			alias TemplArgInfo S;
+			auto len = roundToPwrTwo(rng.length);
+			auto arr = new S[2*len];
+			foreach(i,x;rng) arr[len+i]=S(x);;
+			foreach_reverse(i;1..len) arr[i]=arr[2*i].combine(arr[2*i+1]);
+			return SegTree(arr);
+		}
+		struct SliceSegTree{
+			SegTree tree;
+			S value;
+			size_t a,b;
+			this(SegTree tree, size_t a, size_t b){
+				this.tree=tree;
+				this.a=a;
+				this.b=b;
+				value=tree.get(a,b);
+			}
+			@property size_t length(){ return b-a; }
+			auto opSlice(size_t a, size_t b)in{assert(this.a+b<=this.b);}body{
+				return new SliceSegTree(tree,this.a+a,this.a+b);
+			}
+		}
 	}
-	@property size_t length(){ return b-a; }
-	auto opSlice(size_t a, size_t b)in{assert(this.a+b<=this.b);}body{
-		return new SliceSegTree(tree,this.a+a,this.a+b);
-	}
-}
-
-template Rope(T,bool isTemplateArgs=false){
 	// interface (owns array; can exploit array opAssign)
-	enum ita=isTemplateArgs;
-	static if(ita) alias Seq!TemplArgInfo Info;
+	static if(segtree) alias Seq!S Info;
 	else alias Seq!() Info;
 	struct Rope{
-		static if(ita) private SliceSegTree* tree;
+		static if(segtree) private SliceSegTree* tree;
 		private this(T[] array){
 			if(array==[]) return;
 			this.array = array;
-			static if(ita){
+			static if(segtree){
 				tree=new SliceSegTree(buildSegTree(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
 			}
 		}
 
-		static if(ita){
-			size_t tmplArgToHash(){
-				if(isArray()) return !tree?0:tree.value.hash.toHash();
-				return rope.value.hash.toHash();
-			}
+		static if(segtree){
+			@property value(){ return isArray()?tree?tree.value:S.init:rope.value; }
 			private this(T[] array, SliceSegTree* tree){
 				if(array==[]) return;
 				this.array = array;
@@ -110,13 +92,13 @@ template Rope(T,bool isTemplateArgs=false){
 		private @property bool isArray(){ return array.length || rope is null; }
 		private RopeImpl* toImpl(){
 			if(isArray()){
-				static if(ita) return new RopeImpl(array,tree);
+				static if(segtree) return new RopeImpl(array,tree);
 				else return new RopeImpl(array);
 			}
 			return rope;
 		}
-		auto generalize(S)()@trusted if(is(S==class)&&is(T==class)&&is(T:S)){
-			return cast(Rope!(S,ita))this;
+		auto generalize(Q)()@trusted if(is(Q==class)&&is(T==class)&&is(T:Q)){
+			return cast(Rope!(Q,S))this;
 		}
 		@property size_t length(){ return isArray() ? array.length : rope.length; }
 		Rope opBinary(string op:"~")(Rope rhs){
@@ -176,15 +158,15 @@ template Rope(T,bool isTemplateArgs=false){
 	private struct RopeImpl{
 		enum Tag : ubyte { Array, Concat, }
 		Tag tag;
-		static if(ita){
-			TemplArgInfo value;
+		static if(segtree){
+			S value;
 			SliceSegTree* tree;
 		}
 		this(RopeImpl* l, RopeImpl* r){
 			tag=Tag.Concat;
 			this.l=l, this.r=r;
 			this.length = l.length+r.length;
-			static if(ita) value=l.value.combine(r.value);
+			static if(segtree) value=l.value.combine(r.value);
 		}
 		this(T[] array, SliceSegTree* tree){
 			this.array=array;
@@ -247,8 +229,8 @@ template Rope(T,bool isTemplateArgs=false){
 }
 
 // in-place update.
-struct UnsafeByRef(T,bool ita){
-	Rope!(T,ita) enc;
+struct UnsafeByRef(T,S){
+	Rope!(T,S) enc;
 	int opApply(scope int delegate(size_t,ref T) dg){
 		with(enc){
 			if(isArray()){foreach(i,ref x;array) if(auto r=dg(i,x)) return r; return 0; }
@@ -262,5 +244,5 @@ struct UnsafeByRef(T,bool ita){
 		}
 	}
 }
-auto unsafeByRef(T,bool ita)(Rope!(T,ita) enc){ return UnsafeByRef!(T,ita)(enc); }
+auto unsafeByRef(T,S)(Rope!(T,S) enc){ return UnsafeByRef!(T,S)(enc); }
 

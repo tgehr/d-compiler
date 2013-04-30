@@ -2312,7 +2312,7 @@ interface Tuple{
 
 	int opApply(scope int delegate(Expression) dg);
 
-	static T expand(T,S...)(T a, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,true),X)){
+	static T expand(T,S...)(T a, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,TemplArgInfo),X)){
 		T r;
 		S rep;
 		static if(is(T _:X[],X))enum isarray=true;else enum isarray=false;
