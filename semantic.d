@@ -3029,7 +3029,11 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(!analyzedArgsInitialized){
 			analyzedArgs = args.captureTemplArgs();
 			analyzedArgs = Tuple.expand(analyzedArgs);
-			argTypes = TypeTuple.expand(args.map!(a=>a.type));
+			argTypes = TypeTuple.expand(args.map!((a){
+				// TODO: this is hacky (the type passed is irrelevant), better approaches?
+				if(auto tt=a.isTypeTuple()) return tt;
+				return a.type;
+			}));
 		}
 
 		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);
