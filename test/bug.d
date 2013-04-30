@@ -1,10 +1,42 @@
-template CommonType(T...){
+
+struct TestVirtualCall{
+	class A{ string foo(){ return "B"; }}
+	class B: A{ override string foo(){ return "A"; }}
+	template Mixin(string s){
+		mixin("alias "~s~" Mixin;");
+	}
+	class C: Mixin!({A a = new B; return a.foo();}()){
+		static assert( is(typeof(this): A));
+		static assert(!is(typeof(this): B));
+		int bar(){ return 123; }
+	}
+
+	template X(){
+		alias Mixin!({D d = new E; return d.foo();}()) X;
+	}
+	class D: X!(){
+		int foo(int x){ X!() y=new X!(); return x+y.bar();}
+		override string foo(){
+			return "B";
+		}
+	}
+	class E: D{
+		override string foo(){
+			return "C";
+		}
+		override foo(int x){ return super.foo(x); }
+	}
+	static assert(is(E: C));
+	static assert(!is(E: B));
+	static assert({D e = new E; return e.foo(2);}()==125);
+}
+/+template CommonType(T...){
 	enum e = q{{ T bar(T)(T[]); T t; auto ts = [t]; return bar(ts); }()};
 	/+static if(is(typeof(mixin(e))))+/ alias typeof(mixin(e)) CommonType;
 	//else alias void CommonType;
 }
 
-pragma(msg, "CommonType: ",CommonType!(double,real));
+pragma(msg, "CommonType: ",CommonType!(double,real));+/
 
 /+template MAlias(A,B){ alias A delegate(B) MAlias; }
 

@@ -2,7 +2,7 @@
 
 module rope_; // underscore to not conflict with the eponymous function...
 
-import std.random, std.range, std.algorithm;
+import std.random, std.range, std.algorithm, std.conv;
 import util;
 // treap-based rope container
 
@@ -131,7 +131,7 @@ template Rope(T,bool withAssocHash=false){
 		Rope opOpAssign(string op:"~")(T rhs){
 			return this = this ~ rhs;
 		}
-		Rope opSlice(size_t a, size_t b)in{assert(a<=b && b<=length);}body{
+		Rope opSlice(size_t a, size_t b)in{assert(a<=b && b<=length,text(this," ",a," ",b));}body{
 			if(a==b) return Rope([]);
 			if(isArray()) return Rope(array[a..b],(*tree)[a..b]);
 			return Rope((*rope)[a..b]);
