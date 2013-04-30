@@ -14,19 +14,29 @@ auto ropeCapture(T)(T[] arg){ return arg.Rope!T; } // transfers ownership!
 auto hashRope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R,true); }
 auto hashRopeCapture(T)(T[] arg){ return arg.Rope!(T,true); } // transfers ownership!
 
-struct SegTree{//(T,alias combine){// forward reference bug
-	alias AssocHash T;
-	alias assocHashCombine combine;
+struct TemplArgInfo{
+	AssocHash hash;
+	bool typeOnly;
 
-	T[] t;
+	auto combine(TemplArgInfo rhs){
+		return TemplArgInfo(assocHashCombine(hash,rhs.hash),typeOnly&&rhs.typeOnly);
+	}
+}
+
+// (non-genericity because of DMD bugs. forward reference errors)
+
+struct SegTree{
+	alias TemplArgInfo S;
+
+	S[] t;
 	@property size_t length(){ return t.length/2; }
-	T get(size_t a, size_t b){
-		T get(size_t i,size_t l,size_t r){
+	S get(size_t a, size_t b){
+		S get(size_t i,size_t l,size_t r){
 			if(a<=l&&r<=b) return t[i];
 			auto mid=l+(r-l)/2;
 			if(b<=mid) return get(2*i,l,mid);
 			if(a>mid) return get(2*i+1,mid+1,r);
-			return combine(get(2*i,l,mid),get(2*i+1,mid+1,r));
+			return get(2*i,l,mid).combine(get(2*i+1,mid+1,r));
 		}
 		return get(1,0,length-1);
 	}
@@ -34,26 +44,22 @@ struct SegTree{//(T,alias combine){// forward reference bug
 
 private size_t roundToPwrTwo(size_t v){ for(size_t t=1;t;t<<=1) v|=v>>t; return v+1; }
 
-auto buildSegTree(/+alias combine,+/R)(R rng){
-	//alias ElementType!R T;
-	alias AssocHash T;
-	alias assocHashCombine combine;
-	auto len = roundToPwrTwo(rng.length)*2;
-	auto arr = new T[len];
-	//copy(rng, arr[len/2..$]);
-	foreach(i,x;rng) arr[len/2+i]=!x?0.assocHash():x.tmplArgToHash().assocHash();
-	foreach_reverse(i;1..len/2) arr[i]=combine(arr[2*i],arr[2*i+1]);
-	return SegTree/+!(T,combine)+/(arr);
+auto buildSegTree(R)(R rng){
+	alias TemplArgInfo S;
+	auto len = roundToPwrTwo(rng.length);
+	auto arr = new S[2*len];
+	foreach(i,x;rng) arr[len+i]=TemplArgInfo(!x?0.assocHash():x.tmplArgToHash().assocHash(),!x||x.isType());
+	foreach_reverse(i;1..len) arr[i]=arr[2*i].combine(arr[2*i+1]);
+	return SegTree(arr);
 }
 
-struct SliceSegTree{//(T,alias combine){
-	alias AssocHash T;
-	alias assocHashCombine combine;
+struct SliceSegTree{
+	alias TemplArgInfo S;
 
-	SegTree/+!(T,combine)+/ tree;
-	T value;
+	SegTree tree;
+	S value;
 	size_t a,b;
-	this(SegTree/+!(T,combine)+/ tree, size_t a, size_t b){
+	this(SegTree tree, size_t a, size_t b){
 		this.tree=tree;
 		this.a=a;
 		this.b=b;
@@ -65,27 +71,27 @@ struct SliceSegTree{//(T,alias combine){
 	}
 }
 
-template Rope(T,bool withAssocHash=false){
+template Rope(T,bool isTemplateArgs=false){
 	// interface (owns array; can exploit array opAssign)
-	enum wah=withAssocHash;
-	static if(wah) alias Seq!AssocHash Hash;
-	else alias Seq!() Hash;
+	enum ita=isTemplateArgs;
+	static if(ita) alias Seq!TemplArgInfo Info;
+	else alias Seq!() Info;
 	struct Rope{
-		static if(wah) private SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree;
+		static if(ita) private SliceSegTree* tree;
 		private this(T[] array){
 			if(array==[]) return;
 			this.array = array;
-			static if(wah){
-				tree=new SliceSegTree/+!(AssocHash,assocHashCombine)+/(buildSegTree/+!(assocHashCombine)+/(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
+			static if(ita){
+				tree=new SliceSegTree(buildSegTree(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
 			}
 		}
 
-		static if(wah){
+		static if(ita){
 			size_t tmplArgToHash(){
-				if(isArray()) return !tree?0:tree.value.toHash();
-				return rope.hash.toHash();
+				if(isArray()) return !tree?0:tree.value.hash.toHash();
+				return rope.value.hash.toHash();
 			}
-			private this(T[] array, SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree){
+			private this(T[] array, SliceSegTree* tree){
 				if(array==[]) return;
 				this.array = array;
 				this.tree = tree;
@@ -104,13 +110,13 @@ template Rope(T,bool withAssocHash=false){
 		private @property bool isArray(){ return array.length || rope is null; }
 		private RopeImpl* toImpl(){
 			if(isArray()){
-				static if(wah) return new RopeImpl(array,tree);
+				static if(ita) return new RopeImpl(array,tree);
 				else return new RopeImpl(array);
 			}
 			return rope;
 		}
 		auto generalize(S)()@trusted if(is(S==class)&&is(T==class)&&is(T:S)){
-			return cast(Rope!(S,wah))this;
+			return cast(Rope!(S,ita))this;
 		}
 		@property size_t length(){ return isArray() ? array.length : rope.length; }
 		Rope opBinary(string op:"~")(Rope rhs){
@@ -170,20 +176,20 @@ template Rope(T,bool withAssocHash=false){
 	private struct RopeImpl{
 		enum Tag : ubyte { Array, Concat, }
 		Tag tag;
-		static if(wah){
-			AssocHash hash;
-			SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree;
+		static if(ita){
+			TemplArgInfo value;
+			SliceSegTree* tree;
 		}
 		this(RopeImpl* l, RopeImpl* r){
 			tag=Tag.Concat;
 			this.l=l, this.r=r;
 			this.length = l.length+r.length;
-			static if(wah) hash=assocHashCombine(l.hash,r.hash);
+			static if(ita) value=l.value.combine(r.value);
 		}
-		this(T[] array, SliceSegTree/+!(AssocHash,assocHashCombine)+/* tree){
+		this(T[] array, SliceSegTree* tree){
 			this.array=array;
 			this.tree=tree;
-			hash=tree.value;
+			value=tree.value;
 		}
 		union{
 			T[] array;
@@ -241,8 +247,8 @@ template Rope(T,bool withAssocHash=false){
 }
 
 // in-place update.
-struct UnsafeByRef(T,bool wah){
-	Rope!(T,wah) enc;
+struct UnsafeByRef(T,bool ita){
+	Rope!(T,ita) enc;
 	int opApply(scope int delegate(size_t,ref T) dg){
 		with(enc){
 			if(isArray()){foreach(i,ref x;array) if(auto r=dg(i,x)) return r; return 0; }
@@ -256,5 +262,5 @@ struct UnsafeByRef(T,bool wah){
 		}
 	}
 }
-auto unsafeByRef(T,bool wah)(Rope!(T,wah) enc){ return UnsafeByRef!(T,wah)(enc); }
+auto unsafeByRef(T,bool ita)(Rope!(T,ita) enc){ return UnsafeByRef!(T,ita)(enc); }
 
