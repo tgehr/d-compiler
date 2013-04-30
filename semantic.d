@@ -2992,6 +2992,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		e.willInstantiate();
 		mixin(SemChld!q{e});
 		if(auto r=e.isUFCSCallExp()){
+			if(auto sym=r.e.isSymbol()) sym.inContext=InContext.none; // clear context
 			auto tmpl = New!TemplateInstanceExp(r.e,args);
 			tmpl.loc = loc;
 			tmpl.willCall();
@@ -4011,15 +4012,6 @@ class Symbol: Expression{ // semantic node
 	bool isFunctionLiteral; // does symbol own 'meaning'
 	bool isSymbolMatcher;
 	mixin ContextSensitive;
-	private @property bool implicitCall(){
-		// TODO: reduce and report: this causes a linker error
-		//with(InContext)return !inContext.among(called,addressTaken,instantiated,passedToTemplateAndOrAliased,fieldExp);
-		switch(inContext) with(InContext){
-			case called, addressTaken, instantiated, passedToTemplateAndOrAliased, fieldExp:
-				return false;
-			default: return true;
-		}
-	}
 	private bool _ignoreProperty = false;
 	@property bool ignoreProperty(){
 		return _ignoreProperty||inContext==InContext.instantiated||inContext==InContext.passedToTemplateAndOrAliased;
@@ -4098,7 +4090,7 @@ class Symbol: Expression{ // semantic node
 		debug scope(exit) assert(sstate != SemState.started||needRetry||rewrite,toString()~" "~typeid(this.meaning).toString());
 		debug scope(exit) assert(needRetry==2||!circ,toString()~" nR: "~to!string(needRetry)~" circ: "~to!string(circ));
 		mixin(SemPrlgDontSchedule);
-		if(inContext != InContext.fieldExp) Scheduler().add(this,sc);
+		// if(inContext != InContext.fieldExp) Scheduler().add(this,sc);
 		if(!scope_) scope_=sc;
 		assert(meaning && scope_);
 		if(needRetry) sstate = SemState.begin;
@@ -4282,7 +4274,7 @@ class Symbol: Expression{ // semantic node
 
 		if(inoutRes!=InoutRes.none){sstate=SemState.completed;resolveInout(inoutRes);}
 
-		if(isImplicitlyCalled()){
+		if(isImplicitlyCalled()&&inContext!=InContext.fieldExp){
 			auto s = New!Symbol(meaning);
 			s.loc = loc;
 			s.accessCheck = accessCheck;
@@ -4312,11 +4304,21 @@ class Symbol: Expression{ // semantic node
 	}
 
 	final bool isImplicitlyCalled(){
+		return isImplicitlyCalled(inContext);
+	}
+
+	final bool isImplicitlyCalled(InContext inContext){
 		Declaration implcalldecl = meaning.isFunctionDecl();
 		if(!implcalldecl)
 			if(auto ov=meaning.isOverloadSet())
 				if(ov.hasFunctions())
 					implcalldecl=meaning;
+		bool implicitCall;
+		switch(inContext) with(InContext){
+			case called, addressTaken, instantiated, passedToTemplateAndOrAliased, fieldExp:
+				implicitCall=false; break;
+			default: implicitCall=true;
+		}
 		return implcalldecl && (implicitCall || !ignoreProperty && meaning.stc&STCproperty);
 	}
 
@@ -5580,9 +5582,7 @@ mixin template Semantic(T) if(is(T==SuperExp)){
 
 mixin template Semantic(T) if(is(T==FieldExp)){
 
-	override void isInContext(InContext context){
-		if(e2.inContext!=InContext.fieldExp) e2.isInContext(context);
-	}
+	mixin ContextSensitive;
 
 	Expression res;
 	Expression ufcs; // TODO: we do not want this to take up space in every instance
@@ -5634,17 +5634,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		// TODO: find a better design here
 		if(rewrite)
 			return;
-
-		{	// block implicit call rewrite:
-			auto inContext = e2.inContext;
-			e2.inContext = InContext.fieldExp; scope(exit) e2.inContext=inContext;
-			auto ignoreProperty = e2.ignoreProperty;
-			e2.ignoreProperty = true; scope(exit) e2.ignoreProperty=ignoreProperty;
-			
-			e2.semantic(sc);
-			Scheduler().remove(e2);
-		}
-
+		e2.inContext = InContext.fieldExp;
+		e2.semantic(sc);
 		res = e2;
 		mixin(Rewrite!q{res});
 		e2.rewrite = null;
@@ -5709,6 +5700,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				if(e1.isType()) goto Lok;
 				// allow implicit call rewrite
 				sym.sstate = SemState.begin;
+				sym.inContext = InContext.none;
+				transferContext(sym);
 				sym.semantic(sc);
 			}
 			mixin(RewEplg!q{r});
@@ -5716,13 +5709,12 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			// we have a 'this' pointer that we don't need
 		}+/
 	Lok:
-		if(e2.isImplicitlyCalled()){
+		// in order to be able to reuse isImplicitlyCalled (TODO: improve)
+		if(e2.isImplicitlyCalled(inContext)){
 			auto b = New!(BinaryExp!(Tok!"."))(e1,e2);
 			b.loc = loc;
 			e2.ignoreProperty=true;
 			auto r = New!CallExp(b, (Expression[]).init);
-			e2.transferContext(r);
-			e2.inContext = InContext.called;
 			r.loc = loc;
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
@@ -5750,7 +5742,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			mixin(SemChldPar!q{ufcs});
 			if(ufcs.isSymbol()||ufcs.isType())
 			if(ufcs.sstate == SemState.completed){
-				bool incomplete=e2.inContext.among(InContext.called,InContext.instantiated);
+				bool incomplete=inContext.among(InContext.called,InContext.instantiated);
 				incomplete&=!(ufcs.isSymbol()&&ufcs.isSymbol().meaning.stc&STCproperty);
 				auto r = New!UFCSCallExp(ufcs, this_, incomplete);
 				r.loc=loc;
@@ -5853,9 +5845,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(auto tt=e1.extractThis())
 			this_=tt.type;
 		
-		auto inContext=e2.inContext;
-		e2.inContext=inContext.fieldExp;
-		scope(exit) e2.inContext=inContext;
+		assert(e2.inContext==InContext.fieldExp);
 
 		mixin(MatchCallHelper!q{auto exp; e2, sc, loc, this_, args, context});
 		if(!exp) return null.independent!Expression;
