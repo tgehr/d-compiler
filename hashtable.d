@@ -17,7 +17,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 	size_t length;
 
 	enum initialSize = 16;
-	enum maxBucketSize = 32;
+	enum maxBucketSize = 2;
 	enum limitfactor = 32;
 	enum incrementFactor = 3;
 	enum decrementFactor = 2;
@@ -25,6 +25,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 
 
 	private void initialize(){ es = new B[](initialSize); }
+	int numrealloc;
 	private void realloc(){
 		auto ees = es;
 		es = new B[](es.length*incrementFactor+uniform(0,incrementFactor));
@@ -50,7 +51,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 	V get(K k, lazy V alt){
 		if(length){
 			foreach(ref e; es[h(k)%$])
-		        if(eq(k, e.k)) return e.v;
+				if(eq(k, e.k)) return e.v;
 		}
 		return alt;
 	}
@@ -72,9 +73,10 @@ struct HashMap(K, V, alias eq_ , alias h_){
 			}
 	}
 
-	private void insert(E x) out{assert(x.k in this, text(es[h(x.k)%$]));}body{
+	private void insert(E x) /+out{assert(x.k in this, text(es[h(x.k)%$]));}body+/{
 		if(!es.length) initialize();
-		auto b = &es[h(x.k)%$];
+		auto hs=h(x.k);
+		auto b = &es[hs%$];
 		foreach(ref e; *b)
 			if(eq(x.k, e.k)){
 				e=x;
@@ -82,7 +84,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 			}
 		length++;
 		*b~=x;
-		if(b.length>maxBucketSize&&length*limitfactor<b.length) realloc();
+		if(b.length>maxBucketSize&&hs!=h((*b)[0].k)) realloc();
 	}
 	
 	void opIndexAssign(V v, K k){
@@ -227,7 +229,7 @@ struct CuckooMap(K, V, alias eq_, alias h0_, alias h1_){
 /+		import expression;
 		static if(is(typeof(x.k)==Expression[]))foreach(k, e; es) if(e.e){
 				dw(k," ",e.k," ",h0(e.k)," ",h1(e.k)," ",
-				   e.k.map!(_=>_.templateParameterToHash()));
+				   e.k.map!(_=>_.tmplArgToHash()));
 		}
 		dw();dw();+/
 
@@ -292,10 +294,22 @@ size_t FNV(size_t data, size_t start=fnvb){
 
 size_t FNVred(R)(R i){
 	if(!i.length) return fnvb;
-	auto r = FNV(i[0].templateParameterToHash());
-	foreach(x; i[1..$]) r = FNV(x.templateParameterToHash(), r);
+	auto r = FNV(i[0].tmplArgToHash());
+	foreach(x; i[1../*$*/i.length]) r = FNV(x.tmplArgToHash(), r); // TODO: update compiler, then dollar will work for ropes
 	return r;
 }
+
+
+// (Dummy implementation!)
+struct AssocHash{
+	size_t value;
+}
+auto toHash(AssocHash h){ return h.value; }
+auto assocHashCombine(AssocHash a, AssocHash b){ return AssocHash(a.value+b.value); }
+int i;
+auto assocHash(size_t data){ return AssocHash(data); }
+private enum assocb=assocHash(0);
+auto assocHashRed(R)(R i){ return reduce!assocCombine(assocb, i.map!assocHash); }
 
 alias Seq!(identityHash0, identityHash1) identityHash;
 

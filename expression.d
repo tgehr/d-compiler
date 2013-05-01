@@ -8,6 +8,7 @@ import scope_, semantic, visitors, vrange, util;
 import analyze;
 
 import variant;
+import rope_;
 
 // Node champ;
 
@@ -377,6 +378,27 @@ class CallExp: TemporaryExp{
 	mixin DownCastMethod;
 	mixin Visitors;
 }
+
+
+import hashtable;
+struct TemplArgInfo{
+	AssocHash hash;
+	bool typeOnly=true;
+	this(AssocHash hash, bool typeOnly){this.hash=hash;this.typeOnly=typeOnly;}
+	this(Expression e){
+		this(!e?0.assocHash():e.tmplArgToHash().assocHash(),!e||e.isType());
+	}
+	TemplArgInfo combine(TemplArgInfo rhs){
+		return TemplArgInfo(assocHashCombine(hash,rhs.hash),typeOnly&&rhs.typeOnly);
+	}
+}
+
+alias Rope!(Expression,TemplArgInfo) TemplArgs;
+alias Rope!(Type,TemplArgInfo) TypeTemplArgs;
+
+size_t tmplArgToHash(T)(Rope!(T,TemplArgInfo) arg){ return arg.value.hash.toHash(); }
+
+
 class TemplateInstanceExp: Expression{
 	Expression e;
 	Expression[] args;

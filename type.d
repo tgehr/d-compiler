@@ -7,6 +7,8 @@ import semantic, scope_, vrange, visitors;
 
 import analyze;
 
+import rope_;
+
 import std.traits : Unqual;
 
 class Type: Expression{ //Types can be part of Expressions and vice-versa
