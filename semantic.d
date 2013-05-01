@@ -1880,8 +1880,7 @@ class TemplateInstanceDecl: Declaration{
 		// TODO: does this work?
 		if(!paramScope){
 			paramScope = New!TemplateScope(scope_,scope_,this);
-			determineInstanceScope(); // !!!
-			// paramScope.iparent=parent.scope_;
+			determineInstanceScope();// TODO: this makes template argument sequence manipulation slow
 		}
 
 		// this always fills the first tuple parameter
@@ -2412,7 +2411,30 @@ class ExpTuple: Expression, Tuple{
 	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
-		auto r=exprs[cast(size_t)index].clone(sc,inContext,loc);
+		return indexImpl(sc,inContext,loc,exprs[cast(size_t)index]);
+	}
+
+	final allIndices(Scope sc, InContext inContext, const ref Location loc){
+		static struct AllIndices{
+			private{
+				Scope sc;
+				InContext inContext;
+				Location loc;
+				ExpTuple tp;
+			}
+
+			int opApply(scope int delegate(Expression) dg){
+				foreach(exp;this.tp.exprs)
+					if(auto r=dg(tp.indexImpl(sc,inContext,loc,exp)))
+						return r;
+				return 0;
+			}
+		}
+		return AllIndices(sc,inContext,loc,this);
+	}
+
+	private Expression indexImpl(Scope sc, InContext inContext, const ref Location loc, Expression exp){
+		auto r=exp.clone(sc,inContext,loc);
 
 		if(auto s=r.isSymbol()){
 			if(s.accessCheck<accessCheck){
@@ -2590,8 +2612,8 @@ mixin template TupleImplConvTo(alias exprs){
 class TypeTuple: Type, Tuple{
 	this(TypeTemplArgs types)in{
 		alias util.all all;
-		assert(all!(_=>_.sstate==SemState.completed)(types));
-		assert(all!(_=>!_.isTuple())(types));
+		// assert(all!(_=>_.sstate==SemState.completed)(types));
+		// assert(all!(_=>!_.isTuple())(types));
 	}body{
 		this.types = types;
 		sstate = SemState.completed;
@@ -2607,6 +2629,8 @@ class TypeTuple: Type, Tuple{
 		assert(sstate == SemState.completed);
 		return types[cast(size_t)index];
 	}
+
+	final allIndices(){ return types; }
 	Expression slice(Scope sc,const ref Location loc, ulong a,ulong b)in{
 		assert(a<=b && b<=length);
 	}body{
@@ -3096,15 +3120,15 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			if(p.which==WhichTemplateParameter.constant){
 				mixin(ImplConvertTo!q{x,p.type});
 				x.semantic(sc);
-				assert(x.sstate == SemState.completed);
 				x.interpret(sc);
 				mixin(Rewrite!q{x});
+				mixin(PropErr!q{x});
+				assert(x.sstate == SemState.completed);
 			}else if(p.which==WhichTemplateParameter.tuple)
 				break;
 			
 		}
 
-		mixin(PropErr!q{analyzedArgs});
 		// ! changing meaning of 'sym'
 		if(!inst.finishedInstantiation()) inst.finishInstantiation(!matchOnly); // start analysis?
 		if(sc.handler.showsEffect&&inst.isGagged) inst.ungag();

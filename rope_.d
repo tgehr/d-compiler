@@ -182,9 +182,17 @@ template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
 			invariant(){ assert(array.length==length); }
 		}
 		RopeImpl* opBinary(string op:"~")(RopeImpl* rhs){
-			if(tag==Tag.Array||rhs.tag==Tag.Array){
-				// if(length+rhs.length<128) return new RopeImpl(array~rhs.array);
+			if(tag==Tag.Array&&rhs.tag==Tag.Array){
+				// TODO: coalesce?
 				return new RopeImpl(&this,rhs);
+			}
+			if(tag==Tag.Array){
+				if(uniform(0,2)) return new RopeImpl(&this,rhs);
+				else return new RopeImpl(this~rhs.l,rhs.r);
+			}
+			if(rhs.tag==Tag.Array){
+				if(uniform(0,2)) return new RopeImpl(l,*r~rhs);
+				else return new RopeImpl(&this,rhs);
 			}
 			// TODO: refcount+in-place updates
 			if(uniform(0,2)) return new RopeImpl(l,*r~rhs);
@@ -210,20 +218,20 @@ template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
 		}
 		int opApply(scope int delegate(size_t,T) dg,size_t start=0){
 			if(tag==Tag.Array){foreach(i,x;array) if(auto r=dg(start+i,x)) return r; return 0; }
-			if(auto r=l.opApply(dg)) return r;
-			return r.opApply(dg,l.length);
+			if(auto r=l.opApply(dg,start)) return r;
+			return r.opApply(dg,start+l.length);
 		}
 
 		// in-place update.
-		int unsafeByRef(scope int delegate(ref T) dg,size_t start=0){
+		int unsafeByRef(scope int delegate(ref T) dg){
 			if(tag==Tag.Array){foreach(ref x;array) if(auto r=dg(x)) return r; return 0; }
 			if(auto r=l.unsafeByRef(dg)) return r;
-			return r.unsafeByRef(dg,l.length);
+			return r.unsafeByRef(dg);
 		}
 		int unsafeByRef(scope int delegate(size_t,ref T) dg,size_t start=0){
 			if(tag==Tag.Array){foreach(i,ref x;array) if(auto r=dg(start+i,x)) return r; return 0; }
-			if(auto r=l.unsafeByRef(dg)) return r;
-			return r.unsafeByRef(dg,l.length);			
+			if(auto r=l.unsafeByRef(dg,start)) return r;
+			return r.unsafeByRef(dg,start+l.length);			
 		}
 	}
 }
