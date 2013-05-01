@@ -25,7 +25,7 @@ mixin template Analyze(){
 							//if(_idfofodi2) writeln(T.stringof,_idfododi," ",(_idfofodi2));
 
 							if(_idfofodi2) dg(_idfofodi2);
-						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl"){ // hack, annotations will solve this
+						}else static if(is(typeof(_idfofodi2[0]): Node) && !is(typeof(_idfofodi2[0]): Type) && _idfododi!="bcErrtbl" && !is(typeof(_idfofodi2): Type) && !is(typeof(this):Tuple) && (!is(typeof(this)==TemplateInstanceExp)||_idfododi!="args"&&_idfododi!="analyzedArgs"&&_idfododi!="argTypes")){ // hack, annotations will solve this
 
 								//import std.stdio; if(_idfofodi2.length) writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
 								//if(_idfofodi2.length) writeln(_idfododi);

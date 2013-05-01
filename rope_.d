@@ -200,7 +200,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
 			if(tag==Tag.Array) return new RopeImpl(array[a..b], (*tree)[a..b]);
 			if(b<=l.length) return (*l)[a..b];
 			if(l.length<=a) return (*r)[a-l.length..b-l.length];
-			return new RopeImpl((*l)[a..l.length],(*r)[0..b-l.length]);
+			return *(*l)[a..l.length]~(*r)[0..b-l.length];
 		}
 
 		int opApply(scope int delegate(T) dg){

@@ -833,7 +833,6 @@ mixin template Semantic(T) if(is(T==Expression)){
 		assert(sstate == SemState.completed,"not completed sstate "~toString());
 		assert(rhs.sstate == SemState.completed,"rhs not completed sstate "~rhs.toString());
 	}body{
-		dw(this," ",rhs," ",typeid(this));
 		assert(0, "unsupported operation");
 	}
 	size_t tmplArgToHash(){
@@ -1881,7 +1880,8 @@ class TemplateInstanceDecl: Declaration{
 		// TODO: does this work?
 		if(!paramScope){
 			paramScope = New!TemplateScope(scope_,scope_,this);
-			determineInstanceScope();
+			determineInstanceScope(); // !!!
+			// paramScope.iparent=parent.scope_;
 		}
 
 		// this always fills the first tuple parameter
@@ -2320,9 +2320,7 @@ interface Tuple{
 		foreach(i,x;a){
 			if(!x) continue;
 			if(auto tp=x.isTuple()){
-				foreach(y; tp) y.loc=x.loc;
 				if(auto et=x.isExpTuple()){
-					et.accessCheckSymbols();
 					static if(isarray){
 						auto exprs=et.exprs.array;
 						if(et.scope_) foreach(ref exp;exprs) exp=exp.clone(et.scope_,InContext.passedToTemplateAndOrAliased,et.loc);
@@ -2376,11 +2374,6 @@ class ExpTuple: Expression, Tuple{
 	 */
 	AccessCheck accessCheck = AccessCheck.all;
 
-	protected this(){
-		alias util.all all;
-		assert(all!(_=>_.sstate==SemState.completed)(exprs));
-	}
-
 	private Scope scope_;
 	this(Scope sc, Expression[] exprs){ this(sc, exprs.captureTemplArgs); }
 	this(Scope sc, TemplArgs exprs)in{
@@ -2416,17 +2409,6 @@ class ExpTuple: Expression, Tuple{
 
 	override Tuple isTuple(){return this;}
 
-	void accessCheckSymbols(){
-		foreach(r; exprs){
-			if(auto s=r.isSymbol()){
-				if(s.accessCheck<accessCheck){
-					s.accessCheck = accessCheck;
-					s.performAccessCheck();
-				}
-			}
-		}
-	}
-
 	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
@@ -2460,19 +2442,21 @@ class ExpTuple: Expression, Tuple{
 		alias util.all all;
 
 		// the empty tuple is an expression except if a type is requested
-		if(exprs.length && all!(_=>cast(bool)_.isType())(exprs)){
+		if(exprs.length && exprs.value.typeOnly){
 			auto r=New!TypeTuple(cast(TypeTemplArgs)exprs); // TODO: ok?
 			assert(r.sstate == SemState.completed);
 			mixin(RewEplg!q{r});
 		}
 		// auto tt = exprs.map!(x=>x.isType() ? assert(cast(Type)x), cast(Type)cast(void*)x : x.type).rope; // TODO: report DMD bug
-		auto tta = new Type[exprs.length];
-		foreach(i,ref x;tta){
-			if(auto ty=exprs[i].isType()) x = ty;
-			else x = exprs[i].type;
+		if(!type){
+			auto tta = new Type[exprs.length];
+			foreach(i,ref x;tta){
+				if(auto ty=exprs[i].isType()) x = ty;
+				else x = exprs[i].type;
+			}
+			auto tt = tta.captureTemplArgs;
+			type = New!TypeTuple(tt);
 		}
-		auto tt = tta.captureTemplArgs;
-		type = New!TypeTuple(tt);
 		dontConstFold();
 		mixin(SemEplg);
 	}
@@ -2494,11 +2478,13 @@ class ExpTuple: Expression, Tuple{
 
 	override bool isConstant(){
 		alias util.all all;
-		return all!(_=>_.isConstant())(exprs);
+		//return all!(_=>_.isConstant())(exprs); // !!!
+		return true;
 	}
 	override bool isConstFoldable(){
 		alias util.all all;
-		return all!(_=>_.isConstFoldable())(exprs);
+		//return all!(_=>_.isConstFoldable())(exprs); // !!!
+		return false;
 	}
 
 	mixin TupleImplConvTo!exprs;
@@ -2519,7 +2505,7 @@ class ExpTuple: Expression, Tuple{
 	}
 	override size_t tmplArgToHash(){
 		import hashtable;
-		return FNVred(exprs);
+		return toHash(exprs.value.hash);
 	}
 
 private:
@@ -2683,7 +2669,7 @@ class TypeTuple: Type, Tuple{
 
 	override size_t tmplArgToHash(){
 		import hashtable;
-		return FNVred(types);
+		return toHash(types.value.hash);
 	}
 
 	static TypeTemplArgs expand(R)(R tts)if(isInputRange!R&&is(ElementType!R==Type)){

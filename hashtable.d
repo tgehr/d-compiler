@@ -73,7 +73,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 			}
 	}
 
-	private void insert(E x) out{assert(x.k in this, text(es[h(x.k)%$]));}body{
+	private void insert(E x) /+out{assert(x.k in this, text(es[h(x.k)%$]));}body+/{
 		if(!es.length) initialize();
 		auto hs=h(x.k);
 		auto b = &es[hs%$];
