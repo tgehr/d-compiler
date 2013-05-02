@@ -4,7 +4,7 @@ struct IndetCircErr{
 		return b(t[0],t[1..$]);
 	}
 	
-	static getLen(T)(T[] t){ return match!(()=>0,(x,xs)=>1+getLen(xs))(t); } // // TODO: this appears to sometimes fail
+	static getLen(T)(T[] t){ return match!(()=>0,(x,xs)=>1+getLen(xs))(t); }
 	
 	pragma(msg, getLen([1,2,3,4]));
 	static assert(getLen([1,2,3,4])==4);
