@@ -333,6 +333,9 @@ auto maybe(alias a, T)(T arg){
 	return maybe!(a, ()=>typeof(a(arg)).init)(arg);
 }
 
+auto or(T)(T t, lazy T s){ if(t) return t; return s; }
+S and(T,S)(T t, lazy S s){ if(!t) return null; return s; }
+
 // Versions from Phobos do not work. TODO: reduce and file bug report
 
 import std.range;

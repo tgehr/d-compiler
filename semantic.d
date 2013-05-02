@@ -146,7 +146,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 					foreach(ref x;@(t)) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
 					static if(is(typeof(@(t)): Expression[]) && (!is(typeof(this)==TemplateInstanceExp)||"@(t)"!="args")){
 						pragma(msg, typeof(this)," @(t)");
-						@(t)=Tuple.expand(@(t));
+						@(t)=Tuple.expand(@(sc),@(t));
 						//foreach(ref x;@(t)) mixin(PropRetry!q{x});
 						mixin(PropErr!q{@(t)});
 					}
@@ -1416,7 +1416,7 @@ private:
 			mixin(ErrEplg);
 		}
 
-		auto r=tp.slice(sc,loc,a,b);
+		auto r=tp.slice(loc,a,b);
 		r.semantic(sc);
 		mixin(NoRetry);
 		return r;
@@ -1767,7 +1767,8 @@ class TemplateInstanceDecl: Declaration{
 
 		this.loc = loc;
 
-		this.instantiation = expr; // TODO: need to handle FieldExp?
+		if(!this.instantiation)
+			this.instantiation = expr; // TODO: need to handle FieldExp?
 
 		scope_ = parent.scope_;
 		sstate = SemState.begin;
@@ -1891,7 +1892,7 @@ class TemplateInstanceDecl: Declaration{
 		// but potentially less useful.
 		if(tuplepos<params.length && args.length>tuplepos){
 			auto expr = args[tuplepos..args.length]; // TODO: dollar
-			Expression et = New!ExpTuple(paramScope.iparent,expr,New!TypeTuple(argTypes[tuplepos..args.length]));
+			Expression et = New!ExpTuple(expr,New!TypeTuple(argTypes[tuplepos..args.length]));
 			et.semantic(scope_);
 			mixin(Rewrite!q{et});
 			assert(et.sstate == SemState.completed);
@@ -1976,7 +1977,7 @@ class TemplateInstanceDecl: Declaration{
 		}
 
 		mixin(SemChldPar!q{iftiEponymousParameters});
-		iftiEponymousParameters = Tuple.expand(iftiScope, iftiEponymousParameters);
+		iftiEponymousParameters = Tuple.expandVars(iftiScope, iftiEponymousParameters);
 
 		foreach(ref x;iftiArgs) mixin(SemChld!q{x});
 
@@ -2086,7 +2087,7 @@ class TemplateInstanceDecl: Declaration{
 		}
 
 		if(tuplepos < params.length && !resolved[tuplepos])
-			resolved[tuplepos]=New!ExpTuple(paramScope.iparent,(Expression[]).init);
+			resolved[tuplepos]=New!ExpTuple((Expression[]).init);
 
 		alias util.any any;
 		if(any!(_=>_ is null)(resolved)) return false;
@@ -2304,14 +2305,14 @@ import rope_;
 interface Tuple{
 	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index)
 		in{assert(index<length);}
-	Expression slice(Scope sc, const ref Location loc, ulong a, ulong b)
+	Expression slice(const ref Location loc, ulong a, ulong b)
 		in{assert(a<=b && b<length);}
 
 	@property size_t length();
 
 	int opApply(scope int delegate(Expression) dg);
 
-	static T expand(T,S...)(T a, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,TemplArgInfo),X)){
+	static T expand(T,S...)(Scope sc,T a, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,TemplArgInfo),X)){
 		T r;
 		S rep;
 		static if(is(T _:X[],X))enum isarray=true;else enum isarray=false;
@@ -2322,7 +2323,7 @@ interface Tuple{
 				if(auto et=x.isExpTuple()){
 					static if(isarray){
 						auto exprs=et.exprs.array;
-						if(et.scope_) foreach(ref exp;exprs) exp=exp.clone(et.scope_,InContext.passedToTemplateAndOrAliased,et.loc);
+						foreach(ref exp;exprs) exp=exp.clone(sc,InContext.passedToTemplateAndOrAliased,et.loc);
 					}else auto exprs=et.exprs;
 					r~=a[index..i]~exprs;
 				}else if(auto tt=x.isTypeTuple()){
@@ -2344,7 +2345,7 @@ interface Tuple{
 		return index?r~=a[index..a.length]:a; // TODO: dollar
 	}
 
-	static VarDecl[] expand()(Scope sc, VarDecl[] a) in{ //templated as workaround
+	static VarDecl[] expandVars(Scope sc, VarDecl[] a) in{
 /+		alias util.all all;
 		assert(all!(_=>!_.rtype&&!_.init||_.sstate == SemState.completed)(a));+/
 	}body{
@@ -2361,8 +2362,8 @@ interface Tuple{
 		}
 		return index?r~a[index..$]:a;
 	}
-	static Parameter[] expand()(Scope sc,Parameter[] a){ // ditto
-		return cast(Parameter[])expand(sc,cast(VarDecl[])a);
+	static Parameter[] expandVars(Scope sc,Parameter[] a){ // ditto
+		return cast(Parameter[])expandVars(sc,cast(VarDecl[])a);
 	}
 
 }
@@ -2373,37 +2374,28 @@ class ExpTuple: Expression, Tuple{
 	 */
 	AccessCheck accessCheck = AccessCheck.all;
 
-	private Scope scope_;
-	this(Scope sc, Expression[] exprs){ this(sc, exprs.captureTemplArgs); }
-	this(Scope sc, TemplArgs exprs)in{
+	this(Expression[] exprs){ this(exprs.captureTemplArgs); }
+	this(TemplArgs exprs)in{
 		alias util.all all;
-		assert(sc);
 		assert(all!(_=>_.sstate==SemState.completed)(exprs));
 	}body{
 		// TODO: gc allocation
-		this.scope_ = sc;
 		this.exprs = exprs;
 	}
 
-	this(Scope sc, size_t len, Expression exp)in{
+	this(size_t len, Expression exp)in{
 		assert(exp.sstate == SemState.completed);
 		assert(len<=size_t.max);
-		assert(sc);
 	}body{
-		// exprs = std.range.repeat(exp,cast(size_t)len).map!(x=>x.clone(sc, InContext.passedToTemplateAndOrAliased, loc)).rope; // TODO: report DMD bug
-		this.scope_ = sc;
 		auto exprsa = new Expression[cast(size_t)len];
-		foreach(ref x;exprsa) x=exp.clone(sc, InContext.passedToTemplateAndOrAliased, loc);
+		foreach(ref x;exprsa) x=exp;
 		exprs = exprsa.captureTemplArgs;
 	}
 
-	/+private+/ this(Scope sc, TemplArgs exprs, Type type)in{
-		assert(sc);
-	}body{// TODO: report DMD bug
-		this.scope_=sc;
+	/+private+/ this(TemplArgs exprs, Type type){// TODO: report DMD bug
 		this.exprs=exprs;
 		this.type=type;
-		semantic(sc);
+		semantic(null);
 	}
 
 	override Tuple isTuple(){return this;}
@@ -2444,13 +2436,13 @@ class ExpTuple: Expression, Tuple{
 		}
 		return r;
 	}
-	Expression slice(Scope sc, const ref Location loc, ulong a,ulong b)in{
+	Expression slice(const ref Location loc, ulong a,ulong b)in{
 		assert(a<=b && b<=length);
 	}body{
 		assert(sstate == SemState.completed);
 		assert(cast(TypeTuple)type);
 		auto types = (cast(TypeTuple)cast(void*)type).types;
-		return New!ExpTuple(sc,exprs[cast(size_t)a..cast(size_t)b],New!TypeTuple(types[cast(size_t)a..cast(size_t)b]));
+		return New!ExpTuple(exprs[cast(size_t)a..cast(size_t)b],New!TypeTuple(types[cast(size_t)a..cast(size_t)b]));
 	}
 	@property size_t length(){ return exprs.length;}
 
@@ -2489,7 +2481,7 @@ class ExpTuple: Expression, Tuple{
 		foreach(i,ref x;exprsa) x = exprs[i].clone(sc,InContext.passedToTemplateAndOrAliased,loc);
 		auto r = New!ExpTuple(sc, exprsa.ropeCapture, type);+/
 
-		auto r = New!ExpTuple(sc, exprs, type); // TODO: why does this not work?
+		auto r = New!ExpTuple(exprs, type);
 		r.loc = loc;
 		return r;
 	}
@@ -2579,7 +2571,7 @@ ExpTuple makeMultiReturn(CallExp call)in{
 	if(call.tmpVarDecl.tupleContext.syms.length){
 		r=call.tmpVarDecl.tupleContext.vds[0].init=
 			New!MultiReturnValueExp(call, call.tmpVarDecl.tupleContext.syms[0]);
-		return New!ExpTuple(call.tmpVarDecl.scope_, r~call.tmpVarDecl.tupleContext.syms[1..$]);
+		return New!ExpTuple(r~call.tmpVarDecl.tupleContext.syms[1..$]);
 		// TODO: aliasing would be ok here
 	}
 	assert(0,"TODO: zero return values");
@@ -2631,7 +2623,7 @@ class TypeTuple: Type, Tuple{
 	}
 
 	final allIndices(){ return types; }
-	Expression slice(Scope sc,const ref Location loc, ulong a,ulong b)in{
+	Expression slice(const ref Location loc, ulong a,ulong b)in{
 		assert(a<=b && b<=length);
 	}body{
 		assert(sstate == SemState.completed);
@@ -3035,7 +3027,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 		if(!analyzedArgsInitialized){
 			analyzedArgs = args.captureTemplArgs();
-			analyzedArgs = Tuple.expand(analyzedArgs);
+			analyzedArgs = Tuple.expand(sc,analyzedArgs);
 			argTypes = TypeTuple.expand(args.map!((a){
 				// TODO: this is hacky (the type passed is irrelevant), better approaches?
 				if(auto tt=a.isTypeTuple()) return tt;
@@ -3137,7 +3129,8 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		sym.accessCheck = accessCheck;
 		if(matchOnly) sym.makeWeak(); // do not propagate errors
 		transferContext(sym);
-		inst.instantiation = sym; // transfer ownership
+		if(inst.instantiation is this)
+			inst.instantiation = sym; // transfer ownership
 
 		if(container){
 			auto res = New!(BinaryExp!(Tok!"."))(container, sym);
@@ -6465,7 +6458,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		if(rret) mixin(PropErr!q{rret});
 		if(ret) mixin(PropErr!q{ret});
 		mixin(PropErr!q{params});
-		params = Tuple.expand(sc,params);
+		params = Tuple.expandVars(sc,params);
 		mixin(SemEplg);
 	}
 
@@ -8262,7 +8255,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 						mixin(ErrEplg);
 					}
 				}else{
-					et = New!ExpTuple(sc, len, init);
+					et = New!ExpTuple(len, init);
 					et.loc = init.loc;
 					init = et;
 					mixin(SemChldPar!q{init});
@@ -8302,7 +8295,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			}
 			mixin(SemChld!q{tc.syms});
 			if(!tc.tupleAlias){
-				auto stpl = New!ExpTuple(sc,tc.syms); // TODO: can directly transfer ownership
+				auto stpl = New!ExpTuple(tc.syms); // TODO: can directly transfer ownership
 				stpl.loc = loc;
 				tc.tupleAlias = New!AliasDecl(STC.init, newVarDecl(STC.init, stpl, name, null));
 				tc.tupleAlias.sstate = SemState.begin;
@@ -8845,7 +8838,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			if(!weak) x.semantic(sc);
 			mixin(Rewrite!q{x});
 		}
-		parents = Tuple.expand(parents, rparents);
+		parents = Tuple.expand(scope_, parents, rparents);
 		auto knownBefore = knownParents;
 		updateKnownParents(); // valid because only prior unknown parents can cause expansion
 		foreach(i, ref x; parents[knownBefore..knownParents]){

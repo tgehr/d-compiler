@@ -182,7 +182,8 @@ class Scheduler{
 				// this code causes very significant slowdowns for deeply nested template instantiations and often is a bottleneck for template meta-programs
 				// TODO: optimize or find a way to ensure correctness that does not depend on this
 				TemplateInstanceDecl[] tmpls; // TODO: use a SmallCollection, or just a counter
-				for(auto tmpl=sc.maybe!(a=>a.getTemplateInstance());
+				import declaration;
+				for(auto tmpl=nd.isDeclaration().and((cast(Declaration)cast(void*)nd).isTemplateInstanceDecl().maybe!(a=>a.instantiation.isSymbol().maybe!(a=>a.scope_))).or(sc).maybe!(a=>a.getTemplateInstance());
 				    tmpl&&tmpl.sstate==SemState.begin;
 				    tmpl=tmpl.instantiation.isSymbol()
 					    .maybe!(a=>a.scope_.maybe!(a=>a.getTemplateInstance()))
