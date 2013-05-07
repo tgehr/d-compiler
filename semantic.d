@@ -1881,7 +1881,6 @@ class TemplateInstanceDecl: Declaration{
 		// TODO: does this work?
 		if(!paramScope){
 			paramScope = New!TemplateScope(scope_,scope_,this);
-			determineInstanceScope();// TODO: this makes template argument sequence manipulation slow
 		}
 
 		// this always fills the first tuple parameter
@@ -2109,6 +2108,7 @@ class TemplateInstanceDecl: Declaration{
 		auto bdyscope=New!NestedScope(paramScope);
 		bdy = bdy.ddup();
 
+		determineInstanceScope();
 		auto instanceScope = paramScope.iparent;
 		bdy.stc|=parent.stc;
 		if(instanceScope !is parent.scope_){
