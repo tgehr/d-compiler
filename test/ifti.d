@@ -292,7 +292,7 @@ static assert(mixin(exec!()((int x,short y,byte z)=>toString(x)~"+"~toString(y)~
 //pragma(msg, foo!()(1));
 
 auto inexistentparamtype(T...)(S arg){ }
-auto inexistentparamtype(T...)(S arg) if(T.length){ // TODO: gag
+auto inexistentparamtype(T...)(S arg) if(T.length){
 	return arg.length;
 }
 pragma(msg, inexistentparamtype!()(2)); // error
