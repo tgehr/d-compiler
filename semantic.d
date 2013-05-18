@@ -2193,6 +2193,25 @@ class TemplateInstanceDecl: Declaration{
 				if(!checkResolvedValidity()||!finishMatching())
 					mixin(ErrEplg);
 
+				// do implicit conversions
+				foreach(i; 0..resolved.length){
+					auto x = resolved[i];
+					scope(exit) resolved[i]=x;
+
+					auto p = parent.params[i];
+					mixin(Rewrite!q{x});
+					if(x.isType()) continue;
+					if(p.which==WhichTemplateParameter.constant){
+						mixin(ImplConvertTo!q{x,p.type});
+						x.semantic(sc);
+						x.interpret(sc);
+						mixin(Rewrite!q{x});
+						mixin(PropErr!q{x});
+						assert(x.sstate == SemState.completed);
+					}else if(p.which==WhichTemplateParameter.tuple)
+						break;
+				}
+
 				matchState = checkConstraint;
 				
 				auto r = parent.completeMatching(this, isGagged);
@@ -3104,22 +3123,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		auto decl = inst.parent;
 
 		needRetry=false;
-		// TODO: (why) is this needed? :
-		foreach(i,ref x; analyzedArgs[0..min(analyzedArgs.length,decl.params.length)].unsafeByRef()){ // TODO: dollar
-			auto p = decl.params[i];
-			mixin(Rewrite!q{x});
-			if(x.isType()) continue;
-			if(p.which==WhichTemplateParameter.constant){
-				mixin(ImplConvertTo!q{x,p.type});
-				x.semantic(sc);
-				x.interpret(sc);
-				mixin(Rewrite!q{x});
-				mixin(PropErr!q{x});
-				assert(x.sstate == SemState.completed);
-			}else if(p.which==WhichTemplateParameter.tuple)
-				break;
-			
-		}
 
 		// ! changing meaning of 'sym'
 		if(!inst.finishedInstantiation()) inst.finishInstantiation(!matchOnly); // start analysis?

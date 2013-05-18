@@ -26,7 +26,7 @@ class Scheduler{
 	}
 	
 	struct WorkingSet{
-		private enum useBuiltin = false; // TODO: when set to true, wrong behaviour results (test/tmplanalysis.d). Wrong code bug? AA bug? Something else?
+		private enum useBuiltin = true;
 		static if(useBuiltin) private template Map(K, V){ alias V[K] Map; }
 		else private template Map(K,V){ alias HashMap!(K, V, "a is b","cast(size_t)cast(void*)a/16") Map; }
 
