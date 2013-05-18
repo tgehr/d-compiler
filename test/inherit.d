@@ -511,6 +511,11 @@ class HidesFinalFoo: HasFinalFoo{
 	final int foo(int x) { return x; }// ok
 }
 
+void testOverrideSkip(){
+	class P{ int foo(){ return 2; }}
+	class C6: P{}
+	class C7: C6{ override int foo(){ return 3; }}
+}
 
 class GG{ enum gg = "gg"; }
 class HH: GG{ enum hh = "hh"; }
@@ -589,7 +594,12 @@ int test(){
 }
 //pragma(msg, test());
 
-
+struct TestInheritIsExp{
+	class A{ static assert(is(E: A)); }
+	class D(): A{}
+	class E: D!(){}
+	pragma(msg, is(E:A));	
+}
 
 class X{}
 class Y:X{}

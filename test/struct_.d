@@ -191,6 +191,15 @@ struct SS{
 
 mixin("mixin(`dod`);"); // error
 
+static assert(!is(typeof({
+int testStructMemberAliasParam(){
+	int x;
+	struct S{
+		void bar(int x){ foo((a)=>a=x); }
+		void foo(alias a)(){ a(x); }
+	}
+}})));
+
 
 void main(){
 /+	mixin(q{	for(c=2;){return 2;}

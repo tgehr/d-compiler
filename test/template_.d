@@ -38,6 +38,31 @@ struct MatchLevels{
 	mixin(generate()); // TODO!
 }
 
+template toStringNow(ulong v)
+{
+    static if (v < 10)
+        enum toStringNow = "" ~ cast(char)(v + '0');
+    else
+        enum toStringNow = toStringNow!(v / 10) ~ toStringNow!(v % 10);
+}
+void unittest_()
+{
+    static assert(toStringNow!(1uL << 62) == "4611686018427387904");
+}
+template toStringNow(long v)
+{
+    static if (v < 0)
+        enum toStringNow = "-" ~ toStringNow!(cast(ulong) -v);
+    else
+        enum toStringNow = toStringNow!(cast(ulong) v);
+}
+
+void unittest_()
+{
+	static assert(toStringNow!(0x100000000) == "4294967296"); // TODO
+	static assert(toStringNow!(-138L) == "-138");             // TODO
+}
+
 struct TemplatedParserHack(T){
 	this(int a[]){}
 }
@@ -469,6 +494,27 @@ template tt2(long a : 2){enum tt2=a;}
 pragma(msg, tt2!(2));
 static assert(!is(typeof(tt2!(1))));
 
+
+
+static assert(!is(typeof({
+	template U(long v){
+		static if (v < 0){}
+		else enum U = U!(cast(ulong) v);
+	}
+	void testU(){ U!2; }
+})));
+
+
+auto testImplConvIdentity(){
+	template TT(long x){
+		int TT = x;
+	}
+	TT!1=1;
+	TT!1L=2;
+	return cast(char)(TT!1+'0')~" "~cast(char)(TT!1L+'0');
+}
+static assert(testImplConvIdentity()=="2 2");
+pragma(msg, "testImplConvIdentity: ",testImplConvIdentity());
 
 
 

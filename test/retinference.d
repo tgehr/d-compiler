@@ -18,3 +18,14 @@ void main(){
 	pragma(msg, typeof(y));
 }
 
+
+static assert(!is(typeof({
+auto recc2(R)(R foo)=>recc2!R(foo);
+pragma(msg, recc2!int);
+})));
+
+
+static assert(!is(typeof({
+auto recc(R)(R foo)=>recc(foo);
+pragma(msg, recc!int);
+})));

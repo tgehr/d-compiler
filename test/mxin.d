@@ -1,4 +1,7 @@
-
+struct FOFOFO{
+	enum x = undef; // error
+	mixin(`float a11=`~foo1~";"); // error
+}
 
 enum x = "enum xx = q{int y = 0;};";
 
@@ -26,6 +29,25 @@ struct MixinEvalOrder{
 	}
 }
 
+struct MixinAccessCheck{
+	struct S{
+		immutable int x = 2;
+	}
+	pragma(msg, mixin(q{S.x}));
+
+	template ReturnType(func...) if (func.length == 1) {
+		alias int ReturnType;
+	}
+	struct BinaryOperatorX(string _op, rhs_t,C) {
+		ReturnType!(mixin("C.opBinary!(_op,rhs_t)")) RET_T;
+	}
+	class MyClass {
+		auto opBinary(string op, T)() { }
+	}
+	void PydMain() {
+		BinaryOperatorX!("+", int, MyClass) foo;
+	}
+}
 
 mixin(q{pragma(msg, is(typeof({immutable(char)[] x=['2'];}())));});
 enum immutable(dchar)[] fooz = "hello";

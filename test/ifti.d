@@ -44,6 +44,17 @@ struct TestTypeConstructorMatching{
 	static assert(is(typeof(qux2(cast(immutable)[1],cast(immutable)[2]))==const(int)));
 }
 
+void testMemberFunctionTemplate(){
+	struct S{
+		int x;
+		bool g()(){
+			return !!x;
+		}
+		bool f(){return g!()();}
+	}
+	static assert({S s; s.x=1; return s.f();}());
+}
+
 auto indexOf3(alias a=(a,b)=>a==b, T, V...)(const(T)[] c, const V v){
 	for(typeof(c.length) i=0;i<c.length;i++)
 		if(a(c[i],v)) return i;

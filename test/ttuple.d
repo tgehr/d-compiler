@@ -48,6 +48,21 @@ T seq(T...)(T args){ return args; }
 pragma(msg, (()=>[seq(1,2,3,4)])());
 pragma(msg, [seq(1,2,3,4)]); // TODO
 
+
+
+struct TupleExpand{
+	template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+	
+	auto callCC(T...)(T args){
+		Cont!(int,int) delegate(Cont!(int,int) delegate(int),int) f;
+		return (int delegate(int) k)=>f(a=>_=>k(a), args)(k);
+	}
+	
+	auto testcallCC(){
+		assert(callCC(1)(x=>x)==1);
+	}
+}
+
 /+
 
 struct Tpl{
