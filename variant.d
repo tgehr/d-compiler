@@ -397,6 +397,7 @@ struct Variant{
 			foreach(i,ref x; res) x = fromBCSlice(from[i],el);
 			return Variant(res);
 		}
+		if(type is Type.get!EmptyArray()) return Variant((Variant[]).init);
 		if(auto bt = el.isBasicType()){
 		swtch:switch(bt.op){
 				foreach(xx;ToTuple!basicTypes){

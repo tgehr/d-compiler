@@ -7467,10 +7467,21 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 	// this adds one indirection for pointers and dynamic arrays
 	override Dependent!bool refConvertsTo(Type rhs, int num){
 		// dynamic and static arrays can implicitly convert to void[]
-		static if(is(T==DynArrTy)||is(T==ArrayTy)){
-			if(rhs.getUnqual() is Type.get!(void[])()){
-				auto ell = getElementType(), elr = rhs.getElementType();
-				auto stcr = elr.getHeadSTC(), stcl=getHeadSTC();
+		// pointer types can implicitly convert to void*
+		static if(is(T==DynArrTy)||is(T==ArrayTy)||is(T==PointerTy)){
+			static if(is(T==PointerTy)) auto vtt = Type.get!(void*)();
+			else auto vtt = Type.get!(void[])();
+			if(rhs.getUnqual() is vtt){
+				static if(is(T==PointerTy)){
+					auto c=rhs.isPointerTy();
+					if(!c) goto Lsuper;
+					auto elr=c.ty;
+				}else{
+					auto elr = rhs.getElementType();
+					assert(!!elr);
+				}
+				auto ell = ty;
+				auto stcr = elr.getHeadSTC(), stcl=ell.getHeadSTC();
 				if(auto t=ell.refConvertsTo(ell.getUnqual().applySTC(stcr),num+1).prop)
 					return t;
 			}
@@ -7489,7 +7500,7 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 				return c.length!=length?false.independent:ty.refConvertsTo(c.ty,num);
 			else return ty.refConvertsTo(c.ty,num+1);
 		}
-		return super.refConvertsTo(rhs,num);
+	Lsuper: return super.refConvertsTo(rhs,num);
 	}
 	override Dependent!Type combine(Type rhs){
 		if(auto r = mostGeneral(rhs).prop) return r;

@@ -591,6 +591,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 						mixin(Rewrite!q{dg});
 					}
 					ctfeCallWrapper = dg;
+					ctfeCallWrapper.loc = loc;
 					//}
 			}
 			r = ctfeCallWrapper.interpretCall(sc.handler).toExpr();
@@ -819,6 +820,9 @@ enum Instruction : uint{
 	storefkr,
 	storefkv,
 	ptrf,
+	// casts from void[] and void*
+	castfromvarr,
+	castfromvptr,
 	// virtual methods
 	fetchvtbl,                 // if there already is a vtbl, use it (if the child does have it as well)
 	fetchoverride,             // there is no vtbl, always determine overrides dynamically
@@ -885,6 +889,8 @@ size_t numArgs(Instruction inst){
 		 I.fetchoverride: 1,
 		 // partially analyzed functions
 		 I.analyzeandfail: 2,
+		 // casts from void[] and void*
+		 I.castfromvarr: 1, I.castfromvptr: 1,
 		 // error handling table
 		 I.errtbl: 0,
 		 ];
@@ -911,6 +917,8 @@ bool isUnsafe(Instruction inst){
 		 I.loadap: 1, I.ptrtoa: 1,
 		 // field operations
 		 I.loadf: 1, I.loadfkr: 1, I.storef: 1, I.storefkr: 1, I.storefkv: 1, I.ptrf: 1,
+		 // casts from void[] and void*
+		 I.castfromvarr: 1, I.castfromvptr: 1,
 		 I.max: 0
 		 ];
 	return fail[inst];
@@ -2522,6 +2530,30 @@ Ltailcall:
 				runAnalysis!MakeStrong(stm);
 				stm.semantic(sc); // TODO!
 				throw new UnwindException;
+				// casts from void[] and void*
+				{
+					enum castfromcode=q{
+						auto ltt = stack.pop();
+						auto t1 = cast(Type)cast(void*)ltt;
+						auto t2 = *cast(Type*)&byteCode[ip++];
+						auto rcd = t1.refConvertsTo(t2,0);
+						if(auto d=rcd.dependee) throw new CTFERetryException(d.node);
+						if(!rcd.value){
+							tmp[0] = ltt;
+							goto Lcastfailure;
+						}
+					};
+					case I.castfromvarr:
+						auto slice = stack.pop!BCSlice();
+						mixin(castfromcode);
+						stack.push(slice);
+						break;
+					case I.castfromvptr:
+						auto ptr = stack.pop!BCPointer();
+						mixin(castfromcode);
+						stack.push(ptr);
+						break;
+				}
 			case I.errtbl:
 				assert(0, "TODO: static definite return analysis");
 		}
@@ -2579,12 +2611,18 @@ Lsliceoutofbounds:
 		handler.error(format("lower slice index %dU exceeds upper slice index %dU",tmp[0],tmp[1]),info4.loc);
 	}
 	goto Lfail;
-
 Lnullfunction:
 	auto info5 = obtainErrorInfo();
 	assert(!!cast(CallExp)info5);
 	auto ce = cast(CallExp)cast(void*)info5;
 	handler.error(format("null %s dereference", ce.e.type.isDelegateTy?"delegate":"function pointer"),ce.loc);
+	goto Lfail;
+Lcastfailure:
+	auto castinfo = obtainErrorInfo();
+	assert(!!cast(CastExp)castinfo);
+	auto cae = cast(CastExp)cast(void*)castinfo;
+	auto t1 = cast(Type)cast(void*)tmp[0];
+	handler.error(format("cannot interpret cast from '%s' ('%s') to '%s' at compile time", cae.e.type,t1,cae.type), cae.loc);
 	goto Lfail;
 Linvfunction:
 	auto info6 = obtainErrorInfo();
@@ -3477,13 +3515,21 @@ void emitMakeArray(ref ByteCodeBuilder bld, Type ty, ulong elems)in{
 
 mixin template CTFEInterpret(T) if(is(T==ArrayLiteralExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		auto tt = type;
+		if(type is Type.get!(void[])){
+			if(lit.length) tt = lit[0].type.getDynArr();
+			else tt = Type.get!EmptyArray();
+			bld.emit(Instruction.push);
+			static assert(Type.sizeof<=ulong.sizeof);
+			bld.emitConstant(cast(ulong)cast(void*)tt);
+		}
 		foreach(x; lit) x.byteCompile(bld);
-		emitMakeArray(bld, type, lit.length);
+		emitMakeArray(bld, tt, lit.length);
 		if(type.isArrayTy()){ // static array literal (TODO: this is a horrible kludge)
 			bld.emit(Instruction.push);
 			bld.emitConstant(0);
 			bld.emitUnsafe(Instruction.loada,this);
-			bld.emitConstant(getCTSizeof(type));
+			bld.emitConstant(getCTSizeof(tt));
 		}
 	}
 
@@ -3555,13 +3601,40 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 
 		if(e.isDirectlyAllocated()) t1 = t1.getUnqual(), t2 = t2.getUnqual();
 
+		void castToVoidPtrOrArray(Type tt){
+			auto siz=getBCSizeof(tt);
+			bld.emitTmppush(siz);
+			bld.emit(I.push);
+			bld.emitConstant(cast(ulong)cast(void*)tt);
+			bld.emitTmppop(siz);			
+		}
+
+		auto varr=Type.get!(void[])();
+		auto vptr=Type.get!(void*)();
+		if(t2 is varr||t2 is vptr){
+			castToVoidPtrOrArray(t1);
+			return;
+		}
+		if(t1 is varr||t1 is vptr){
+			bld.emitUnsafe(t1 is varr ? I.castfromvarr : I.castfromvptr, this);
+			static assert(Type.sizeof<=ulong.sizeof);
+			bld.emitConstant(cast(ulong)cast(void*)t2);
+			return;
+		}
+
 		// TODO: sanity check for reinterpreted references
 		// TODO: sanity check for array cast alignment
 		auto rcd = t1.refConvertsTo(t2,0);
 		assert(!rcd.dependee); // must have been determined to type check the expression
 		if(rcd.value) return;
+
 		if(auto dyn=t1.isDynArrTy()){
 			if(auto ptr=t2.isPointerTy()){
+				if(t2 is Type.get!(void*)()){
+					bld.emit(I.ptra);
+					castToVoidPtrOrArray(t1.getElementType().getPointer());
+					return;
+				}
 				auto rcd2 = dyn.refConvertsTo(ptr.ty.getDynArr(), 0);
 				assert(!rcd2.dependee);
 				if(rcd2.value){
@@ -4087,11 +4160,11 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 		return (bt.bitSize()+63)/64;
 	}
 	if(type.isDynArrTy() || type is Type.get!EmptyArray())
-		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
+		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof + (type is Type.get!(void[])());
 	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSiz;
-	ptr: return bcPointerBCSize;
+	ptr: return bcPointerBCSize+(type is Type.get!(void*)());
 	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return bcPointerBCSize+bcFunPointerBCSiz;
@@ -4108,6 +4181,8 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 // get compile time size of a type in bytes
 size_t getCTSizeof(Type type){
 	type = type.getHeadUnqual();
+	if(type is Type.get!(void*)()||type is Type.get!(void[])())
+		return getBCSizeof(type)*ulong.sizeof;
 	if(type.isDynArrTy()) return BCSlice.sizeof;
 	if(type.isPointerTy()){
 		if(type.getFunctionTy()) return Symbol.sizeof;
@@ -4536,6 +4611,13 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				default: break;
 			}
 		}
+		if(ret is Type.get!(void[])()){
+			auto slice = stack.pop!BCSlice();
+			auto ltt = stack.pop();
+			auto ty = *cast(Type*)&ltt;
+			return Variant.fromBCSlice(slice,ty);
+		}
+
 		if(ret.isArrayTy){
 			auto slice = (cast(void*)stack.stack.ptr)[0..getCTSizeof(ret)];
 			return Variant.fromBCSlice(BCSlice(slice,slice),ret);			
@@ -4543,7 +4625,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		if(ret.getElementType()) return Variant.fromBCSlice(stack.pop!BCSlice(),ret);
 		else if(ret is Type.get!(typeof(null))) return Variant(null);
 		// assert(0,"unsupported return type "~type.ret.toString());
-		handler.error(format("return type '%s' not yet supported", type.ret.toString()),loc);
+		handler.error(format("return type '%s' not yet supported in CTFE", type.ret.toString()),loc);
 		throw new UnwindException();
 	}
 }
