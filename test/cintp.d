@@ -1,3 +1,26 @@
+struct TestVoidArrayVoidPtr{
+	enum returnVoidArray = delegate void[](){return [2];}();
+
+	static immutable int x = 2;
+	static testvptr(){ void* ptr = cast(void*)&x; return ptr; }
+	pragma(msg, testvptr()); // TODO
+
+	static test1(){ auto x = [1,2,3]; return cast(immutable(int)[])cast(void[])x; } // error
+	pragma(msg, test1()," ",typeof(test1()));
+
+	static test2(){ auto x = [1,2,3]; return cast(const(int)[])cast(void[])x; } // ok
+	pragma(msg, test2()," ",typeof(test2()));
+
+
+	static testVarrayStruct(){
+		auto x = [1,2,3,4,5];
+		struct S{ void[] f; }
+		S s;
+		s.f = x;
+		return s.f;
+	}
+	static assert(testVarrayStruct()==[1,2,3,4,5]);
+}
 
 string execLenses(){
 	string r;
