@@ -570,10 +570,10 @@ mixin template Semantic(T) if(is(T==Expression)){
 				void perform(CurrentExp self){
 					self.accessCheck = min(self.accessCheck, check);
 				}
-				void perform(CallExp self){
+				/+void perform(CallExp self){
 					if(auto fl=self.e.isFunctionLiteralExp())
 						runAnalysis!WeakenCheckM(fl.bdy);
-				}
+				}+/
 				void perform(MixinExp self){
 					self.accessCheck = min(self.accessCheck, check);
 				}

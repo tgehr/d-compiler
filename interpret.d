@@ -186,19 +186,21 @@ mixin template Interpret(T) if(is(T==Symbol)){
 mixin template Interpret(T) if(is(T==FieldExp)){
 	override bool checkInterpret(Scope sc){
 		// more or less duplicated above
+		if(!e2.meaning.isVarDecl()) return false;
 		if(e2.meaning.sstate == SemState.error) return false;
 		if(e2.isConstant()) return true;
 		auto this_=e1.extractThis();
-		if(this_&&this_.isConstant()){
-			// return true;
-			sc.error("non-constant field access on constant receiver not supported in CTFE yet.",loc); // TODO!
-			return false;
-		}
+		if(this_&&this_.isConstant()) return true;
 		return super.checkInterpret(sc);
 	}
 	
 	override Variant interpretV(){
-		return e2.interpretV();
+		if(e2.isConstant()) return e2.interpretV();
+		auto value=e1.interpretV();
+		auto aggr=value.get!(Variant[VarDecl])();
+		// TODO: handle the case when the variable decl does not occur
+		assert(cast(VarDecl)e2.meaning);
+		return aggr[cast(VarDecl)cast(void*)e2.meaning];
 	}
 }
 mixin template Interpret(T) if(is(T==BinaryExp!(Tok!"."))){ } // (workaround for DMD bug)
@@ -3483,17 +3485,11 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 		}else if(auto at=tu.isAggregateTy()){
 			auto vars = value.get!(Variant[VarDecl])();
 			if(vars is null) goto Lnull;
-			if(at.decl.isReferenceAggregateDecl()){
-				// TODO: this is inefficient
-				ulong[] memory = bld.ctx.VariantToBCMemory(value);
-				BCPointer r = memory.consume!BCPointer();
-				assert(!memory.length);
-				foreach(i;0..(BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof){
-					bld.emit(Instruction.push);
-					bld.emitConstant(*(cast(ulong*)&r+i));
-				}
-			}else{
-				assert(0,"TODO!");
+			// TODO: this is inefficient
+			ulong[] memory = bld.ctx.VariantToBCMemory(value);
+			foreach(v;memory){
+				bld.emit(Instruction.push);
+				bld.emitConstant(v);
 			}
 		}else{
 			assert(tu is Type.get!(typeof(null))());
@@ -4771,38 +4767,6 @@ mixin template CTFEInterpret(T) if(is(T==PragmaDecl)){
 }
 
 
-Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{assert(type.getElementType());}body{
-	auto v = bc.slice;
-	auto tyu=type.getHeadUnqual();
-	import std.typetuple;
-	foreach(T;TypeTuple!(string, wstring, dstring))
-		if(tyu is Type.get!T()) return Variant(cast(T)v);
-	auto el = type.getElementType().getHeadUnqual();
-	if(el.getElementType()){
-		auto from = cast(BCSlice[])v;
-		auto res = new Variant[from.length];
-		foreach(i,ref x; res) x = VariantFromBCSlice(from[i],el,supported);
-		return Variant(res);
-	}
-	if(type is Type.get!EmptyArray()) return Variant((Variant[]).init);
-	if(auto bt = el.isBasicType()){
-	swtch:switch(bt.op){
-			foreach(xx;ToTuple!basicTypes){
-				static if(xx!="void"){
-					alias typeof(mixin(xx~`.init`)) T;
-					case Tok!xx:
-						auto from = cast(T[])v;
-						auto res = new Variant[from.length];
-						foreach(i, ref x; res) x=Variant(from[i]);
-						return Variant(res);
-				}
-			}
-			default: assert(0);
-		}
-	}else assert(0, "TODO: fromVoidArray for type "~to!string(type));
-}
-
-
 // TODO: this is similar to Stack.pop
 T consume(T=ulong)(ref ulong[] memory){
 	static if(is(T==ulong)){
@@ -4846,20 +4810,30 @@ struct VariantToMemoryContext{
 				default: break;
 			}
 		}
-		if(ret is Type.get!(void[])()){
+		if(ret is Type.get!(void[])()||ret is Type.get!(void*)()){
 			auto ltt = memory.consume();
 			auto ty = cast(Type)cast(void*)ltt;
-			auto slice = memory.consume!BCSlice();
-			return VariantFromBCSlice(slice,ty,supported);
+			auto r=VariantFromBCMemory(memory, ty, supported);
+			memory=[];
+			return r;
 		}
 		if(ret.isArrayTy){
-			assert(memory.length*4-4<=getCTSizeof(ret)&&getCTSizeof(ret)<=memory.length*4);
+			assert((memory.length-1)*ulong.sizeof<=getCTSizeof(ret)&&getCTSizeof(ret)<=memory.length*ulong.sizeof);
 			auto slice = (cast(void*)memory.ptr)[0..getCTSizeof(ret)];
 			memory=[];
 			return VariantFromBCSlice(BCSlice(slice,slice),ret,supported);
 		}
+
+		// TODO: preserve aliasing of pointers and slices correctly.
 		if(ret.getElementType()) return VariantFromBCSlice(memory.consume!BCSlice(),ret,supported);
-		else if(ret is Type.get!(typeof(null))){
+		if(auto pt=ret.isPointerTy()){
+			auto ptr=memory.consume!BCPointer();
+			if(ptr.ptr is null) return Variant(null);
+			// TODO: proper pointer support!
+			return VariantFromBCSlice(BCSlice(ptr.container,ptr.container), pt.ty.getDynArr(), supported);
+		}
+
+		if(ret is Type.get!(typeof(null))){
 			assert(memory.length==getBCSizeof(Type.get!(typeof(null))()));
 			memory=[];
 			return Variant(null);
@@ -4870,7 +4844,10 @@ struct VariantToMemoryContext{
 				if(ptr.ptr is null) return Variant(null);
 				return VariantFromAggregate(cast(ulong[])ptr.container, at.decl, supported);
 			}
-			return VariantFromAggregate(memory, at.decl, supported);
+			auto r=VariantFromAggregate(memory, at.decl, supported);
+			assert(memory.length==at.decl.getBCSize());
+			memory=[];
+			return r;
 		}
 		supported = false;
 		return Variant(null);
@@ -4909,6 +4886,45 @@ struct VariantToMemoryContext{
 		}
 		assert(0,ret.text);
 	}
+
+	Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{assert(type.getElementType());}body{
+		// TODO: preserve container!
+		auto v = bc.slice;
+		auto tyu=type.getHeadUnqual();
+		import std.typetuple;
+		foreach(T;TypeTuple!(string, wstring, dstring))
+			if(tyu is Type.get!T()) return Variant(cast(T)v);
+		auto el = type.getElementType().getHeadUnqual();
+		if(el.getElementType()){
+			auto from = cast(BCSlice[])v;
+			auto res = new Variant[from.length];
+			foreach(i,ref x; res) x = VariantFromBCSlice(from[i],el,supported);
+			return Variant(res);
+		}
+		if(type is Type.get!EmptyArray()) return Variant((Variant[]).init);
+		if(auto bt = el.isBasicType()){
+		swtch:switch(bt.op){
+				foreach(xx;ToTuple!basicTypes){
+					static if(xx!="void"){
+						alias typeof(mixin(xx~`.init`)) T;
+						case Tok!xx:
+							auto from = cast(T[])v;
+							auto res = new Variant[from.length];
+							foreach(i, ref x; res) x=Variant(from[i]);
+							return Variant(res);
+					}
+				}
+				default: assert(0);
+			}
+		}
+		auto memory = cast(ulong[])v;
+		auto siz=el.getBCSizeof();
+		assert(!(v.length%siz));
+		auto res = new Variant[memory.length/siz];
+		foreach(i,ref x; res) x = VariantFromBCMemory(memory[siz*i..siz*i+siz],el,supported);
+		return Variant(res);
+	}
+
 
 	Variant VariantFromAggregate(ulong[] memory, AggregateDecl decl, ref bool supported){
 		// TODO: What about pointers with an offset?
