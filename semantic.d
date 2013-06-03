@@ -4590,7 +4590,7 @@ mixin template Semantic(T) if(is(T==UFCSCallExp)){
 	}
 	override @property string kind(){ return "UFCS function call"; }
 	override string toString(){
-		assert(e.toString().startsWith("."));
+		// assert(e.toString().startsWith(".")); // TODO: fix ('this' rewrite might kill this)
 		return args[0].toString()~e.toString()~"("~join(map!(to!string)(args[1..$]),",")~")";
 	}
 

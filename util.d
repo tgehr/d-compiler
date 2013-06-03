@@ -256,6 +256,13 @@ string toEngNum(uint i){ // pure
 // a really fast downcast. only works if the argument is of the exact class type T
 T fastCast(T,R)(R x) if(isFinal!T){return typeid(x) is typeid(T)?cast(T)cast(void*)x:null;}
 
+struct AAbyIdentity(K,V){
+	V[K] x;
+	size_t opHash()const @trusted pure nothrow{ return cast(size_t)cast(void*)x; }
+	int opEquals(const ref AAbyIdentity rhs)const @safe pure nothrow{ return x is rhs.x; }
+}
+auto byid(K,V)(V[K] x){ return AAbyIdentity!(K,V)(x); }
+
 
 // compile time file facilites:
 template FileExists(string name){enum FileExists = is(typeof(import(name)));}

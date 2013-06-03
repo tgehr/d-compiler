@@ -1,6 +1,6 @@
 // Written in the D programming language.
 
-import lexer, operators, expression, type, util;
+import lexer, operators, expression, declaration, type, util;
 
 import std.traits: isIntegral, isFloatingPoint, Unqual;
 import std.range: ElementType;
@@ -44,7 +44,7 @@ struct BCPointer{
 
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, vars, err
 }
 
 template getOccupied(T){
@@ -67,6 +67,8 @@ template getOccupied(T){
 		enum getOccupied = Occupies.arr;
 	else static if(is(T==typeof(null)))
 		enum getOccupied = Occupies.none;
+	else static if(is(T==Vars))
+		enum getOccupied = Occupies.vars;
 	else static assert(0);
 }
 
@@ -82,20 +84,30 @@ template FullyUnqual(T){
 	else alias Unqual!T FullyUnqual;
 }+/
 
+private struct Vars{ enum empty = (Variant[VarDecl]).init; }
+
 private struct RTTypeID{
 	Type type;
 	Occupies occupies;
 	TokenType whichBasicType;
-
-	static RTTypeID* get(U)(){
+	private template Arg(T){
+		static if(is(T==Vars)) alias Type Arg;
+		else alias Seq!() Arg;
+	}
+	static RTTypeID* get(U)(Arg!U arg){
 		//static if(!is(U==Variant[]))
 		//	alias Unqual!(immutable(U)) T; // only structural information, no type checking
 		//else alias U T;
 		alias Unqual!U T;
-		if(id!T.exists) return &id!T.memo;
-		id!T.exists = true;
-		alias id!T.memo r;
-		static if(!is(T==Variant[])) r.type = Type.get!T();
+		static if(is(T==Vars)){
+			// TODO: cache this
+			auto r = new RTTypeID();
+		}else{
+			if(id!T.exists) return &id!T.memo;
+			id!T.exists = true;
+			alias id!T.memo r;
+		}
+		static if(!is(T==Variant[])&&!is(T==Vars)) r.type = Type.get!T();
 		else r.type = Type.get!EmptyArray();
 		static if(is(T==typeof(null))){
 			r.occupies = Occupies.none;
@@ -107,8 +119,10 @@ private struct RTTypeID{
 				return r;
 			};
 			r.convertTo = function(ref Variant self, Type to){
+				to = to.getHeadUnqual();
 				if(to is Type.get!(typeof(null))()) return self;
 				if(to.getElementType()) return Variant(cast(Variant[])null).convertTo(to);
+				if(to.isAggregateTy()) return Variant(Vars.empty, to);
 
 				// TODO: null pointers and delegates
 				// auto tou=to.getHeadUnqual();
@@ -288,7 +302,25 @@ private struct RTTypeID{
 				}
 				assert(0,"TODO: toBCSlice for "~to!string(self.id.type));
 			};
-		}else{
+		}else static if(is(T==Vars)){
+			r.type = arg;
+			r.occupies = Occupies.vars;
+			r.toExpr = function Expression(ref Variant self){
+				// TODO: Aliasing?
+				return LiteralExp.factory(self, self.id.type);
+			};
+			r.convertTo = function Variant(ref Variant self, Type to){
+				return self; // TODO: fix?
+			};
+			r.toString = function string(ref Variant self){
+				if(self.vars is null) return "null";
+				return self.id.type.toString(); // TODO: pick up toString?
+			};
+
+			r.toBCSlice = function BCSlice(ref Variant self){
+				assert(0, "cannot turn variables into a slice");
+			};		
+		}else{		
 			static assert(!isBasicType!T);
 			static assert(0, "TODO");
 			//r.toExpr = function Expression
@@ -301,7 +333,8 @@ private struct RTTypeID{
 			static if(is(typeof(*mixin(member))==function))
 				assert(mixin(`r.`~member)!is null);
 		}
-		return &r;
+		static if(is(T==Vars)) return r;
+		else return &r;
 	}
 private:
 	// vtbl
@@ -319,6 +352,7 @@ private:
 	}
 	
 	template id(T){static: RTTypeID memo; bool exists;}
+	RTTypeID*[Type] aggrmemo;
 }
 /+
 private struct WithLoc(T){
@@ -351,8 +385,13 @@ struct Variant{
 			}
 		}
 	}body{
-		id =  RTTypeID.get!T();
+		id = RTTypeID.get!T();
 		mixin(to!string(getOccupied!T)~` = value;`);
+	}
+
+	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
+		id = RTTypeID.get!Vars(type);
+		this.vars=vars;
 	}
 
 
@@ -362,7 +401,7 @@ struct Variant{
 		ulong int64;
 		real flt80; ireal fli80; creal cmp80;
 		Variant[] arr;
-		// TODO: structs, classes
+		Variant[VarDecl] vars; // structs, classes, closures
 		string err;
 	}
 
@@ -376,43 +415,19 @@ struct Variant{
 		else static if(is(T==wstring)){assert(id.occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(id.occupies == Occupies.dstr); return dstr;}
 		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(id.occupies == Occupies.int64,"occupies was "~to!string(id.occupies)~" instead of int64"); return cast(T)int64;}
-		else static if(is(T==float)||is(T==double)||is(T==real)
-			        || is(T==ifloat) || is(T==idouble)||is(T==ireal)){
-			assert(id.occupies == Occupies.flt80 || id.occupies == Occupies.fli80);
+		else static if(is(T==float)||is(T==double)||is(T==real)){
+			assert(id.occupies == Occupies.flt80);
 			return flt80;
+		}else static if(is(T==ifloat) || is(T==idouble)||is(T==ireal)){
+			assert(id.occupies == Occupies.fli80);
+			return fli80;
 		}else static if(is(T==BCSlice)) return id.toBCSlice(this);
-		else static assert(0, "cannot get this field (yet?)");
-	}
-
-	static Variant fromBCSlice(BCSlice bc, Type type)in{assert(type.getElementType());}body{
-		auto v = bc.slice;
-		auto tyu=type.getHeadUnqual();
-		import std.typetuple;
-		foreach(T;TypeTuple!(string, wstring, dstring))
-			if(tyu is Type.get!T()) return Variant(cast(T)v);
-		auto el = type.getElementType().getHeadUnqual();
-		if(el.getElementType()){
-			auto from = cast(BCSlice[])v;
-			auto res = new Variant[from.length];
-			foreach(i,ref x; res) x = fromBCSlice(from[i],el);
-			return Variant(res);
+		else static if(is(T==Variant[VarDecl])){
+			if(id.occupies == Occupies.none) return null;
+			assert(id.occupies == Occupies.vars,text(id.occupies));
+			return vars;
 		}
-		if(type is Type.get!EmptyArray()) return Variant((Variant[]).init);
-		if(auto bt = el.isBasicType()){
-		swtch:switch(bt.op){
-				foreach(xx;ToTuple!basicTypes){
-					static if(xx!="void"){
-						alias typeof(mixin(xx~`.init`)) T;
-						case Tok!xx:
-						    auto from = cast(T[])v;
-							auto res = new Variant[from.length];
-							foreach(i, ref x; res) x=Variant(from[i]);
-							return Variant(res);
-					}
-				}
-				default: assert(0);
-			}
-		}else assert(0, "TODO: fromVoidArray for type "~to!string(type));
+		else static assert(0, "cannot get this field (yet?)");
 	}
 
 	/* returns a type that fully specifies the memory layout
