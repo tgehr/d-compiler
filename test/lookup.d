@@ -1,3 +1,4 @@
+
 struct StructLevelDelegateAccessCheck{
 	int y;
 	static foo(int delegate(int) dg){return dg(2);}
@@ -7,6 +8,8 @@ struct StructLevelDelegateAccessCheck{
 	static assert(is(typeof(delegate(int x)=>x)==int delegate(int)));
 	pragma(msg, foo((int x)=>y)); // error
 	pragma(msg, foo(delegate(int x)=>y)); // error
+
+	int z = { return StructLevelDelegateAccessCheck.y; }(); // error
 }
 
 struct TTTTTTTTT{

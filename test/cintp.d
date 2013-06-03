@@ -3,7 +3,7 @@ struct TestVoidArrayVoidPtr{
 
 	static immutable int x = 2;
 	static testvptr(){ void* ptr = cast(void*)&x; return ptr; }
-	pragma(msg, testvptr()); // TODO
+	pragma(msg, "testvptr: ", testvptr()); // (// TODO: this does not do exactly the right thing yet.)
 
 	static test1(){ auto x = [1,2,3]; return cast(immutable(int)[])cast(void[])x; } // error
 	pragma(msg, test1()," ",typeof(test1()));

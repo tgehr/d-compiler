@@ -1,4 +1,16 @@
 
+/+enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
+
+pragma(msg, returnEmptyArray);
+pragma(msg, typeof(returnEmptyArray));+/
+
+/+pragma(msg, foo(2));
+string foo(double x){
+	return q{string foo(int x){ return ""; }};
+}
+mixin(foo(2));
+pragma(msg, foo(2));+/
+
 /+@property int bar()=>2;
 
 struct PoorErrorMessage{
@@ -19,6 +31,23 @@ pragma(msg, foo());
 	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message
 	pragma(msg, foo(a=>1,a=>1.0));
 }+/
+
+/+
+auto testtemplatefunclit(fun...)(){
+	static if(!fun.length) return "";
+	else{
+		alias fun[0] tmpl;
+		static if(is(typeof(tmpl!(double,string)))) alias tmpl!(double,string) ff;
+		else alias tmpl ff;
+		pragma(msg, typeof(ff));
+		return ff(0,4.5,"fun ")()~testtemplatefunclit!(fun[1..$])();
+	}
+}
+struct FunContainer{
+	static fun(int x,double y,string z)=>()=>z~"hi1";
+}
+pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)()); // TODO! (currently fails to show error message)
++/
 
 /+
 struct Foo(_T) {
@@ -62,9 +91,6 @@ template Instantiable() if(Uninstantiable!()){}
 pragma(msg, typeof(Instantiable!())); // show error!
 +/
 
-// enum returnVoidArray = delegate void[](){return [2];}();
-// enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
-
 /+
 template Seq(T...){ alias T Seq; }
 int aMatchError(R)(Seq!R delegate(int) dg){ return dg(2); }
@@ -98,3 +124,9 @@ auto testcallCC(){
 	assert(callCC(&f,3)(x=>x)==4);
 	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
 }+/
+
+// +/
+// +/
+// +/
+
+alias immutable(char)[] string;
