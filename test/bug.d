@@ -1,9 +1,4 @@
 
-/+enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
-
-pragma(msg, returnEmptyArray);
-pragma(msg, typeof(returnEmptyArray));+/
-
 /+pragma(msg, foo(2));
 string foo(double x){
 	return q{string foo(int x){ return ""; }};

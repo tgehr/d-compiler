@@ -1,21 +1,59 @@
 
+struct SliceAliasing{
+	static immutable(int[][]) retslices(){
+		immutable x = cast(immutable(int[]))[0,1,2,3,4];
+		return [x[0..3],x[0..4]];
+	}
+	static immutable x=retslices();
+	static assert(x[0].ptr==x[1].ptr); // TODO
+	static assert((()=>x[0].ptr==x[1].ptr)()); // ok
+}
+
+struct Aliasing{
+	struct S{
+		int x;
+	}
+	
+	struct TODO{
+		static S[][] foo(){
+			auto x = [S(),S(),S(),S()];
+			auto xx = [x[0..2],x[2..4]];
+			assert(xxx(xx));
+			return xx;
+		}
+		
+		immutable xx = foo(); // TODO!
+	}
+	
+	static immutable(S[][]) foo(){
+		immutable x = [S(),S(),S(),S()];
+		auto xx = [cast(immutable)x[0..2],cast(immutable)x[2..4]];
+		assert(xxx(xx));
+		return xx;
+	}
+
+	immutable xx = foo();
+
+	static bool xxx(const S[][] xx){ return xx[0].ptr+2 == xx[1].ptr; }
+	static assert(xxx(xx));
+	
+	pragma(msg, foo());
+}
+
 struct S{
 	int a=2,b=3;
 	S* next;
 }
 
 immutable s = {auto s=S();s.b=4;s.a++;s.next=new S();return s;}();
-immutable t=s.next[0];
 
 pragma(msg, s.b);
 
 
-/+
-
 class D{
 	int x;
 	D d = {auto x = new D(); return x;}();
-	//int y = {return D.x;}(); // error
+	int y = {return D.x;}(); // error
 }
 
 enum x = (()=>new D)();
@@ -44,7 +82,7 @@ static assert(z.toString()=="1");
 
 class List(T){
 	T value;
-	bool empty = true; // TODO: implement comparison with null!
+	bool empty = true; // // TODO: implement comparison with null!
 	List next = null;
 
 	string toString(int x){
@@ -63,13 +101,18 @@ auto buildList(){
 		l.empty = i==0;
 		r=l;
 	}
-	r.next.next.next=r;
+	r.next.next.next.next=r;
 	return r;
 }
 
 enum list = buildList();
 pragma(msg, list.toString(40));
 
+
+enum returnEmptyArray = ((int delegate(int))=>[])(x=>x);
+
+pragma(msg, returnEmptyArray);
+pragma(msg, typeof(returnEmptyArray));
 
 
 // +/

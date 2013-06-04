@@ -1,3 +1,10 @@
+
+int[] allocarr(){
+	auto x = new int[5]; // TODO!
+	return x;
+}
+pragma(msg, allocarr());
+
 struct TestVoidArrayVoidPtr{
 	enum returnVoidArray = delegate void[](){return [2];}();
 
