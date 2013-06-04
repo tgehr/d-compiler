@@ -111,13 +111,13 @@ private struct RTTypeID{
 		else r.type = Type.get!EmptyArray();
 		static if(is(T==typeof(null))){
 			r.occupies = Occupies.none;
-			r.toExpr = function(ref Variant self){
+/+			r.toExpr = function(ref Variant self){
 				auto r = New!LiteralExp(token!"null");
 				r.semantic(null);
 				assert(!r.rewrite);
 				r.dontConstFold();
 				return r;
-			};
+			};+/
 			r.convertTo = function(ref Variant self, Type to){
 				to = to.getHeadUnqual();
 				if(to is Type.get!(typeof(null))()) return self;
@@ -130,16 +130,15 @@ private struct RTTypeID{
 				return cannotConvert(self, to);
 			};
 			r.toString = function(ref Variant self){return "null";};
-			r.toBCSlice = function (ref Variant self) => BCSlice(null);
 		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
 			enum occ = getOccupied!T;
 			r.whichBasicType=Tok!(is(T==string)?"``c":is(T==wstring)?"``w":is(T==dstring)?"``d":assert(0));
 			r.occupies = occ;
-			r.toExpr = function Expression(ref Variant self){
+			/+r.toExpr = function Expression(ref Variant self){
 				auto r=LiteralExp.create!New(mixin(`self.`~to!string(occ)));
 				r.dontConstFold();
 				return r;
-			};
+			};+/
 			r.convertTo = function Variant(ref Variant self, Type to){
 				auto tou = to.getHeadUnqual();
 				if(tou is Type.get!T()) return self;
@@ -165,22 +164,16 @@ private struct RTTypeID{
 			r.toString = function string(ref Variant self){
 				return to!string('"'~escape(mixin(`self.`~to!string(occ)))~'"'~sfx);
 			};
-
-			r.toBCSlice = function BCSlice(ref Variant self){
-				auto str = mixin(`self.`~to!string(occ));
-				str=str~0; // duplicate payload and zero terminate
-				return BCSlice(cast(void[])str, cast(void[])str[0..$-1]);
-			};
 		}else static if(isBasicType!T){//
 			alias getOccupied!T occ;
 			r.whichBasicType = Tok!(T.stringof);
 			r.occupies = occ;
-			r.toExpr = function Expression(ref Variant self){
+			/+r.toExpr = function Expression(ref Variant self){
 				auto r=LiteralExp.create!New(cast(T)mixin(`self.`~to!string(occ)));
 				r.dontConstFold();
 				return r;
 				//assert(0,"TODO");
-			};
+			};+/
 			r.convertTo = function Variant(ref Variant self, Type to){
 				if(auto bt = to.getHeadUnqual().isBasicType()){
 					switch(bt.op){
@@ -217,22 +210,8 @@ private struct RTTypeID{
 					if(self.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
 				return left~res~right~rlsfx~sfx;
 			};
-			r.toBCSlice = function BCSlice(ref Variant self){
-				assert(0,"cannot turn basic type into void[]");
-			};
 		}else static if(is(T==Variant[])){
 			r.occupies = Occupies.arr;
-			r.toExpr = function Expression(ref Variant self){
-				// TODO: allocation ok?
-				Expression[] lit = new Expression[self.length];
-				foreach(i,ref x;lit) x = self.arr[i].id.toExpr(self.arr[i]);
-				// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
-				auto r=New!ArrayLiteralExp(lit);
-				r.semantic(null); // TODO: ok?
-				assert(!r.rewrite);
-				r.dontConstFold();
-				return r;
-			};
 			r.convertTo = function Variant(ref Variant self, Type to){
 				// assert(to.getHeadUnqual().getElementType()!is null);
 				auto tou = to.getHeadUnqual();
@@ -256,59 +235,25 @@ private struct RTTypeID{
 				import std.algorithm, std.array;
 				return '['~join(map!(to!string)(self.arr),",")~']';
 			};
-			r.toBCSlice = function BCSlice(ref Variant self){
-				import std.typetuple;
-				auto el = self.getType().getElementType();
-				assert(el);
-				if(el.getElementType()){
-					// TODO: this allocates, probably ok
-					auto r = new BCSlice[self.length];
-					foreach(i,ref x;r) x=self.arr[i].get!BCSlice();
-					return BCSlice(r);
-				}
-				if(auto bt=el.getUnqual().isBasicType()){
-					if(bt.isIntegral()){
-						switch(bt.getSizeof()){
-							foreach(U; TypeTuple!(ubyte, ushort, uint, ulong)){
-								case U.sizeof:
-								auto r=new U[self.length];
-								foreach(i,ref x;r) x=cast(U)self.arr[i].get!ulong();
-								return BCSlice(r);
-							}
-							default: import std.stdio; writeln(self);assert(0);
-						}
-					}
-					foreach(U; TypeTuple!(float, double, real)){
-						if(bt is Type.get!U()){
-							auto r=new U[self.length];
-							foreach(i,ref x;r) x=cast(U)self.arr[i].flt80;
-							return BCSlice(r);
-						}
-					}
-					foreach(U; TypeTuple!(ifloat, idouble, ireal)){
-						if(bt is Type.get!U()){
-							auto r=new U[self.length];
-							foreach(i,ref x;r) x=cast(U)self.arr[i].fli80;
-							return BCSlice(r);
-						}
-					}
-					foreach(U; TypeTuple!(cfloat, cdouble, creal)){
-						if(bt is Type.get!U()){
-							auto r=new U[self.length];
-							foreach(i,ref x;r) x=cast(U)self.arr[i].cmp80;
-							return BCSlice(r);
-						}
-					}
-				}
-				assert(0,"TODO: toBCSlice for "~to!string(self.id.type));
-			};
 		}else static if(is(T==Vars)){
+			if(!arg){
+				if(id!Vars.exists){
+					return &id!Vars.memo;
+				}else{
+					id!Vars.memo=*r; // TODO: don't allocate
+					id!Vars.exists=true;
+				}
+			}else{
+				if(arg in aggrmemo) return aggrmemo[arg];
+				aggrmemo[arg]=r;
+			}
+
 			r.type = arg;
 			r.occupies = Occupies.vars;
-			r.toExpr = function Expression(ref Variant self){
+			/+r.toExpr = function Expression(ref Variant self){
 				// TODO: Aliasing?
 				return LiteralExp.factory(self, self.id.type);
-			};
+			};+/
 			r.convertTo = function Variant(ref Variant self, Type to){
 				return self; // TODO: fix?
 			};
@@ -316,10 +261,6 @@ private struct RTTypeID{
 				if(self.vars is null) return "null";
 				return self.id.type.toString(); // TODO: pick up toString?
 			};
-
-			r.toBCSlice = function BCSlice(ref Variant self){
-				assert(0, "cannot turn variables into a slice");
-			};		
 		}else{		
 			static assert(!isBasicType!T);
 			static assert(0, "TODO");
@@ -338,10 +279,9 @@ private struct RTTypeID{
 	}
 private:
 	// vtbl
-	Expression function(ref Variant) toExpr;
+	// Expression function(ref Variant) toExpr;
 	string function(ref Variant) toString;
 	Variant function(ref Variant,Type) convertTo;
-	BCSlice function(ref Variant) toBCSlice;
 
 	private static Variant function(ref Variant,Type) cannotConvert;
 	static this(){ // meh
@@ -352,7 +292,7 @@ private:
 	}
 	
 	template id(T){static: RTTypeID memo; bool exists;}
-	RTTypeID*[Type] aggrmemo;
+	static RTTypeID*[Type] aggrmemo;
 }
 /+
 private struct WithLoc(T){
@@ -421,13 +361,16 @@ struct Variant{
 		}else static if(is(T==ifloat) || is(T==idouble)||is(T==ireal)){
 			assert(id.occupies == Occupies.fli80);
 			return fli80;
-		}else static if(is(T==BCSlice)) return id.toBCSlice(this);
-		else static if(is(T==Variant[VarDecl])){
+		}else static if(is(T==cfloat) || is(T==cdouble)||is(T==creal)){
+			assert(id.occupies == Occupies.cmp80);
+			return cmp80;
+		}else static if(is(T==Variant[VarDecl])){
 			if(id.occupies == Occupies.none) return null;
 			assert(id.occupies == Occupies.vars,text(id.occupies));
 			return vars;
-		}
-		else static assert(0, "cannot get this field (yet?)");
+		}else static if(is(T==Variant[])){
+			return arr;
+		}else static assert(0, "cannot get this field (yet?)");
 	}
 
 	/* returns a type that fully specifies the memory layout
@@ -446,8 +389,13 @@ struct Variant{
 	bool isEmpty(){return id is null;}
 
 	Expression toExpr(){
-		if(id) return id.toExpr(this);
-		else return New!ErrorExp();
+		/+if(id) return id.toExpr(this);
+		else return New!ErrorExp();+/
+		if(id){
+			auto r = LiteralExp.factory(this, getType());
+			r.semantic(null);
+			return r;
+		}else return New!ErrorExp();
 	}
 
 	string toString(){

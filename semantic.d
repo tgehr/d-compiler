@@ -987,7 +987,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		return true;
 	}
 
-	override bool isDirectlyAllocated(){ return true; }
+	override bool isDirectlyAllocated(){ return true; } // TODO: analyze what's contained withhin
 
 	override Dependent!bool implicitlyConvertsTo(Type rhs){
 		if(auto t=super.implicitlyConvertsTo(rhs).prop) return t;
@@ -8346,6 +8346,10 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				if(!iconv) mixin(FinishDeductionProp!q{init});
 				assert(init.sstate == SemState.completed, to!string(init));
 				mixin(IntChld!q{init});
+				if(stc&STCenum){
+					prepareEnumInitializer();
+					//mixin(SemCheck);
+				}
 			}
 			// order is significant: fully interpreted expressions might carry information
 			// that allows more implicit conversions
@@ -8366,6 +8370,17 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		}
 		mixin(SemEplg);
 	}
+
+	private void prepareEnumInitializer(){
+		assert(init.isConstant());
+		// re-allocate mutable dynamic array constants everywhere:
+		if(init.type.isDynArrTy()&&init.type.getElementType().isMutable()){
+			if(auto lexp=init.isLiteralExp())
+				init=lexp.toArrayLiteral();
+		}
+		// TODO: check for mutable indirections. Here?
+	}
+
 
 	override @property string kind(){
 		return isField?"field":"variable";
