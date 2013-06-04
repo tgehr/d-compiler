@@ -121,7 +121,7 @@ private struct RTTypeID{
 			r.convertTo = function(ref Variant self, Type to){
 				to = to.getHeadUnqual();
 				if(to is Type.get!(typeof(null))()) return self;
-				if(to.getElementType()) return Variant(cast(Variant[])null).convertTo(to);
+				if(to.getElementType()) return Variant((Variant[]).init,(Variant[]).init).convertTo(to);
 				if(to.isAggregateTy()) return Variant(Vars.empty, to);
 
 				// TODO: null pointers and delegates
@@ -152,7 +152,7 @@ private struct RTTypeID{
 					// TODO: revise allocation
 					auto r = new Variant[self.length];
 					foreach(i,x;mixin(`self.`~.to!string(occ))) r[i]=Variant(x);
-					return Variant(r);
+					return Variant(r,r);//TODO: aliasing?
 				}
 
 				// assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
@@ -312,21 +312,26 @@ private struct WithLoc(T){
 struct Variant{
 	private RTTypeID* id;
 
-	this(T)(T value)in{
-		static if(is(T==Variant[])){
-			if(value.length){
-				/+assert(value[0].id.type !is Type.get!char()  &&
-				       value[0].id.type !is Type.get!wchar() &&
-				       value[0].id.type !is Type.get!dchar() &&
-				       value[0].id.type.getUnqual() is value[0].id.type,
-				       "unsupported: "~to!string(value[0].id.type));+/
-				auto id = value[0].id;
-				foreach(x;value[1..$]) assert(id is x.id);
-			}
-		}
-	}body{
+	this(T)(T value)if(!is(T==Variant[])&&!is(T==Vars)){
 		id = RTTypeID.get!T();
 		mixin(to!string(getOccupied!T)~` = value;`);
+	}
+
+	this()(Variant[] arr, Variant[] cnt)in{
+		assert(cnt.ptr<=arr.ptr&&arr.ptr+arr.length<=cnt.ptr+cnt.length);
+		if(cnt.length){
+			/+assert(value[0].id.type !is Type.get!char()  &&
+			 value[0].id.type !is Type.get!wchar() &&
+			 value[0].id.type !is Type.get!dchar() &&
+			 value[0].id.type.getUnqual() is value[0].id.type,
+			 "unsupported: "~to!string(value[0].id.type));+/
+			auto id = cnt[0].id;
+			foreach(x;cnt[1..$]) assert(id is x.id);
+		}		
+	}body{
+		id = RTTypeID.get!(Variant[])();
+		this.arr=arr;
+		this.cnt=cnt;
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
@@ -340,7 +345,10 @@ struct Variant{
 		string str; wstring wstr; dstring dstr;
 		ulong int64;
 		real flt80; ireal fli80; creal cmp80;
-		Variant[] arr;
+		struct{
+			Variant[] arr;
+			Variant[] cnt;
+		}
 		Variant[VarDecl] vars; // structs, classes, closures
 		string err;
 	}
@@ -369,8 +377,15 @@ struct Variant{
 			assert(id.occupies == Occupies.vars,text(id.occupies));
 			return vars;
 		}else static if(is(T==Variant[])){
+			assert(id.occupies == Occupies.arr);
 			return arr;
 		}else static assert(0, "cannot get this field (yet?)");
+	}
+
+	Variant[] getContainer()in{
+		assert(id.occupies == Occupies.arr);
+	}body{
+		return cnt;
 	}
 
 	/* returns a type that fully specifies the memory layout
@@ -427,7 +442,7 @@ struct Variant{
 			}
 			default: assert(0);
 		}
-		return Variant(r);
+		return Variant(r,r);
 	}
 
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
@@ -461,7 +476,8 @@ struct Variant{
 		if(id.occupies == Occupies.arr){
 			if(rhs.id.occupies != Occupies.arr) rhs=rhs.strToArr();
 			static if(op=="~"){
-				return Variant(arr~rhs.arr);
+				auto r=arr~rhs.arr;
+				return Variant(r,r);
 			}static if(op=="is"||op=="!is"){
 				return Variant(mixin(`arr `~op~` rhs.arr`));
 			}static if(op=="in"||op=="!in"){
@@ -590,7 +606,7 @@ struct Variant{
 		if(id.occupies == Occupies.arr){
 			assert(l.int64<=arr.length && r.int64<=arr.length);
 			assert(l.int64<=r.int64);
-			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64]); // aliasing ok?
+			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64],cnt); // aliasing ok?
 		}else switch(id.occupies){
 			foreach(x; ToTuple!(["str","wstr","dstr"])){
 				case mixin(`Occupies.`~x):

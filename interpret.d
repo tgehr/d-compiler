@@ -155,7 +155,7 @@ mixin template Interpret(T) if(is(T==CastExp)){
 			// TODO: allocation ok?
 			Variant[] r = new Variant[vle.length];
 			foreach(i,ref x;r) x = vle[i].convertTo(el);
-			return Variant(r);
+			return Variant(r,r);
 		}else return e.interpretV().convertTo(type);
 	}
 
@@ -332,7 +332,7 @@ mixin template Interpret(T) if(is(T==ArrayLiteralExp)){
 		// TODO: this GC allocation is probably justified
 		Variant[] res = new Variant[lit.length];
 		foreach(i, ref x; res) x = lit[i].interpretV();
-		return Variant(res);
+		return Variant(res,res);
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
@@ -512,7 +512,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 						rhs = Variant(""w~rhs.get!wchar());
 					else if(ety is Type.get!(immutable(dchar))())
 						rhs = Variant(""d~rhs.get!dchar());
-					else rhs = Variant([rhs]);
+					else{ auto r=[rhs];rhs = Variant(r,r); }
 					return e1.interpretV().opBinary!"~"(rhs);
 				}
 			}
@@ -527,7 +527,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 				lhs = Variant(""w~lhs.get!wchar());
 			else if(ety is Type.get!(immutable(dchar))())
 				lhs = Variant(""d~lhs.get!dchar());
-			else lhs = Variant([lhs]);
+			else{ auto l=[lhs];lhs = Variant(l,l); }
 			return lhs.opBinary!"~"(e2.interpretV());
 		}else return super.interpretV();
 	}
@@ -4939,18 +4939,18 @@ struct VariantToMemoryContext{
 	Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{assert(type.getElementType());}body{
 		auto v = bc.container;
 		auto el = type.getElementType().getHeadUnqual();
+		auto tyu=type.getHeadUnqual();
+		import std.typetuple;
+		foreach(T;TypeTuple!(string, wstring, dstring))
+			if(tyu is Type.get!T()) return Variant(cast(T)bc.slice); // TODO: aliasing!
 		auto computeContainer(){
-			auto tyu=type.getHeadUnqual();
-			import std.typetuple;
-			foreach(T;TypeTuple!(string, wstring, dstring))
-				if(tyu is Type.get!T()) return Variant(cast(T)v);
 			if(el.getElementType()){
 				auto from = cast(BCSlice[])v;
 				auto res = new Variant[from.length];
 				foreach(i,ref x; res) x = VariantFromBCSlice(from[i],el,supported);
-				return Variant(res);
+				return res;
 			}
-			if(type is Type.get!EmptyArray()) return Variant((Variant[]).init);
+			if(type is Type.get!EmptyArray()) return (Variant[]).init;
 			if(auto bt = el.isBasicType()){
 			swtch:switch(bt.op){
 					foreach(xx;ToTuple!basicTypes){
@@ -4960,7 +4960,7 @@ struct VariantToMemoryContext{
 								auto from = cast(T[])v;
 								auto res = new Variant[from.length];
 								foreach(i, ref x; res) x=Variant(from[i]);
-								return Variant(res);
+								return res;
 						}
 					}
 					default: assert(0);
@@ -4969,13 +4969,13 @@ struct VariantToMemoryContext{
 			auto memory = cast(ulong[])v;
 			auto siz=el.getBCSizeof();
 			// TODO: can we assert siz!=0?
-			if(!siz) return Variant((Variant[]).init);
+			if(!siz) return (Variant[]).init;
 			assert(siz&&!(v.length%siz));
 			auto res = new Variant[memory.length/siz];
 			foreach(i,ref x; res) x = VariantFromBCMemory(memory[siz*i..siz*i+siz],el,supported);
-			return Variant(res);
+			return res;
 		}
-		Variant container;
+		Variant[] container;
 		if(v.ptr in sl_aliasing_cache){
 			container=sl_aliasing_cache[v.ptr];
 		}else{
@@ -4983,22 +4983,22 @@ struct VariantToMemoryContext{
 			sl_aliasing_cache[v.ptr]=container;
 		}
 		auto siz = getCTSizeof(el);
-		if(!siz) return container; // TODO: can we assert siz!=0?
+		if(!siz) return Variant(container,container); // TODO: can we assert siz!=0?
 		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
 		assert(!(bc.slice.length%siz));
 		auto start=(bc.slice.ptr-bc.container.ptr)/siz;
 		auto end=start+bc.slice.length/siz;
-		return container[start..end];
+		return Variant(container[start..end],container);
 	}
-	Variant[void*] sl_aliasing_cache; // preserve aliasing
-	BCSlice[Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
+	Variant[][void*] sl_aliasing_cache; // preserve aliasing
+	void[][Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
 
 	BCSlice VariantToBCSlice(Variant value){
 		// TODO: container!
 		auto ret=value.getType().getHeadUnqual();
 		if(ret is Type.get!(typeof(null))())
 			return BCSlice(null); // TODO: necessary?
-		foreach(T;Seq!(string,wstring,dstring)){ // TODO: aliasing for strings
+		foreach(T;Seq!(string,wstring,dstring)){ // TODO: aliasing for strings, proper zero-termination of allocated memory blocks
 			if(ret is Type.get!T()){
 				auto str = value.get!T();
 				str=str~0; // duplicate payload and zero terminate
@@ -5006,58 +5006,56 @@ struct VariantToMemoryContext{
 			}
 		}
 		auto arr = value.get!(Variant[])();
-		if(arr.ptr in sl_aliasing_reverse) return sl_aliasing_reverse[arr.ptr];
-		BCSlice computeSlice(){
-			if(ret.getElementType()){
-				if(ret.getUnqual() is Type.get!EmptyArray()) return BCSlice([]);
-				auto el = ret.getElementType().getHeadUnqual();
-				assert(el);
-				if(auto bt=el.isBasicType()){
-					if(bt.isIntegral()){
-						switch(bt.getSizeof()){
-							foreach(U; Seq!(ubyte, ushort, uint, ulong)){
-								case U.sizeof:
-									auto r=new U[value.length];
-									foreach(i,ref x;r) x=cast(U)arr[i].get!ulong();
-									return BCSlice(r);
-							}
-							default: import std.stdio; writeln(value);assert(0);
-						}
-					}
-					foreach(U; Seq!(float, double, real)){
-						if(bt is Type.get!U()){
-							auto r=new U[value.length];
-							foreach(i,ref x;r) x=cast(U)arr[i].get!U();
-							return BCSlice(r);
-						}
-					}
-					foreach(U; Seq!(ifloat, idouble, ireal)){
-						if(bt is Type.get!U()){
-							auto r=new U[value.length];
-							foreach(i,ref x;r) x=cast(U)arr[i].get!U();
-							return BCSlice(r);
-						}
-					}
-					foreach(U; Seq!(cfloat, cdouble, creal)){
-						if(bt is Type.get!U()){
-							auto r=new U[value.length];
-							foreach(i,ref x;r) x=cast(U)arr[i].get!U();
-							return BCSlice(r);
-						}
-					}
-				}				
-				assert(getCTSizeof(el)==getBCSizeof(el)*ulong.sizeof);
-				auto siz=getBCSizeof(el);
-				auto r = new ulong[value.length*siz];
-				foreach(i;0..value.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(arr[i])[];
-				return BCSlice(r);
-
-			}
-			assert(0);
+		auto cnt = value.getContainer();
+		auto start = arr.ptr-cnt.ptr;
+		auto end = start+arr.length;
+		void[] rcnt;
+		bool cached = false;
+		if(cnt.ptr in sl_aliasing_reverse){
+			rcnt=sl_aliasing_reverse[cnt.ptr];
+			cached = true;
 		}
-		auto res = computeSlice();
-		sl_aliasing_reverse[arr.ptr]=res;
-		return res;
+
+		auto finish(size_t siz){
+			if(!cached) sl_aliasing_reverse[cnt.ptr]=rcnt;
+			return BCSlice(rcnt, rcnt[start*siz..end*siz]);
+		}
+
+		assert(ret.getElementType());
+		if(ret.getUnqual() is Type.get!EmptyArray()) return BCSlice([]);
+		auto el = ret.getElementType().getHeadUnqual();
+		assert(el);
+		if(auto bt=el.isBasicType()){
+			if(bt.isIntegral()){
+				switch(bt.getSizeof()){
+					foreach(U; Seq!(ubyte, ushort, uint, ulong)){
+						case U.sizeof:
+							if(cached) return finish(U.sizeof);
+							auto r=new U[cnt.length];
+							foreach(i,ref x;r) x=cast(U)cnt[i].get!ulong();
+							rcnt=r;
+							return finish(U.sizeof);
+					}
+					default: import std.stdio; writeln(cnt);assert(0);
+				}
+			}
+			foreach(U; Seq!(float, double, real, ifloat, idouble, ireal, cfloat, cdouble, creal)){
+				if(bt is Type.get!U()){
+					if(cached) return finish(U.sizeof);
+					auto r=new U[cnt.length];
+					foreach(i,ref x;r) x=cast(U)cnt[i].get!U();
+					rcnt=r;
+					return finish(U.sizeof);
+				}
+			}
+		}
+		assert(getCTSizeof(el)==getBCSizeof(el)*ulong.sizeof);
+		auto siz=getBCSizeof(el);
+		if(cached) return finish(siz*ulong.sizeof);
+		auto r = new ulong[cnt.length*siz];
+		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i])[];
+		rcnt=r;
+		return finish(siz*ulong.sizeof);
 	}
 
 	Variant VariantFromAggregate(ulong[] memory, AggregateDecl decl, ref bool supported){
