@@ -1,3 +1,11 @@
+struct AliasingPreserving{
+	static immutable x = [1,2,3];
+	static auto foo(){ return x; }
+	static immutable a = foo();
+	static immutable b = foo();
+	static assert(a is b);
+	static assert(foo() is foo());
+}
 
 struct SliceAliasing{
 	static immutable(int[][]) retslices(){
@@ -62,7 +70,8 @@ pragma(msg, (()=>x.d.d.d.d)());
 
 //pragma(msg, (()=>new D().d)());
 
-
+/+
+// TODO: this should error at the appropriate time
 class C{
 	int x=2;
 	C c=null;
@@ -78,7 +87,7 @@ static assert(y.toString()=="2");
 static assert({auto z=y;z.mutate;return z;}().toString()=="1");
 
 enum z = {auto z=y;z.mutate;return z;}();
-static assert(z.toString()=="1");
+static assert(z.toString()=="1");+/
 
 class List(T){
 	T value;

@@ -932,14 +932,15 @@ pragma(msg, "testarrayptrlength: ", testarrayptrlength());
 typeof(null) retnull(){return null;}
 pragma(msg, "retnull: ",retnull());
 
-static assert(retnull() is null); // TODO!
+static assert(retnull() is null);
 
-static assert([] is null); // TODO!
+static assert([] is null);
 static assert([] == null);
 
 immutable a = "hallo";
 immutable b = a;
-pragma(msg, a is b); // TODO (?)
+pragma(msg, a is b);
+static assert(a is b);
 //pragma(msg, (()=>a is b)());
 //pragma(msg, ((immutable(char)[] a, immutable(char)[] b)=>a is b)(a,b));
 
