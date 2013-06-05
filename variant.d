@@ -118,22 +118,10 @@ private struct RTTypeID{
 				r.dontConstFold();
 				return r;
 			};+/
-			r.toString = function(ref Variant self){return "null";};
 		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
 			enum occ = getOccupied!T;
 			r.whichBasicType=Tok!(is(T==string)?"``c":is(T==wstring)?"``w":is(T==dstring)?"``d":assert(0));
 			r.occupies = occ;
-			/+r.toExpr = function Expression(ref Variant self){
-				auto r=LiteralExp.create!New(mixin(`self.`~to!string(occ)));
-				r.dontConstFold();
-				return r;
-			};+/
-			enum sfx = is(T==string)  ? "c" :
-			           is(T==wstring) ? "w" :
-				       is(T==dstring) ? "d" : "";
-			r.toString = function string(ref Variant self){
-				return to!string('"'~escape(mixin(`self.`~to!string(occ)))~'"'~sfx);
-			};
 		}else static if(isBasicType!T){//
 			alias getOccupied!T occ;
 			r.whichBasicType = Tok!(T.stringof);
@@ -144,34 +132,8 @@ private struct RTTypeID{
 				return r;
 				//assert(0,"TODO");
 			};+/
-			r.toString = function(ref Variant self){
-				enum sfx = is(T==uint) ? "U" :
-					       is(T==long)||is(T==real) ? "L" :
-						   is(T==ulong) ? "LU" :
-						   is(T==float) ? "f" :
-				           is(T==ifloat) ? "fi" :
-					       is(T==idouble) ? "i" :
-						   is(T==ireal) ? "Li":"";
-				enum left = is(T==char)||is(T==wchar)||is(T==dchar) ? "'" : "";
-				enum right = left;
-				// remove redundant "i" from imaginary literals
-				enum occ = occ==Occupies.fli80?Occupies.flt80:occ;
-				static if(is(T==ifloat)) alias float T;
-				else static if(is(T==idouble)) alias double T;
-				else static if(is(T==ireal)) alias real T;
-
-				string rlsfx = ""; // TODO: extract into its own function?
-				string res = to!string(mixin(`cast(T)self.`~to!string(occ)));
-				static if(is(T==float)||is(T==double)||is(T==real))
-					if(self.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
-				return left~res~right~rlsfx~sfx;
-			};
 		}else static if(is(T==Variant[])){
 			r.occupies = Occupies.arr;
-			r.toString = function string(ref Variant self){
-				import std.algorithm, std.array;
-				return '['~join(map!(to!string)(self.arr),",")~']';
-			};
 		}else static if(is(T==Vars)){
 			if(!arg){
 				if(id!Vars.exists){
@@ -191,17 +153,10 @@ private struct RTTypeID{
 				// TODO: Aliasing?
 				return LiteralExp.factory(self, self.id.type);
 			};+/
-			r.toString = function string(ref Variant self){
-				if(self.vars is null) return "null";
-				return self.id.type.toString(); // TODO: pick up toString?
-			};
 		}else{		
 			static assert(!isBasicType!T);
 			static assert(0, "TODO");
 			//r.toExpr = function Expression
-			r.toString = function (ref Variant self){
-				return Variant("(Variant of type "~self.id.type.toString()~")");
-			};
 		}
 		foreach(member; __traits(allMembers,typeof(this))){
 			static if(is(typeof(*mixin(member))==function))
@@ -213,7 +168,6 @@ private struct RTTypeID{
 private:
 	// vtbl
 	// Expression function(ref Variant) toExpr;
-	string function(ref Variant) toString;
 	
 	template id(T){static: RTTypeID memo; bool exists;}
 	static RTTypeID*[Type] aggrmemo;
@@ -338,13 +292,55 @@ struct Variant{
 	}
 
 	string toString(){
-		return id.toString(this);
-		/*final switch(id.occupies){
-			foreach(x;__traits(allMembers, Occupies)){
-				case mixin(`Occupies.`~x): return to!string(mixin(x));
+		auto type=getType().getHeadUnqual();
+		if(type is Type.get!(typeof(null))()) return "null";
+		if(type.isSomeString()){
+			foreach(T;Seq!(string,wstring,dstring)){
+				if(type !is Type.get!T()) continue;
+				enum occ = getOccupied!T;
+				enum sfx = is(T==string)  ? "c" :
+					       is(T==wstring) ? "w" :
+						   is(T==dstring) ? "d" : "";
+				return to!string('"'~escape(mixin(`this.`~to!string(occ)))~'"'~sfx);
 			}
 		}
-		assert(0); // TODO: investigate, report bug*/
+		if(auto bt=type.isBasicType()){
+			switch(bt.op){
+				foreach(x;ToTuple!basicTypes){
+					static if(x!="void")
+					case Tok!x:
+						mixin(`alias typeof(`~x~`.init) T;`); // dmd parser workaround
+						enum sfx = is(T==uint) ? "U" :
+					       is(T==long)||is(T==real) ? "L" :
+						   is(T==ulong) ? "LU" :
+						   is(T==float) ? "f" :
+				           is(T==ifloat) ? "fi" :
+					       is(T==idouble) ? "i" :
+						   is(T==ireal) ? "Li":"";
+						enum left = is(T==char)||is(T==wchar)||is(T==dchar) ? "'" : "";
+						enum right = left;
+						// remove redundant "i" from imaginary literals
+						enum oc1 = getOccupied!T;
+						enum occ = oc1==Occupies.fli80?Occupies.flt80:oc1;
+						
+						string rlsfx = ""; // TODO: extract into its own function?
+						string res = to!string(mixin(`cast(T)this.`~to!string(occ)));
+						static if(occ==Occupies.flt80)
+							if(this.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
+						return left~res~right~rlsfx~sfx;						
+				}
+				default: assert(0);
+			}
+		}
+		if(type.getElementType()){
+			import std.algorithm, std.array;
+			return '['~join(map!(to!string)(this.arr),",")~']';
+		}
+		if(type.isAggregateTy()){
+			if(this.vars is null) return "null";
+			return this.id.type.toString(); // TODO: pick up toString?
+		}
+		assert(0,"cannot get string");
 	}
 
 	Variant convertTo(Type to)in{assert(!!id);}body{
