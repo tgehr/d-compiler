@@ -118,17 +118,6 @@ private struct RTTypeID{
 				r.dontConstFold();
 				return r;
 			};+/
-			r.convertTo = function(ref Variant self, Type to){
-				to = to.getHeadUnqual();
-				if(to is Type.get!(typeof(null))()) return self;
-				if(to.getElementType()) return Variant((Variant[]).init,(Variant[]).init).convertTo(to);
-				if(to.isAggregateTy()) return Variant(Vars.empty, to);
-
-				// TODO: null pointers and delegates
-				// auto tou=to.getHeadUnqual();
-				
-				return cannotConvert(self, to);
-			};
 			r.toString = function(ref Variant self){return "null";};
 		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
 			enum occ = getOccupied!T;
@@ -139,25 +128,6 @@ private struct RTTypeID{
 				r.dontConstFold();
 				return r;
 			};+/
-			r.convertTo = function Variant(ref Variant self, Type to){
-				auto tou = to.getHeadUnqual();
-				if(tou is Type.get!T()) return self;
-				if(!is(T==string) && tou is Type.get!string())
-					return Variant(.to!string(mixin(`self.`~.to!string(occ))));
-				else if(!is(T==wstring) && tou is Type.get!wstring())
-					return Variant(.to!wstring(mixin(`self.`~.to!string(occ))));
-				else if(!is(T==dstring) && tou is Type.get!dstring())
-					return Variant(.to!dstring(mixin(`self.`~.to!string(occ))));
-				else if(to.getElementType()){
-					// TODO: revise allocation
-					auto r = new Variant[self.length];
-					foreach(i,x;mixin(`self.`~.to!string(occ))) r[i]=Variant(x);
-					return Variant(r,r);//TODO: aliasing?
-				}
-
-				// assert(to.getElementType().getUnqual() is Type.get!(Unqual!(ElementType!T))());
-				return self; // TODO: this is a hack and might break stuff (?)
-			};
 			enum sfx = is(T==string)  ? "c" :
 			           is(T==wstring) ? "w" :
 				       is(T==dstring) ? "d" : "";
@@ -174,20 +144,6 @@ private struct RTTypeID{
 				return r;
 				//assert(0,"TODO");
 			};+/
-			r.convertTo = function Variant(ref Variant self, Type to){
-				if(auto bt = to.getHeadUnqual().isBasicType()){
-					switch(bt.op){
-						foreach(x;ToTuple!basicTypes){
-							static if(x!="void")
-							case Tok!x:
-								return Variant(mixin(`cast(`~x~`)cast(T)self.`~.to!string(occ)));
-						}
-						case Tok!"void": return self;
-						default: break;
-					}
-				}
-				return cannotConvert(self, to);
-			};
 			r.toString = function(ref Variant self){
 				enum sfx = is(T==uint) ? "U" :
 					       is(T==long)||is(T==real) ? "L" :
@@ -212,25 +168,6 @@ private struct RTTypeID{
 			};
 		}else static if(is(T==Variant[])){
 			r.occupies = Occupies.arr;
-			r.convertTo = function Variant(ref Variant self, Type to){
-				// assert(to.getHeadUnqual().getElementType()!is null);
-				auto tou = to.getHeadUnqual();
-				if(tou is Type.get!string()){
-					string s;
-					foreach(x; self.arr) s~=cast(char)x.int64;
-					return Variant(s);
-				}else if(tou is Type.get!wstring()){
-					wstring s;
-					foreach(x; self.arr) s~=cast(wchar)x.int64;
-					return Variant(s);
-				}else if(tou is Type.get!dstring()){
-					dstring s;
-					foreach(x; self.arr) s~=cast(wchar)x.int64;
-					return Variant(s);
-				}
-				// TODO: Sanity check.
-				return self;
-			};
 			r.toString = function string(ref Variant self){
 				import std.algorithm, std.array;
 				return '['~join(map!(to!string)(self.arr),",")~']';
@@ -254,9 +191,6 @@ private struct RTTypeID{
 				// TODO: Aliasing?
 				return LiteralExp.factory(self, self.id.type);
 			};+/
-			r.convertTo = function Variant(ref Variant self, Type to){
-				return self; // TODO: fix?
-			};
 			r.toString = function string(ref Variant self){
 				if(self.vars is null) return "null";
 				return self.id.type.toString(); // TODO: pick up toString?
@@ -265,7 +199,6 @@ private struct RTTypeID{
 			static assert(!isBasicType!T);
 			static assert(0, "TODO");
 			//r.toExpr = function Expression
-			r.convertTo = cannotConvert;
 			r.toString = function (ref Variant self){
 				return Variant("(Variant of type "~self.id.type.toString()~")");
 			};
@@ -281,15 +214,6 @@ private:
 	// vtbl
 	// Expression function(ref Variant) toExpr;
 	string function(ref Variant) toString;
-	Variant function(ref Variant,Type) convertTo;
-
-	private static Variant function(ref Variant,Type) cannotConvert;
-	static this(){ // meh
-		cannotConvert = 
-		function Variant(ref Variant self, Type to){
-			assert(0, text("cannot convert ", self, " of type ",self.id.type, " to ",to));
-		};
-	}
 	
 	template id(T){static: RTTypeID memo; bool exists;}
 	static RTTypeID*[Type] aggrmemo;
@@ -326,7 +250,7 @@ struct Variant{
 			 value[0].id.type.getUnqual() is value[0].id.type,
 			 "unsupported: "~to!string(value[0].id.type));+/
 			auto id = cnt[0].id;
-			foreach(x;cnt[1..$]) assert(id is x.id);
+			foreach(x;cnt[1..$]) assert(id is x.id,cnt.text);
 		}		
 	}body{
 		id = RTTypeID.get!(Variant[])();
@@ -423,7 +347,86 @@ struct Variant{
 		assert(0); // TODO: investigate, report bug*/
 	}
 
-	Variant convertTo(Type ty)in{assert(!!id);}body{return id.convertTo(this, ty);}
+	Variant convertTo(Type to)in{assert(!!id);}body{
+		auto type = getType().getHeadUnqual();
+		to = to.getHeadUnqual();
+		if(to is type) return this;
+		if(type is Type.get!(typeof(null))()){
+			if(to is Type.get!(typeof(null))()) return this;
+			if(to.getElementType()) return Variant((Variant[]).init,(Variant[]).init).convertTo(to);
+			if(to.isAggregateTy()) return Variant(Vars.empty, to);
+			// TODO: null pointers and delegates
+			// auto tou=to.getHeadUnqual();
+			assert(0,"cannot convert");
+		}else if(type.isSomeString()){
+			foreach(T;Seq!(string,wstring,dstring)){
+				enum occ=getOccupied!T;
+				if(type !is Type.get!T()) continue;
+				if(to is Type.get!T()) return this;
+				if(!is(T==string) && to is Type.get!string())
+					return Variant(.to!string(mixin(`this.`~.to!string(occ))));
+				else if(!is(T==wstring) && to is Type.get!wstring())
+					return Variant(.to!wstring(mixin(`this.`~.to!string(occ))));
+				else if(!is(T==dstring) && to is Type.get!dstring())
+					return Variant(.to!dstring(mixin(`this.`~.to!string(occ))));
+				else if(to.getElementType()){
+					// TODO: revise allocation
+					auto r = new Variant[this.length];
+					foreach(i,x;mixin(`this.`~.to!string(occ))) r[i]=Variant(x);
+					return Variant(r,r);//TODO: aliasing?
+				}
+				return this; // TODO: this is a hack and might break stuff (?)
+				break;
+			}
+		}else if(auto tbt=type.isBasicType()){
+			if(auto bt = to.getHeadUnqual().isBasicType()){
+				switch(tbt.op){
+					foreach(tx;ToTuple!basicTypes){
+						static if(tx!="void"){
+							case Tok!tx:// TODO: code generated for integral types is identical
+							mixin(`alias typeof(`~tx~`.init) T;`); // dmd parser workaround
+							enum occ=getOccupied!T;
+							switch(bt.op){
+								foreach(x;ToTuple!basicTypes){
+									static if(x!="void")
+									case Tok!x:
+										return Variant(mixin(`cast(`~x~`)cast(T)this.`~.to!string(occ)));
+								}
+								case Tok!"void": return this;
+								default: assert(0);
+							}
+						}
+					}
+					default: assert(0);
+				}
+			}
+		}else if(type.isDynArrTy()){
+			// assert(to.getHeadUnqual().getElementType()!is null);
+			if(to is Type.get!string()){
+				string s;
+				foreach(x; this.arr) s~=cast(char)x.int64;
+				return Variant(s);
+			}else if(to is Type.get!wstring()){
+				wstring s;
+				foreach(x; this.arr) s~=cast(wchar)x.int64;
+				return Variant(s);
+			}else if(to is Type.get!dstring()){
+				dstring s;
+				foreach(x; this.arr) s~=cast(wchar)x.int64;
+				return Variant(s);
+			}
+			// TODO: Sanity check.
+			return this;
+		}else if(type is Type.get!EmptyArray()){
+			assert(to.isDynArrTy());
+			if(to.isSomeString()){
+				foreach(T;Seq!(string,wstring,dstring))
+					if(to is Type.get!T()) return Variant(T.init/+,T.init+/);
+			}
+			return Variant((Variant[]).init,(Variant[]).init);
+		}
+		return this;
+	}
 
 	bool opCast(T)()if(is(T==bool)){
 		assert(id.type == Type.get!bool(), to!string(id.type)~" "~toString());

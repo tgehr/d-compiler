@@ -3874,10 +3874,11 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 
 mixin template CTFEInterpret(T) if(is(T==PtrExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		if(e.type.isDynArrTy()){
+		if(e.type.getHeadUnqual().isDynArrTy()){
 			e.byteCompile(bld);
 			bld.emit(Instruction.ptra);
 		}else{
+			assert(e.type.getHeadUnqual().isArrayTy());
 			auto lv=e.byteCompileLV(bld);
 			lv.emitPointer(bld);
 		}
@@ -4979,11 +4980,11 @@ struct VariantToMemoryContext{
 			return res;
 		}
 		Variant[] container;
-		if(v.ptr in sl_aliasing_cache){
-			container=sl_aliasing_cache[v.ptr];
+		if(v.ptr in sl_aliasing_rev){
+			container=sl_aliasing_rev[v.ptr];
 		}else{
 			container = computeContainer();
-			sl_aliasing_cache[v.ptr]=container;
+			sl_aliasing_rev[v.ptr]=container;
 		}
 		auto siz = getCTSizeof(el);
 		if(!siz) return Variant(container,container); // TODO: can we assert siz!=0?
@@ -5012,13 +5013,13 @@ struct VariantToMemoryContext{
 		auto end = start+arr.length;
 		void[] rcnt;
 		bool cached = false;
-		if(cnt.ptr in sl_aliasing_reverse){
-			rcnt=sl_aliasing_reverse[cnt.ptr];
+		if(cnt.ptr in sl_aliasing){
+			rcnt=sl_aliasing[cnt.ptr];
 			cached = true;
 		}
 
 		auto finish(size_t siz){
-			if(!cached) sl_aliasing_reverse[cnt.ptr]=rcnt;
+			if(!cached) sl_aliasing[cnt.ptr]=rcnt;
 			return BCSlice(rcnt, rcnt[start*siz..end*siz]);
 		}
 
@@ -5106,12 +5107,13 @@ struct VariantToMemoryContext{
 
 	ulong[][AAbyIdentity!(VarDecl,Variant)] aliasing_cache; // preserve aliasing
 	Variant[ulong*] aliasing_reverse; // preserve aliasing on reverse translation
-	Variant[][void*] sl_aliasing_cache; // preserve aliasing
-	void[][Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
+
+	void[][Variant*] sl_aliasing; // preserve aliasing
+	Variant[][void*] sl_aliasing_rev; // preserve aliasing on reverse translation
 
 	void flushCaches(){
 		aliasing_cache=null;
-		sl_aliasing_cache=null;
+		sl_aliasing=null;
 		// we still need reverse translation
 		// hashtables with weak keys would be neat to resolve the memory leak this causes
 		// TODO: fix memory leak
