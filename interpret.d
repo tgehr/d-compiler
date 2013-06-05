@@ -3499,12 +3499,7 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				return;
 			}
 		}else if(tu.getElementType()){
-			if(!bcCache.container.ptr) bcCache=variantToMemory.VariantToBCSlice(value);
-			else{
-				if(!value.getType().isSomeString()) // TODO: get rid of this
-					variantToMemory.registerContainer(value.getContainer(), bcCache.container);
-			}
-			alias bcCache r;
+			auto r=variantToMemory.VariantToBCSlice(value,tu);
 			size_t size = getBCSizeof(tu.getElementType().getDynArr());
 			if(tu.getUnqual() is Type.get!(void[])()){
 				bld.emit(Instruction.push);
@@ -3528,12 +3523,13 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 			auto vars = value.get!(Variant[VarDecl])();
 			if(vars is null) goto Lnull;
 			// TODO: this is inefficient
-			ulong[] memory = variantToMemory.VariantToBCMemory(value);
+			ulong[] memory = variantToMemory.VariantToBCMemory(value,tu);
 			foreach(v;memory){
 				bld.emit(Instruction.push);
 				bld.emitConstant(v);
 			}
 		}else{
+			// TODO: pointers!
 			assert(tu is Type.get!(typeof(null))());
 		Lnull:
 			// TODO: solve more elegantly
@@ -3544,7 +3540,6 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 			return;
 		}
 	}
-	private BCSlice bcCache;
 
 	// for eg. top-level immutable ref parameters that have been const folded
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
@@ -3879,8 +3874,13 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 
 mixin template CTFEInterpret(T) if(is(T==PtrExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		e.byteCompile(bld);
-		bld.emit(Instruction.ptra);
+		if(e.type.isDynArrTy()){
+			e.byteCompile(bld);
+			bld.emit(Instruction.ptra);
+		}else{
+			auto lv=e.byteCompileLV(bld);
+			lv.emitPointer(bld);
+		}
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==LengthExp)){
@@ -3921,6 +3921,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		subscribers[notified]=true;
 	}
 	void notifyLayoutChanged(AggregateDecl decl){
+		variantToMemory.flushCaches();
 		layoutKnown = false;
 		foreach(s,_;subscribers) s.notifyLayoutChanged(this);
 	}
@@ -4836,8 +4837,8 @@ T consume(T=ulong)(ref ulong[] memory){
 // (usage could even be extended into CTFE, but then some form of additional GC
 // during CTFE-runtime will be required.)
 struct VariantToMemoryContext{
-	ulong[] VariantToBCMemory(Variant value){
-		auto va = VariantToMemory(value);
+	ulong[] VariantToBCMemory(Variant value, Type type){
+		auto va = VariantToMemory(value, type);
 		// TODO: this might be not ok!
 		if(va.length%ulong.sizeof) va.length = va.length+ulong.sizeof-va.length%ulong.sizeof;
 		assert(!(va.length%ulong.sizeof));
@@ -4901,8 +4902,8 @@ struct VariantToMemoryContext{
 		return Variant(null);
 	}
 
-	void[] VariantToMemory(Variant value){ // TODO: optimize this such that it does not allocate so heavily
-		auto ret = value.getType();
+	void[] VariantToMemory(Variant value, Type type){ // TODO: optimize this such that it does not allocate so heavily
+		auto ret = type.getHeadUnqual();
 		if(auto bt = ret.isBasicType()){
 		swtch:switch(bt.op){
 				foreach(x; ToTuple!integralTypes){
@@ -4914,11 +4915,11 @@ struct VariantToMemoryContext{
 			}
 		}
 		if(ret.isArrayTy){
-			auto res=VariantToBCSlice(value);
+			auto res=VariantToBCSlice(value,ret);
 			return res.slice;
 		}
 		if(ret.getElementType()){
-			return [VariantToBCSlice(value)];
+			return [VariantToBCSlice(value,ret)];
 		}
 		if(auto at=ret.isAggregateTy()){
 			Variant[VarDecl] vars = value.get!(Variant[VarDecl])();
@@ -4992,17 +4993,10 @@ struct VariantToMemoryContext{
 		auto end=start+bc.slice.length/siz;
 		return Variant(container[start..end],container);
 	}
-	Variant[][void*] sl_aliasing_cache; // preserve aliasing
-	void[][Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
 
-	void registerContainer(Variant[] value, void[] container){
-		sl_aliasing_cache[container.ptr]=value;
-		sl_aliasing_reverse[value.ptr]=container;
-	}
-
-	BCSlice VariantToBCSlice(Variant value){
+	BCSlice VariantToBCSlice(Variant value, Type type){
 		// TODO: container!
-		auto ret=value.getType().getHeadUnqual();
+		auto ret=type.getHeadUnqual();
 		if(ret is Type.get!(typeof(null))())
 			return BCSlice(null); // TODO: necessary?
 		foreach(T;Seq!(string,wstring,dstring)){ // TODO: aliasing for strings, proper zero-termination of allocated memory blocks
@@ -5031,6 +5025,9 @@ struct VariantToMemoryContext{
 		assert(ret.getElementType());
 		if(ret.getUnqual() is Type.get!EmptyArray()) return BCSlice([]);
 		auto el = ret.getElementType().getHeadUnqual();
+		if(el is Type.get!(void)()){
+			el = value.getType().getElementType(); // TODO: store the actual type
+		}
 		assert(el);
 		if(auto bt=el.isBasicType()){
 			if(bt.isIntegral()){
@@ -5060,7 +5057,7 @@ struct VariantToMemoryContext{
 		auto siz=getBCSizeof(el);
 		if(cached) return finish(siz*ulong.sizeof);
 		auto r = new ulong[cnt.length*siz];
-		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i])[];
+		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i],el)[];
 		rcnt=r;
 		return finish(siz*ulong.sizeof);
 	}
@@ -5089,7 +5086,6 @@ struct VariantToMemoryContext{
 
 	ulong[] VariantToAggregate(Variant[VarDecl] vars, AggregateDecl decl){
 		if(vars.byid in aliasing_cache) return aliasing_cache[vars.byid];
-		assert(decl.isLayoutKnown);
 		auto res = new ulong[decl.getBCSize()];
 		aliasing_cache[vars.byid]=res;
 		aliasing_reverse[res.ptr]=Variant(vars,decl.getType());
@@ -5103,12 +5099,23 @@ struct VariantToMemoryContext{
 				vars[vd]=vd.init.interpretV(); // TODO: ok?
 			}
 			auto var = vars[vd];
-			res[off..off+len]=VariantToBCMemory(var);
+			res[off..off+len]=VariantToBCMemory(var,vd.type);
 		}
 		return res;
 	}
+
 	ulong[][AAbyIdentity!(VarDecl,Variant)] aliasing_cache; // preserve aliasing
 	Variant[ulong*] aliasing_reverse; // preserve aliasing on reverse translation
+	Variant[][void*] sl_aliasing_cache; // preserve aliasing
+	void[][Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
+
+	void flushCaches(){
+		aliasing_cache=null;
+		sl_aliasing_cache=null;
+		// we still need reverse translation
+		// hashtables with weak keys would be neat to resolve the memory leak this causes
+		// TODO: fix memory leak
+	}
 }
 
 VariantToMemoryContext variantToMemory; // TODO: is there a better way?
