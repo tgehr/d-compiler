@@ -540,7 +540,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 				mixin(ErrEplg);
 			}
 			mixin(IntFCEplg);
-		}else static if(S==Tok!"is"||S==Tok!"!is"){
+		}/+else static if(S==Tok!"is"||S==Tok!"!is"){
 			mixin(IntFCChldNoEplg!q{e1,e2});
 			assert(e1.type is e2.type);
 
@@ -548,7 +548,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 
 			sc.error("cannot interpret '"~TokChars!S~"' expression during compile time", loc);
 			mixin(ErrEplg);
-		}else static if(S==Tok!"&&"||S==Tok!"||"){
+		}+/else static if(S==Tok!"&&"||S==Tok!"||"){
 			mixin(IntFCChldNoEplg!q{e1});
 			assert(e1.type is Type.get!bool());
 			if(cast(bool)e1.interpretV()^(S==Tok!"&&")){mixin(RewEplg!q{e1});}
@@ -1044,8 +1044,6 @@ struct Stack{
 }
 
 struct ByteCodeBuilder{
-	public VariantToMemoryContext ctx;
-
 /+	/* byte code may contain unique references to constant data, eg. string data
 	   this struct simulates an ulong[], which is conservatively searched for
 	   pointers by the GC.
@@ -3501,7 +3499,11 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				return;
 			}
 		}else if(tu.getElementType()){
-			if(!bcCache.container.ptr) bcCache=bld.ctx.VariantToBCSlice(value);
+			if(!bcCache.container.ptr) bcCache=variantToMemory.VariantToBCSlice(value);
+			else{
+				if(!value.getType().isSomeString()) // TODO: get rid of this
+					variantToMemory.registerContainer(value.getContainer(), bcCache.container);
+			}
 			alias bcCache r;
 			size_t size = getBCSizeof(tu.getElementType().getDynArr());
 			if(tu.getUnqual() is Type.get!(void[])()){
@@ -3526,7 +3528,7 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 			auto vars = value.get!(Variant[VarDecl])();
 			if(vars is null) goto Lnull;
 			// TODO: this is inefficient
-			ulong[] memory = bld.ctx.VariantToBCMemory(value);
+			ulong[] memory = variantToMemory.VariantToBCMemory(value);
 			foreach(v;memory){
 				bld.emit(Instruction.push);
 				bld.emitConstant(v);
@@ -4669,7 +4671,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		if(sstate != SemState.completed)
 			resetByteCode();
 
-		auto supported=true, res=bld.ctx.VariantFromBCMemory(stack.stack[0..stack.stp+1], type.ret, supported);
+		auto supported=true, res=variantToMemory.VariantFromBCMemory(stack.stack[0..stack.stp+1], type.ret, supported);
 		if(supported) return res;
 		// assert(0,"unsupported return type "~type.ret.toString());
 		handler.error(format("return type '%s' not yet supported in CTFE", type.ret.toString()),loc);
@@ -4993,6 +4995,11 @@ struct VariantToMemoryContext{
 	Variant[][void*] sl_aliasing_cache; // preserve aliasing
 	void[][Variant*] sl_aliasing_reverse; // preserve aliasing on reverse translation
 
+	void registerContainer(Variant[] value, void[] container){
+		sl_aliasing_cache[container.ptr]=value;
+		sl_aliasing_reverse[value.ptr]=container;
+	}
+
 	BCSlice VariantToBCSlice(Variant value){
 		// TODO: container!
 		auto ret=value.getType().getHeadUnqual();
@@ -5103,3 +5110,5 @@ struct VariantToMemoryContext{
 	ulong[][AAbyIdentity!(VarDecl,Variant)] aliasing_cache; // preserve aliasing
 	Variant[ulong*] aliasing_reverse; // preserve aliasing on reverse translation
 }
+
+VariantToMemoryContext variantToMemory; // TODO: is there a better way?
