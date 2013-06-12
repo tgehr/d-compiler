@@ -443,15 +443,23 @@ template Semantic(T) if(is(T==Node)){
 	// TODO: needRetry and sstate could be final properties to save one byte of space
 	// profile to see if it is worth it.
 	Node rewrite;
+	/+Node _rewrite;
+	@property Node rewrite(){ return _rewrite; }
+	@property Node rewrite(Node n){
+		if(!_rewrite) assert(!!n);
+		dw("old: ",_rewrite);
+		dw("new: ",n);
+		return _rewrite=n;
+	}+/
 	SemState sstate = SemState.begin;
-	//ubyte needRetry = false; // needRetry == 2: unwind stack for circular dep handling
-	ubyte _needRetry = false;
+	ubyte needRetry = false; // needRetry == 2: unwind stack for circular dep handling
+	/+ubyte _needRetry = false;
 	@property ubyte needRetry(){ return _needRetry; }
 	@property void needRetry(ubyte val){
 		assert(val!=1||sstate!=SemState.error);
 		assert(!val || sstate != SemState.completed || isExpression()&&isExpression().isConstant(),val.to!string);
 		_needRetry=val;
-	}
+	}+/
 
 	invariant(){
 		//assert(sstate!=SemState.error||needRetry!=1, "needRetry and error "~to!string(loc)~" "~to!string(typeid(this))~(cast(Identifier)this?" "~(cast(Identifier)this).name:"")~" Identifier.tryAgain: "~to!string(Identifier.tryAgain)~" needRetry: "~to!string(needRetry)); // !!!!?
@@ -4113,7 +4121,6 @@ class Symbol: Expression{ // semantic node
 			}
 			assert(!circ,toString());
 			circ = this;
-			// assert(0,this.toString);
 			sstate = SemState.error;
 			needRetry = 2;
 			clist~=this;
@@ -5644,8 +5651,10 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		e2.semantic(sc);
 		res = e2;
 		mixin(Rewrite!q{res});
+		auto rew=e2.rewrite;
 		e2.rewrite = null;
 		mixin(SemProp!q{e2});
+		e2.rewrite=rew;
 		////
 		if(auto sym = res.isSymbol()){
 			e2=sym;
