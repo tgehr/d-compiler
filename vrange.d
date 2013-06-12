@@ -343,7 +343,7 @@ private static:
 				if(lhs.max&d){if(~lhs.min&d) lhs.min=0;}
 				else{if(~rhs.min&d) rhs.min=0;}
 			}else if(lhs.min&rhs.min&d){
-			x |= d;
+				x |= d;
 			}else if(and & d){
 				x |= (d<<1)-1;
 				break;
