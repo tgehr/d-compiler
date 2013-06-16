@@ -42,7 +42,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, vars, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, err
 }
 
 template getOccupied(T){
@@ -63,6 +63,8 @@ template getOccupied(T){
 		enum getOccupied = Occupies.cmp80;
 	else static if(is(T==Variant[]))
 		enum getOccupied = Occupies.arr;
+	else static if(is(T==Variant*))
+		enum getOccupied = Occupies.ptr_;
 	else static if(is(T==typeof(null)))
 		enum getOccupied = Occupies.none;
 	else static if(is(T==Vars))
@@ -110,6 +112,7 @@ struct Variant{
 		if(tu is Type.get!wstring()) return Occupies.wstr;
 		if(tu is Type.get!dstring()) return Occupies.dstr;
 		if(tu.getElementType()) return Occupies.arr;
+		if(tu.isPointerTy()) return Occupies.ptr_;
 
 		if(auto bt=tu.isBasicType()){
 			switch(bt.op){
@@ -141,10 +144,21 @@ struct Variant{
 		assert(cnt.ptr<=arr.ptr&&arr.ptr+arr.length<=cnt.ptr+cnt.length);
 		assert(type.getElementType(),text(type));
 		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
-		foreach(x;cnt[0..$]) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
+		foreach(x;cnt) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
 	}body{
 		this.type=type;
 		this.arr=arr;
+		this.cnt=cnt;
+	}
+
+	this()(Variant* ptr, Variant[] cnt, Type type)in{
+		auto pt=type.isPointerTy();
+		assert(!!pt);
+		auto tt=pt.ty.getUnqual();
+		foreach(x;cnt) assert(tt is x.type.getUnqual());
+	}body{
+		this.type=type;
+		this.ptr_=ptr;
 		this.cnt=cnt;
 	}
 
@@ -161,7 +175,10 @@ struct Variant{
 		ulong int64;
 		real flt80; ireal fli80; creal cmp80;
 		struct{
-			Variant[] arr;
+			union{
+				Variant[] arr;
+				Variant* ptr_;
+			}
 			Variant[] cnt;
 		}
 		Variant[VarDecl] vars; // structs, classes, closures
@@ -198,7 +215,7 @@ struct Variant{
 	}
 
 	Variant[] getContainer()in{
-		assert(occupies == Occupies.arr);
+		assert(occupies == Occupies.arr||occupies == Occupies.ptr_);
 	}body{
 		return cnt;
 	}
@@ -264,6 +281,9 @@ struct Variant{
 		if(type.getElementType()){
 			import std.algorithm, std.array;
 			return '['~join(map!(to!string)(this.arr),",")~']';
+		}
+		if(type.isPointerTy()){
+			return "&("~ptr_.toString()~")";
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -435,11 +455,23 @@ struct Variant{
 				else static if(op=="!=") return Variant(false,Type.get!bool());
 				else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
 			}
+		}else if(occupies == Occupies.ptr_){
+			assert(rhs.occupies==Occupies.ptr_);
+			// TODO: other relational operators
+			static if(op=="is"||op=="=="||op=="!is"||op=="!="){
+				return Variant((op=="!is"||op=="!=")^(ptr_ is rhs.ptr_),Type.get!bool());
+			}else assert(0);
+		}else if(occupies == Occupies.vars){
+			assert(rhs.occupies==Occupies.vars);
+			assert(!!type && type.getHeadUnqual().isAggregateTy() && type.getHeadUnqual().isAggregateTy().decl.isClassDecl());
+			static if(op=="is"||op=="!is")
+				return Variant((op=="!is")^(vars is rhs.vars),Type.get!bool());
+			else assert(0);
 		}else if(occupies == Occupies.none){
 			static if(is(typeof(mixin(`null `~op~` null`))))
 				return Variant(mixin(`null `~op~` null`),
 				         Type.get!(typeof(mixin(`null `~op~` null`)))());
-			assert(0);
+			else assert(0);
 		}
 
 		if(type.getHeadUnqual().isSomeString()){
@@ -501,6 +533,12 @@ struct Variant{
 		}
 	}
 
+	@property Variant ptr()in{
+		assert(occupies==Occupies.arr); // TODO: pointers to string
+	}body{
+		return Variant(arr.ptr, cnt, type.getElementType().getPointer());
+	}
+
 	@property size_t length()in{
 		assert(occupies==Occupies.arr||occupies == Occupies.str
 		       || occupies == Occupies.wstr || occupies == Occupies.dstr);
@@ -513,6 +551,14 @@ struct Variant{
 			default: assert(0);
 		}
 	}
+
+	Variant* getPointer()in{
+		assert(occupies==Occupies.ptr_);
+	}body{
+		return ptr_;
+	}
+
+
 
 	Variant opIndex(Variant index)in{
 		assert(index.occupies==Occupies.int64);

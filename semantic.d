@@ -3388,6 +3388,14 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						mixin(SemChld!q{x});
 					}
 					mixin(SemEplg);
+				}else static if(S==Tok!"is"||S==Tok!"!is"){
+					if(auto at=tyu.isAggregateTy()){
+						if(at.decl.isClassDecl()){ // TODO: value types and interfaces
+							// TODO: figure out exact spec for is and !is
+							type = Type.get!bool();
+							mixin(SemEplg);
+						}
+					}
 				}
 			}
 			// TODO: Associative arrays

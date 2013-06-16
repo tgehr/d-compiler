@@ -3022,7 +3022,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			return isLvalue ? e2.byteCompileLV(bld) : (e2.byteCompile(bld),null);
 		}else static if(isAssignOp(S)&&S!=Tok!"~=" || isArithmeticOp(S) || isShiftOp(S) || isBitwiseOp(S) ||isRelationalOp(S)&&S!=Tok!"in"&&S!=Tok!"!in"){
 			auto ptrt=type.isPointerTy();
-			if(auto ptr = ptrt?ptrt:e1.type.isPointerTy()){
+			if(auto ptr = ptrt?ptrt:e1.type.getHeadUnqual().isPointerTy()){
 				enum op = TokChars!S;
 				static if(S==Tok!"+"){
 					if(e2.type.isIntegral()){
@@ -3077,6 +3077,16 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 				assert(type.getHeadUnqual().isBasicType(), text(type," ",this));
 				static if(S!=Tok!"<<"&&S!=Tok!">>"&&S!=Tok!">>>") assert(e1.type is e2.type);
 			}
+
+			if(S==Tok!"is"||S==Tok!"!is"){
+				if(auto at=e1.type.isAggregateTy()){
+					assert(at.decl.isClassDecl(),"TODO: is for interfaces and value types");
+					assert(!!e2.type.isAggregateTy());
+					static if(S==Tok!"is") bld.emit(I.cmpep);
+					else bld.emit(I.cmpnep);
+				}
+			}
+					
 
 			static if(isAssignOp(S)){
 				auto strat = e1.byteCompileLV(bld);
@@ -3494,12 +3504,10 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				return;
 			}
 		}else if(tu.getElementType()){
-			auto r=variantToMemory.VariantToBCSlice(value,tu);
+			auto r=variantToMemory.VariantToBCSlice(value);
 			size_t size = getBCSizeof(tu.getElementType().getDynArr());
 			if(tu.getUnqual() is Type.get!(void[])()){
 				bld.emit(Instruction.push);
-				// TODO: this is incorrect, as the actual type might be qualified!
-				// TODO: store actual type!
 				bld.emitConstant(cast(ulong)cast(void*)value.getType());
 			}else assert(!(size&1),text(tu));
 			for(size_t i=0;i<(size&~1);i+=2){
@@ -3514,18 +3522,29 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				bld.emitConstant(getCTSizeof(tu));
 			}
 			return;
+		}else if(auto pt=tu.isPointerTy()){
+			auto r=variantToMemory.VariantToBCPointer(value);
+			size_t size = getBCSizeof(tu);
+			if(tu.getUnqual() is Type.get!(void*)()){
+				bld.emit(Instruction.push);
+				bld.emitConstant(cast(ulong)cast(void*)value.getType());
+			}else assert(!(size&1),text(tu));
+			for(size_t i=0;i<(size&~1);i+=2){
+				bld.emit(Instruction.push2);
+				bld.emitConstant(*(cast(ulong*)&r+i));
+				bld.emitConstant(*(cast(ulong*)&r+i+1));
+			}
+			return;
 		}else if(auto at=tu.isAggregateTy()){
 			auto vars = value.get!(Variant[VarDecl])();
 			if(vars is null) goto Lnull;
 			// TODO: this is inefficient
-			ulong[] memory = variantToMemory.VariantToBCMemory(value,tu);
+			ulong[] memory = variantToMemory.VariantToBCMemory(value);
 			foreach(v;memory){
 				bld.emit(Instruction.push);
 				bld.emitConstant(v);
 			}
 		}else{
-			// TODO: pointers!
-			assert(tu is Type.get!(typeof(null))());
 		Lnull:
 			// TODO: solve more elegantly
 			foreach(i;0..getBCSizeof(Type.get!(typeof(null))())){
@@ -4833,8 +4852,8 @@ T consume(T=ulong)(ref ulong[] memory){
 // (usage could even be extended into CTFE, but then some form of additional GC
 // during CTFE-runtime will be required.)
 struct VariantToMemoryContext{
-	ulong[] VariantToBCMemory(Variant value, Type type){
-		auto va = VariantToMemory(value, type);
+	ulong[] VariantToBCMemory(Variant value){
+		auto va = VariantToMemory(value);
 		// TODO: this might be not ok!
 		if(va.length%ulong.sizeof) va.length = va.length+ulong.sizeof-va.length%ulong.sizeof;
 		assert(!(va.length%ulong.sizeof));
@@ -4872,12 +4891,13 @@ struct VariantToMemoryContext{
 		// TODO: preserve aliasing of pointers correctly.
 		if(ret.getElementType()) return VariantFromBCSlice(memory.consume!BCSlice(),type,supported);
 		if(auto pt=ret.isPointerTy()){
-			supported = false;
-			return Variant(null, Type.get!(typeof(null))());
-			/+auto ptr=memory.consume!BCPointer();
-			if(ptr.ptr is null) return Variant(null);
+			auto ptr=memory.consume!BCPointer();
+			if(ptr.ptr is null) return Variant(null,type);
 			// TODO: proper pointer support!
-			return VariantFromBCSlice(BCSlice(ptr.container,ptr.container), pt.ty.getDynArr(), supported);+/
+			auto siz=getCTSizeof(pt.ty);
+			auto slc=BCSlice(ptr.container,ptr.ptr[0..siz]);
+			auto slice=VariantFromBCSlice(slc, pt.ty.getDynArr(), supported);
+			return slice.ptr;
 		}
 
 		if(ret is Type.get!(typeof(null))){
@@ -4900,8 +4920,8 @@ struct VariantToMemoryContext{
 		return Variant(null);
 	}
 
-	void[] VariantToMemory(Variant value, Type type){ // TODO: optimize this such that it does not allocate so heavily
-		auto ret = type.getHeadUnqual();
+	void[] VariantToMemory(Variant value){ // TODO: optimize this such that it does not allocate so heavily
+		auto ret = value.getType().getHeadUnqual();
 		if(auto bt = ret.isBasicType()){
 		swtch:switch(bt.op){
 				foreach(x; ToTuple!integralTypes){
@@ -4913,11 +4933,14 @@ struct VariantToMemoryContext{
 			}
 		}
 		if(ret.isArrayTy){
-			auto res=VariantToBCSlice(value,ret);
+			auto res=VariantToBCSlice(value);
 			return res.slice;
 		}
 		if(ret.getElementType()){
-			return [VariantToBCSlice(value,ret)];
+			return [VariantToBCSlice(value)];
+		}
+		if(ret.isPointerTy()){
+			return [VariantToBCPointer(value)];
 		}
 		if(auto at=ret.isAggregateTy()){
 			Variant[VarDecl] vars = value.get!(Variant[VarDecl])();
@@ -4992,8 +5015,10 @@ struct VariantToMemoryContext{
 		return Variant(container[start..end],container,type);
 	}
 
-	BCSlice VariantToBCSlice(Variant value, Type type){
-		auto ret=type.getHeadUnqual();
+	BCSlice VariantToBCSlice(Variant value)in{
+		assert(!!value.getType().getElementType());
+	}body{
+		auto ret=value.getType().getHeadUnqual();
 		if(ret is Type.get!(typeof(null))())
 			return BCSlice(null); // TODO: necessary?
 		foreach(T;Seq!(string,wstring,dstring)){ // TODO: aliasing for strings, proper zero-termination of allocated memory blocks
@@ -5060,10 +5085,22 @@ struct VariantToMemoryContext{
 		auto siz=getBCSizeof(el);
 		if(cached) return finish(siz*ulong.sizeof);
 		auto r = (new ulong[cnt.length*siz+1])[0..$-1];
-		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i],el)[];
+		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i])[];
 		rcnt=r;
 		return finish(siz*ulong.sizeof);
 	}
+
+	BCPointer VariantToBCPointer(Variant value)in{
+		assert(cast(PointerTy)value.getType().getHeadUnqual());
+	}body{
+		auto tt = cast(PointerTy)cast(void*)value.getType().getHeadUnqual();
+		auto cnt = value.getContainer();
+		assert(cnt.ptr<=value.getPointer());
+		auto id = value.getPointer()-cnt.ptr;
+		auto slc = VariantToBCSlice(Variant(cnt[id..id+1],cnt,tt.ty.getDynArr()));
+		return BCPointer(slc.container, slc.slice.ptr);
+	}
+
 
 	Variant VariantFromAggregate(ulong[] memory, Type type, ref bool supported)in{
 		assert(type.getHeadUnqual().isAggregateTy());
@@ -5108,7 +5145,7 @@ struct VariantToMemoryContext{
 				vars[vd]=vd.init.interpretV(); // TODO: ok?
 			}
 			auto var = vars[vd];
-			res[off..off+len]=VariantToBCMemory(var,vd.type);
+			res[off..off+len]=VariantToBCMemory(var);
 		}
 		return res;
 	}
