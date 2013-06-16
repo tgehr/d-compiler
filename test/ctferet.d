@@ -1,3 +1,76 @@
+
+class Pointers{
+	immutable int[1] u=[333];
+	int x = 123;
+	static immutable s = (()=>new immutable(Pointers)())();
+	static immutable t = (()=>s)();
+	pragma(msg, s is t);
+	//static assert((()=>&s.x is &t.x)());
+
+	//static immutable a = (()=>&s.x)(); // TODO
+	//static immutable b = (()=>&t.x)(); // TODO
+	//static assert(a is b);
+
+
+	/+immutable void*[2] a = { // TODO!
+		void* a;
+		void* b;
+		a=&b;
+		b=&a;
+		return [a,b];
+	}();+/
+
+
+	static assert((()=>s.u.ptr is t.u.ptr)());
+	static immutable q = (()=>s.u.ptr)();
+	static immutable p = (()=>t.u.ptr)();
+	static assert(p is q); // TODO!
+}
+
+
+struct ConstantArrayLiteralAliasing{
+	static foo(){
+		auto bar(){
+			auto x=[1,2,3];
+			return x;
+		}
+		return bar().ptr == bar().ptr;
+	}
+	static assert(!foo());
+}
+
+int[] allocarr(){
+	auto x = new int[5]; // TODO!
+	return x;
+}
+pragma(msg, allocarr());
+
+struct TestVoidArrayVoidPtr{
+	enum returnVoidArray = delegate void[](){return [2];}();
+
+	static immutable int x = 2;
+	static testvptr(){ void* ptr = cast(void*)&x; return ptr; }
+	pragma(msg, "testvptr: ", testvptr());
+	static assert(testvptr() is testvptr()); // TODO
+
+	static test1(){ auto x = [1,2,3]; return cast(immutable(int)[])cast(void[])x; } // error
+	pragma(msg, test1()," ",typeof(test1()));
+
+	static test2(){ auto x = [1,2,3]; return cast(const(int)[])cast(void[])x; } // ok
+	pragma(msg, test2()," ",typeof(test2()));
+
+
+	static testVarrayStruct(){
+		auto x = [1,2,3,4,5];
+		struct S{ void[] f; }
+		S s;
+		s.f = x;
+		return s.f;
+	}
+	static assert(testVarrayStruct()==[1,2,3,4,5]);
+}
+
+
 struct ArrayLiteralConv{
 	static int[2] a2=(()=>[1,2])();
 	static immutable a=["zero"];
@@ -14,22 +87,6 @@ struct Qualified{
 	enum baz = (){return new Foo();}();
 	static assert((()=>foo.x.ptr==bar.x.ptr)());
 	static assert((){return foo.x.ptr != bar.x.ptr;}()); // TODO
-}
-
-class Pointers{
-	immutable int[1] u=[333];
-	int x = 123;
-	static immutable s = (()=>new immutable(Pointers)())();
-	static immutable t = (()=>s)();
-	static assert((()=>&s.x is &t.x)());
-
-	static immutable a = (()=>&s.x)(); // TODO
-	static immutable b = (()=>&t.x)(); // TODO
-	static assert(a is b);
-
-	/+ TODO! static immutable q = (()=>s.u.ptr)();
-	static immutable p = (()=>t.u.ptr)();
-	pragma(msg, (()=>p is q)());+/
 }
 
 struct AliasingPreserving{
@@ -87,9 +144,9 @@ struct S{
 	S* next;
 }
 
-immutable s = {auto s=S();s.b=4;s.a++;s.next=new S();return s;}(); // TODO
-
-pragma(msg, s.b);
+immutable s = {auto s=S();s.b=4;s.a++;s.next=new S();return s;}();
+static assert(s.b==4);
+pragma(msg, "s.b: ",s.b);
 
 
 class D{
