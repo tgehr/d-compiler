@@ -4302,7 +4302,8 @@ class Symbol: Expression{ // semantic node
 		// TODO: simple pointer-chain expression alias?
 		if(!inContext.among(InContext.fieldExp,InContext.passedToTemplateAndOrAliased) &&
 		   thisType() && maybeThisContext() &&
-		   !meaning.isFunctionDecl().maybe!(a=>a.isConstructor())
+		   !meaning.isFunctionDecl().maybe!(a=>a.isConstructor()) &&
+		   !meaning.isOverloadSet().maybe!(a=>a.isConstructor())
 		){
 			auto t = New!ThisExp();
 			t.loc = loc;
