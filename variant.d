@@ -139,8 +139,9 @@ struct Variant{
 
 	this()(Variant[] arr, Variant[] cnt, Type type)in{
 		assert(cnt.ptr<=arr.ptr&&arr.ptr+arr.length<=cnt.ptr+cnt.length);
-		auto tt=type.getElementType().getConst();
-		foreach(x;cnt[0..$]) assert(tt is x.type.getConst(),text(cnt," ",tt," ",x.type," ",x));
+		assert(type.getElementType(),text(type));
+		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
+		foreach(x;cnt[0..$]) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
 	}body{
 		this.type=type;
 		this.arr=arr;

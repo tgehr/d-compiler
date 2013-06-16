@@ -91,18 +91,13 @@ mixin template Interpret(T) if(is(T==Expression)){
 		fixupLocations(x);
 		if(this is x) mixin(SemCheck);
 		else mixin(SemProp!q{x});
-		auto r=x._interpretExpr(sc);
+		auto r = x.interpretV().toExpr();
+		r.dontConstFold();		
 		if(this is r) mixin(SemCheck);
 		fixupLocations(r);
 		assert(!isConstant() || !needRetry); // TODO: file bug, so that this can be 'out'
 		rewrite = null;
 		if(this !is r) mixin(RewEplg!q{r});
-	}
-
-	protected Expression _interpretExpr(Scope){
-		auto r = interpretV().toExpr();
-		r.dontConstFold();		
-		return r;
 	}
 
 	Variant interpretV()in{assert(sstate == SemState.completed, to!string(this));}body{
@@ -111,7 +106,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 		//return Variant.init;
 	}
 
-	final Expression cloneConstant()in{assert(!!isConstant());}body{
+	final Expression cloneConstant()in{assert(!!isConstant()||isArrayLiteralExp());}body{
 		auto r = interpretV().toExpr();
 		r.type = type;
 		if(isArrayLiteralExp()){
@@ -304,7 +299,7 @@ mixin template Interpret(T) if(is(T==LiteralExp)){
 	override Variant interpretV(){ return value; }
 
 	final ArrayLiteralExp toArrayLiteral()in{
-		assert(type.isDynArrTy());
+		assert(!!type.getElementType());
 		assert(!type.isSomeString());
 	}body{
 		auto arr=value.get!(Variant[])();
@@ -313,10 +308,10 @@ mixin template Interpret(T) if(is(T==LiteralExp)){
 		foreach(i,ref x;lit) x = arr[i].toExpr();
 		// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
 		auto r=New!ArrayLiteralExp(lit);
+		r.loc=loc;
 		r.type=type;
 		r.semantic(null); // TODO: ok?
 		assert(!r.rewrite);
-		r.dontConstFold();
 		return r;
 	}
 }
@@ -326,11 +321,6 @@ mixin template Interpret(T) if(is(T==ArrayLiteralExp)){
 		bool ok = true;
 		foreach(x; lit) if(!x.checkInterpret(sc)) ok=false;
 		return ok;
-	}
-
-	protected override Expression _interpretExpr(Scope sc){
-		foreach(ref x; lit) mixin(IntChld!q{x});
-		return this;
 	}
 
 	override Variant interpretV(){
@@ -4882,10 +4872,12 @@ struct VariantToMemoryContext{
 		// TODO: preserve aliasing of pointers correctly.
 		if(ret.getElementType()) return VariantFromBCSlice(memory.consume!BCSlice(),type,supported);
 		if(auto pt=ret.isPointerTy()){
-			auto ptr=memory.consume!BCPointer();
+			supported = false;
+			return Variant(null, Type.get!(typeof(null))());
+			/+auto ptr=memory.consume!BCPointer();
 			if(ptr.ptr is null) return Variant(null);
 			// TODO: proper pointer support!
-			return VariantFromBCSlice(BCSlice(ptr.container,ptr.container), pt.ty.getDynArr(), supported);
+			return VariantFromBCSlice(BCSlice(ptr.container,ptr.container), pt.ty.getDynArr(), supported);+/
 		}
 
 		if(ret is Type.get!(typeof(null))){
@@ -4985,29 +4977,29 @@ struct VariantToMemoryContext{
 			return res;
 		}
 		Variant[] container;
+		auto siz = getCTSizeof(el);
+		if(!siz) return Variant(container,container,type); // TODO: can we assert siz!=0?
+		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
+		assert(!(bc.slice.length%siz));
 		if(v.ptr in sl_aliasing_rev){
 			container=sl_aliasing_rev[v.ptr];
 		}else{
 			container = computeContainer();
 			sl_aliasing_rev[v.ptr]=container;
 		}
-		auto siz = getCTSizeof(el);
-		if(!siz) return Variant(container,container,type); // TODO: can we assert siz!=0?
-		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
-		assert(!(bc.slice.length%siz));
 		auto start=(bc.slice.ptr-bc.container.ptr)/siz;
 		auto end=start+bc.slice.length/siz;
 		return Variant(container[start..end],container,type);
 	}
 
 	BCSlice VariantToBCSlice(Variant value, Type type){
-		// TODO: container!
 		auto ret=type.getHeadUnqual();
 		if(ret is Type.get!(typeof(null))())
 			return BCSlice(null); // TODO: necessary?
 		foreach(T;Seq!(string,wstring,dstring)){ // TODO: aliasing for strings, proper zero-termination of allocated memory blocks
 			if(ret is Type.get!T()){
 				auto str = value.get!T();
+				//return BCSlice(cast(void[])str, cast(void[])str);
 				str=str~0; // duplicate payload and zero terminate
 				return BCSlice(cast(void[])str, cast(void[])str[0..$-1]);
 			}
@@ -5024,7 +5016,10 @@ struct VariantToMemoryContext{
 		}
 
 		auto finish(size_t siz){
-			if(!cached) sl_aliasing[cnt.ptr]=rcnt;
+			if(!cached){
+				sl_aliasing[cnt.ptr]=rcnt;
+				sl_aliasing_rev[rcnt.ptr]=cnt;
+			}
 			return BCSlice(rcnt, rcnt[start*siz..end*siz]);
 		}
 
@@ -5035,13 +5030,15 @@ struct VariantToMemoryContext{
 			el = value.getType().getElementType(); // TODO: store the actual type
 		}
 		assert(el);
+		// this prevents in-place append of containers by allocating one element too much
+		// TODO: is there a more elegant solution?
 		if(auto bt=el.isBasicType()){
 			if(bt.isIntegral()){
 				switch(bt.getSizeof()){
 					foreach(U; Seq!(ubyte, ushort, uint, ulong)){
 						case U.sizeof:
 							if(cached) return finish(U.sizeof);
-							auto r=new U[cnt.length];
+							auto r=(new U[cnt.length+1])[0..$-1];
 							foreach(i,ref x;r) x=cast(U)cnt[i].get!ulong();
 							rcnt=r;
 							return finish(U.sizeof);
@@ -5052,7 +5049,7 @@ struct VariantToMemoryContext{
 			foreach(U; Seq!(float, double, real, ifloat, idouble, ireal, cfloat, cdouble, creal)){
 				if(bt is Type.get!U()){
 					if(cached) return finish(U.sizeof);
-					auto r=new U[cnt.length];
+					auto r=(new U[cnt.length+1])[0..$-1];
 					foreach(i,ref x;r) x=cast(U)cnt[i].get!U();
 					rcnt=r;
 					return finish(U.sizeof);
@@ -5062,7 +5059,7 @@ struct VariantToMemoryContext{
 		assert(getCTSizeof(el)==getBCSizeof(el)*ulong.sizeof);
 		auto siz=getBCSizeof(el);
 		if(cached) return finish(siz*ulong.sizeof);
-		auto r = new ulong[cnt.length*siz];
+		auto r = (new ulong[cnt.length*siz+1])[0..$-1];
 		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i],el)[];
 		rcnt=r;
 		return finish(siz*ulong.sizeof);

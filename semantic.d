@@ -898,13 +898,16 @@ mixin template Semantic(T) if(is(T==LiteralExp)){
 			if(auto ptr = rhs.getHeadUnqual().isPointerTy()){
 				return implicitlyConvertsTo(ptr.ty.getDynArr());
 			}
-		if(!isPolyString()) return false.independent;
+		if(isPolyString()){
+			assert(Type.get!wstring().implicitlyConvertsTo(rhs).isIndependent &&
+			       Type.get!dstring().implicitlyConvertsTo(rhs).isIndependent );
+			
+			return Type.get!wstring().implicitlyConvertsTo(rhs).or(
+				Type.get!dstring().implicitlyConvertsTo(rhs));
+		}
+		
 
-		assert(Type.get!wstring().implicitlyConvertsTo(rhs).isIndependent &&
-		       Type.get!dstring().implicitlyConvertsTo(rhs).isIndependent );
-
-		return Type.get!wstring().implicitlyConvertsTo(rhs).or(
-		       Type.get!dstring().implicitlyConvertsTo(rhs));
+		return false.independent;
 	}
 
 
@@ -985,15 +988,6 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		assert(all!(_=>_.sstate == SemState.completed)(lit));
 		type=ty.getDynArr();
 		mixin(SemEplg);
-	}
-
-	override bool isConstant(){
-		foreach(x; lit) if(!x.isConstant()) return false;
-		return true;
-	}
-	override bool isConstFoldable(){
-		foreach(x; lit) if(!x.isConstFoldable()) return false;
-		return true;
 	}
 
 	override bool isDirectlyAllocated(){ return true; } // TODO: analyze what's contained withhin
@@ -4196,7 +4190,6 @@ class Symbol: Expression{ // semantic node
 					type = type.applyScopeSTC(sc);
 			if(vd.stc&STCenum){
 				if(vd.init){
-					assert(vd.init.isConstFoldable());
 					auto r=vd.init.cloneConstant();
 					r.loc = loc;
 					mixin(RewEplg!q{r});
@@ -4421,7 +4414,6 @@ class Symbol: Expression{ // semantic node
 			return vd.stc&STCenum
 				|| vd.stc&(STCimmutable|STCconst)
 				&& vd.init && vd.init.isConstant();
-
 		return false;
 	}
 
@@ -4872,17 +4864,39 @@ class GaggingRecordingScope: GaggingScope{
 
 mixin template Semantic(T) if(is(T==CastExp)){
 	protected Dependent!bool checkConv(Scope sc){
+		// TODO: this requires some code duplication in ImplicitCastExp. Better solutions?
 		mixin(ConvertsTo!q{bool conv; e, type});
+		if(!conv){
+			auto oe=e;
+			relaxCastedExpression();
+			if(oe !is e){
+				mixin(ConvertsTo!q{auto cc; e, type});
+				conv=cc;
+			}
+		}
 		if(conv) return true.independent;
 		sc.error(format("cannot cast expression '%s' of type '%s' to '%s'",e.loc.rep,e.type,type),e.loc);
 		//error(format("no viable conversion from type '%s' to '%s'",e.type,type),e.loc);
 		return false.independent;
 	}
 
+	final protected void relaxCastedExpression(){
+		static Expression arrayLiteralize(Expression exp){
+			if(auto el=exp.type.getElementType())
+			if(el.isMutable())
+			if(auto lit=exp.isLiteralExp()){
+				auto ae=lit.toArrayLiteral();
+				foreach(ref x;ae.lit) x=arrayLiteralize(x);
+				return ae;
+			}
+			return exp;
+		}
+		e=arrayLiteralize(e);
+	}
+
 	protected void displayFunctionLiteralConversionError(Scope sc){
 		sc.error(format("cannot cast function literal to '%s'",type.toString()),loc);
 	}
-
 
 	//mixin(DownCastMethods!ImplicitCastExp);
 	ImplicitCastExp isImplicitCastExp(){return null;}
@@ -4952,6 +4966,9 @@ mixin template Semantic(T) if(is(T==CastExp)){
 				al.sstate = SemState.begin;
 				foreach(ref x; al.lit) x=x.convertTo(el);
 				mixin(SemChld!q{e});
+				if(e.type !is type && e.type.getElementType() is type.getElementType()){
+					e.type = type;
+				}
 				if(e.type is type) mixin(RewEplg!q{e});
 			}
 		}
@@ -5073,6 +5090,14 @@ class ImplicitCastExp: CastExp{ // semantic node
 
 	protected override Dependent!bool checkConv(Scope sc){
 		mixin(ImplConvertsTo!q{bool iconv; e, type});
+		if(!iconv){
+			auto oe=e;
+			relaxCastedExpression();
+			if(oe !is e){
+				mixin(ImplConvertsTo!q{auto cc; e, type});
+				iconv=cc;
+			}
+		}
 		if(iconv) return true.independent;
 		sc.error(format("cannot implicitly convert %s '%s' of type '%s' to '%s'",e.kind,e.loc.rep,e.type,type),e.loc); // TODO: replace toString with actual representation
 		return false.independent;
@@ -5196,6 +5221,12 @@ class StructConsExp: TemporaryExp{
 	
 	override @property string kind(){ return "struct literal"; }
 	override string toString(){ return strd.name.toString()~"("~join(map!(to!string)(args),",")~")"; }
+
+
+	override bool isConstant(){
+		foreach(x;args) if(!x.isConstant()) return false;
+		return true;
+	}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -8226,6 +8257,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			if(auto strd=aggr.decl.isStructDecl()){
 				init = New!StructConsExp(type,(Expression[]).init);
 				init.loc = loc;
+				init.initOfVar(this);
 			}
 		}
 
@@ -8237,8 +8269,6 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			type=rtype.typeSemantic(sc);
 			mixin(PropRetry!q{rtype});
 		}
-
-		if(!init) defaultInit();
 
 		if(init){
 			if(init.sstate!=SemState.completed){
@@ -8345,6 +8375,8 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		// TODO: this is controversial, and should only be done for fields
 		// if(stc&(STCimmutable|STCconst) && init) stc|=STCstatic;
 
+		if(!init) defaultInit(); // TODO: this is a hack (and incorrect, since some code relies on init==null)
+
 		if(init){
 			mixin(SemChld!q{init});
 			/+if(!init.implicitlyConvertsTo(type)){
@@ -8357,10 +8389,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				if(!iconv) mixin(FinishDeductionProp!q{init});
 				assert(init.sstate == SemState.completed, to!string(init));
 				mixin(IntChld!q{init});
-				if(stc&STCenum){
-					prepareEnumInitializer();
-					//mixin(SemCheck);
-				}
+				// TODO: is there a more elegant way to handle array initialization?
 			}
 			// order is significant: fully interpreted expressions might carry information
 			// that allows more implicit conversions
@@ -8368,6 +8397,13 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				mixin(ImplConvertTo!q{init,type});
 			}
 			if(!willInterpretInit()) mixin(FinishDeductionProp!q{init});
+			else{
+				mixin(IntChld!q{init});
+				if(stc&STCenum){
+					prepareEnumInitializer();
+					//mixin(SemCheck);
+				}
+			}
 		}else if(stc&STCenum){
 			sc.error("manifest constants must have initializers",loc);
 			mixin(ErrEplg);
@@ -8383,7 +8419,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 	}
 
 	private void prepareEnumInitializer(){
-		assert(init.isConstant());
+		assert(init.isConstant()||init.isArrayLiteralExp());
 		// re-allocate mutable dynamic array constants everywhere:
 		if(init.type.isDynArrTy()&&init.type.getElementType().isMutable()){
 			if(auto lexp=init.isLiteralExp()){
