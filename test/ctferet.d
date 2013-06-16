@@ -1,3 +1,21 @@
+struct ArrayLiteralConv{
+	static int[2] a2=(()=>[1,2])();
+	static immutable a=["zero"];
+	enum short x = (()=>1)();
+	static void[] v = ["one"];
+}
+
+struct Qualified{
+	class Foo{
+		int[] x=[1,2,3];
+	}
+	enum foo = (){return new immutable(Foo)();}();
+	enum bar = (){return new Foo();}();
+	enum baz = (){return new Foo();}();
+	static assert((()=>foo.x.ptr==bar.x.ptr)());
+	static assert((){return foo.x.ptr != bar.x.ptr;}()); // TODO
+}
+
 class Pointers{
 	immutable int[1] u=[333];
 	int x = 123;
@@ -5,9 +23,9 @@ class Pointers{
 	static immutable t = (()=>s)();
 	static assert((()=>&s.x is &t.x)());
 
-	static immutable a = (()=>&s.x)();
-	static immutable b = (()=>&t.x)();
-	static assert(a is b); // TODO
+	static immutable a = (()=>&s.x)(); // TODO
+	static immutable b = (()=>&t.x)(); // TODO
+	static assert(a is b);
 
 	/+ TODO! static immutable q = (()=>s.u.ptr)();
 	static immutable p = (()=>t.u.ptr)();
@@ -38,7 +56,7 @@ struct Aliasing{
 		int x;
 	}
 	
-	struct TODO{
+	struct ImmutableConversion{
 		static S[][] foo(){
 			auto x = [S(),S(),S(),S()];
 			auto xx = [x[0..2],x[2..4]];
@@ -46,7 +64,7 @@ struct Aliasing{
 			return xx;
 		}
 		
-		immutable xx = foo(); // TODO!
+		immutable xx = foo();
 	}
 	
 	static immutable(S[][]) foo(){
@@ -69,7 +87,7 @@ struct S{
 	S* next;
 }
 
-immutable s = {auto s=S();s.b=4;s.a++;s.next=new S();return s;}();
+immutable s = {auto s=S();s.b=4;s.a++;s.next=new S();return s;}(); // TODO
 
 pragma(msg, s.b);
 

@@ -1,3 +1,12 @@
+struct S{}
+
+immutable S s;
+
+/+
+immutable y = "123";
+static assert((()=>y.ptr == y.ptr)()); // TODO!
+static assert({immutable(char)[] x = y; return x~=x;}()=="123123");
++/
 
 /+pragma(msg, foo(2));
 string foo(double x){

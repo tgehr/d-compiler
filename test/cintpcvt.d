@@ -60,3 +60,8 @@ uint foo(int x, real y){
 void main(){
 	pragma(msg, foo(10,202.5L+119.6));
 }
+
+// +/
+// +/
+// +/
+// +/
