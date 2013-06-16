@@ -1,6 +1,3 @@
-struct S{}
-
-immutable S s;
 
 /+
 immutable y = "123";
