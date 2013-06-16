@@ -1494,9 +1494,9 @@ string testimplconv2ptr(){
 static assert(testimplconv2ptr()=="hello world");
 pragma(msg, "testimplconv2ptr: ",testimplconv2ptr());
 
-static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // TODO error: should this be invalid?
+static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // should this be invalid?
 
-static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO error: cast(char[])"123" currently creates an array literal, should probably be invalid during ctfe instead. if directly assigned to an enum, creates an actual reference to read-only memory
+static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO error: cast(char[])"123" currently creates an array literal, should it be invalid during ctfe instead?
 
 bool strchr(immutable(char)* haystack, immutable(char)* needle){
 	if(haystack is null) return needle is null;

@@ -1,3 +1,19 @@
+class Pointers{
+	immutable int[1] u=[333];
+	int x = 123;
+	static immutable s = (()=>new immutable(Pointers)())();
+	static immutable t = (()=>s)();
+	static assert((()=>&s.x is &t.x)());
+
+	static immutable a = (()=>&s.x)();
+	static immutable b = (()=>&t.x)();
+	static assert(a is b); // TODO
+
+	/+ TODO! static immutable q = (()=>s.u.ptr)();
+	static immutable p = (()=>t.u.ptr)();
+	pragma(msg, (()=>p is q)());+/
+}
+
 struct AliasingPreserving{
 	static immutable x = [1,2,3];
 	static auto foo(){ return x; }

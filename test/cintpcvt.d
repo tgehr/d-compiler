@@ -1,4 +1,17 @@
-
+struct Foo{
+	enum int[] x = [1,2,3];
+	enum y = cast(double[])x;
+	pragma(msg, y);
+	
+	static assert(y==[1.0,2.0,3.0]);
+	
+	static double[] xxx(){
+		auto x=x;
+		return cast(double[])x; // error
+	}
+	
+	pragma(msg, xxx);
+}
 
 static assert({return 2f;}() == 2f);static assert({return 2fi;}() == 2fi);
 static assert({return 2.0;}() == 2.0);static assert({return 2.0i;}() == 2.0i);
