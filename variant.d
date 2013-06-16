@@ -1,6 +1,6 @@
 // Written in the D programming language.
 
-import lexer, operators, expression, declaration, type, util;
+import lexer, operators, expression, declaration, type, semantic, util;
 
 import std.traits: isIntegral, isFloatingPoint, Unqual;
 import std.range: ElementType;
@@ -40,8 +40,6 @@ struct BCPointer{
 	void[] container;
 	void* ptr;
 }
-
-
 
 enum Occupies{
 	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, vars, err
@@ -84,94 +82,7 @@ template FullyUnqual(T){
 	else alias Unqual!T FullyUnqual;
 }+/
 
-private struct Vars{ enum empty = (Variant[VarDecl]).init; }
-
-private struct RTTypeID{
-	Type type;
-	Occupies occupies;
-	TokenType whichBasicType;
-	private template Arg(T){
-		static if(is(T==Vars)) alias Type Arg;
-		else alias Seq!() Arg;
-	}
-	static RTTypeID* get(U)(Arg!U arg){
-		//static if(!is(U==Variant[]))
-		//	alias Unqual!(immutable(U)) T; // only structural information, no type checking
-		//else alias U T;
-		alias Unqual!U T;
-		static if(is(T==Vars)){
-			// TODO: cache this
-			auto r = new RTTypeID();
-		}else{
-			if(id!T.exists) return &id!T.memo;
-			id!T.exists = true;
-			alias id!T.memo r;
-		}
-		static if(!is(T==Variant[])&&!is(T==Vars)) r.type = Type.get!T();
-		else r.type = Type.get!EmptyArray();
-		static if(is(T==typeof(null))){
-			r.occupies = Occupies.none;
-/+			r.toExpr = function(ref Variant self){
-				auto r = New!LiteralExp(token!"null");
-				r.semantic(null);
-				assert(!r.rewrite);
-				r.dontConstFold();
-				return r;
-			};+/
-		}else static if(is(T==string)||is(T==wstring)||is(T==dstring)){
-			enum occ = getOccupied!T;
-			r.whichBasicType=Tok!(is(T==string)?"``c":is(T==wstring)?"``w":is(T==dstring)?"``d":assert(0));
-			r.occupies = occ;
-		}else static if(isBasicType!T){//
-			alias getOccupied!T occ;
-			r.whichBasicType = Tok!(T.stringof);
-			r.occupies = occ;
-			/+r.toExpr = function Expression(ref Variant self){
-				auto r=LiteralExp.create!New(cast(T)mixin(`self.`~to!string(occ)));
-				r.dontConstFold();
-				return r;
-				//assert(0,"TODO");
-			};+/
-		}else static if(is(T==Variant[])){
-			r.occupies = Occupies.arr;
-		}else static if(is(T==Vars)){
-			if(!arg){
-				if(id!Vars.exists){
-					return &id!Vars.memo;
-				}else{
-					id!Vars.memo=*r; // TODO: don't allocate
-					id!Vars.exists=true;
-				}
-			}else{
-				if(arg in aggrmemo) return aggrmemo[arg];
-				aggrmemo[arg]=r;
-			}
-
-			r.type = arg;
-			r.occupies = Occupies.vars;
-			/+r.toExpr = function Expression(ref Variant self){
-				// TODO: Aliasing?
-				return LiteralExp.factory(self, self.id.type);
-			};+/
-		}else{		
-			static assert(!isBasicType!T);
-			static assert(0, "TODO");
-			//r.toExpr = function Expression
-		}
-		foreach(member; __traits(allMembers,typeof(this))){
-			static if(is(typeof(*mixin(member))==function))
-				assert(mixin(`r.`~member)!is null);
-		}
-		static if(is(T==Vars)) return r;
-		else return &r;
-	}
-private:
-	// vtbl
-	// Expression function(ref Variant) toExpr;
-	
-	template id(T){static: RTTypeID memo; bool exists;}
-	static RTTypeID*[Type] aggrmemo;
-}
+private struct Vars{ enum null_ = (Variant[VarDecl]).init; }
 /+
 private struct WithLoc(T){
 	T payload;
@@ -188,32 +99,57 @@ private struct WithLoc(T){
 }
 +/
 struct Variant{
-	private RTTypeID* id;
+	private Type type;
+	private @property Occupies occupies(){
+		// TODO: this is probably too slow
+		// TODO: cache inside type?
+		if(!type) return Occupies.vars;		
+		auto tu=type.getHeadUnqual();
+		if(tu.isAggregateTy()) return Occupies.vars;
+		if(tu is Type.get!string()) return Occupies.str;
+		if(tu is Type.get!wstring()) return Occupies.wstr;
+		if(tu is Type.get!dstring()) return Occupies.dstr;
+		if(tu.getElementType()) return Occupies.arr;
 
-	this(T)(T value)if(!is(T==Variant[])&&!is(T==Vars)){
-		id = RTTypeID.get!T();
+		if(auto bt=tu.isBasicType()){
+			switch(bt.op){
+				foreach(x;ToTuple!basicTypes){
+					static if(x!="void")
+					case Tok!x:
+						mixin("alias "~x~" T;"); // workaround DMD bug
+						return getOccupied!T;
+				}
+				default: assert(0);
+			}
+		}
+
+		
+		assert(tu is Type.get!(typeof(null)), tu.text);
+		return Occupies.none;
+	}
+
+	this(T)(T value, Type type)if(!is(T==Variant[])&&!is(T==Variant[VarDecl]))in{
+		assert(type.sstate==SemState.completed);
+		// TODO: suitable in contract for type based on T
+	}body{
+		//type = Type.get!T();
+		this.type = type;
 		mixin(to!string(getOccupied!T)~` = value;`);
 	}
 
-	this()(Variant[] arr, Variant[] cnt)in{
+	this()(Variant[] arr, Variant[] cnt, Type type)in{
 		assert(cnt.ptr<=arr.ptr&&arr.ptr+arr.length<=cnt.ptr+cnt.length);
-		if(cnt.length){
-			/+assert(value[0].id.type !is Type.get!char()  &&
-			 value[0].id.type !is Type.get!wchar() &&
-			 value[0].id.type !is Type.get!dchar() &&
-			 value[0].id.type.getUnqual() is value[0].id.type,
-			 "unsupported: "~to!string(value[0].id.type));+/
-			auto id = cnt[0].id;
-			foreach(x;cnt[1..$]) assert(id is x.id,cnt.text);
-		}		
+		auto tt=type.getElementType().getConst();
+		foreach(x;cnt[0..$]) assert(tt is x.type.getConst(),text(cnt," ",tt," ",x.type," ",x));
 	}body{
-		id = RTTypeID.get!(Variant[])();
+		this.type=type;
 		this.arr=arr;
 		this.cnt=cnt;
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
-		id = RTTypeID.get!Vars(type);
+		//id = RTTypeID.get!Vars(type);
+		this.type=type;
 		this.vars=vars;
 	}
 
@@ -233,35 +169,35 @@ struct Variant{
 
 	T get(T)(){
 		static if(is(T==string)){
-			if(id.occupies == Occupies.str) return str;
-			else if(id.occupies == Occupies.wstr) return to!string(wstr);
-			else if(id.occupies == Occupies.dstr) return to!string(dstr);
+			if(occupies == Occupies.str) return str;
+			else if(occupies == Occupies.wstr) return to!string(wstr);
+			else if(occupies == Occupies.dstr) return to!string(dstr);
 			else return toString();
 		}
-		else static if(is(T==wstring)){assert(id.occupies == Occupies.wstr); return wstr;}
-		else static if(is(T==dstring)){assert(id.occupies == Occupies.dstr); return dstr;}
-		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(id.occupies == Occupies.int64,"occupies was "~to!string(id.occupies)~" instead of int64"); return cast(T)int64;}
+		else static if(is(T==wstring)){assert(occupies == Occupies.wstr); return wstr;}
+		else static if(is(T==dstring)){assert(occupies == Occupies.dstr); return dstr;}
+		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
 		else static if(is(T==float)||is(T==double)||is(T==real)){
-			assert(id.occupies == Occupies.flt80);
+			assert(occupies == Occupies.flt80||occupies == Occupies.fli80);
 			return flt80;
 		}else static if(is(T==ifloat) || is(T==idouble)||is(T==ireal)){
-			assert(id.occupies == Occupies.fli80);
+			assert(occupies == Occupies.fli80);
 			return fli80;
 		}else static if(is(T==cfloat) || is(T==cdouble)||is(T==creal)){
-			assert(id.occupies == Occupies.cmp80);
+			assert(occupies == Occupies.cmp80);
 			return cmp80;
 		}else static if(is(T==Variant[VarDecl])){
-			if(id.occupies == Occupies.none) return null;
-			assert(id.occupies == Occupies.vars,text(id.occupies));
+			if(occupies == Occupies.none) return null;
+			assert(occupies == Occupies.vars,text(occupies));
 			return vars;
 		}else static if(is(T==Variant[])){
-			assert(id.occupies == Occupies.arr);
+			assert(occupies == Occupies.arr);
 			return arr;
 		}else static assert(0, "cannot get this field (yet?)");
 	}
 
 	Variant[] getContainer()in{
-		assert(id.occupies == Occupies.arr);
+		assert(occupies == Occupies.arr);
 	}body{
 		return cnt;
 	}
@@ -271,21 +207,13 @@ struct Variant{
 	   otherwise, gives no guarantees for type qualifier preservation
 	 */
 
-	Type getType(){
-		if(id.occupies == Occupies.arr){
-			if(!length) return id.type;
-			return arr[0].getType().getDynArr();
-		}
-		return id.type;
+	Type getType()out{assert(!type||type.sstate==SemState.completed);}body{
+		return type;
 	}
 
-	bool isEmpty(){return id is null;}
-
 	Expression toExpr(){
-		/+if(id) return id.toExpr(this);
-		else return New!ErrorExp();+/
-		if(id){
-			auto r = LiteralExp.factory(this, getType());
+		if(type){
+			auto r = LiteralExp.factory(this);
 			r.semantic(null);
 			return r;
 		}else return New!ErrorExp();
@@ -338,44 +266,42 @@ struct Variant{
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
-			return this.id.type.toString(); // TODO: pick up toString?
+			return this.type.toString(); // TODO: pick up toString?
 		}
 		assert(0,"cannot get string");
 	}
 
-	Variant convertTo(Type to)in{assert(!!id);}body{
-		auto type = getType().getHeadUnqual();
-		to = to.getHeadUnqual();
+	Variant convertTo(Type to)in{assert(!!type);}body{
 		if(to is type) return this;
+		auto type = getType().getHeadUnqual();
+		auto tou = to.getHeadUnqual();
 		if(type is Type.get!(typeof(null))()){
-			if(to is Type.get!(typeof(null))()) return this;
-			if(to.getElementType()) return Variant((Variant[]).init,(Variant[]).init).convertTo(to);
-			if(to.isAggregateTy()) return Variant(Vars.empty, to);
+			if(tou is Type.get!(typeof(null))()) return this;
+			if(tou.getElementType()) return Variant((Variant[]).init,(Variant[]).init,to);
+			if(tou.isAggregateTy()) return Variant(Vars.null_, to);
 			// TODO: null pointers and delegates
-			// auto tou=to.getHeadUnqual();
 			assert(0,"cannot convert");
 		}else if(type.isSomeString()){
 			foreach(T;Seq!(string,wstring,dstring)){
 				enum occ=getOccupied!T;
 				if(type !is Type.get!T()) continue;
-				if(to is Type.get!T()) return this;
-				if(!is(T==string) && to is Type.get!string())
-					return Variant(.to!string(mixin(`this.`~.to!string(occ))));
-				else if(!is(T==wstring) && to is Type.get!wstring())
-					return Variant(.to!wstring(mixin(`this.`~.to!string(occ))));
-				else if(!is(T==dstring) && to is Type.get!dstring())
-					return Variant(.to!dstring(mixin(`this.`~.to!string(occ))));
-				else if(to.getElementType()){
+				if(tou is Type.get!string())
+					return Variant(.to!string(mixin(`this.`~.to!string(occ))),to);
+				else if(tou is Type.get!wstring())
+					return Variant(.to!wstring(mixin(`this.`~.to!string(occ))),to);
+				else if(tou is Type.get!dstring())
+					return Variant(.to!dstring(mixin(`this.`~.to!string(occ))),to);
+				else if(auto ety2=tou.getElementType()){
 					// TODO: revise allocation
 					auto r = new Variant[this.length];
-					foreach(i,x;mixin(`this.`~.to!string(occ))) r[i]=Variant(x);
-					return Variant(r,r);//TODO: aliasing?
+					foreach(i,x;mixin(`this.`~.to!string(occ))) r[i]=Variant(x,ety2);
+					return Variant(r,r,to);//TODO: aliasing?
 				}
 				return this; // TODO: this is a hack and might break stuff (?)
 				break;
 			}
 		}else if(auto tbt=type.isBasicType()){
-			if(auto bt = to.getHeadUnqual().isBasicType()){
+			if(auto bt = tou.isBasicType()){
 				switch(tbt.op){
 					foreach(tx;ToTuple!basicTypes){
 						static if(tx!="void"){
@@ -386,7 +312,7 @@ struct Variant{
 								foreach(x;ToTuple!basicTypes){
 									static if(x!="void")
 									case Tok!x:
-										return Variant(mixin(`cast(`~x~`)cast(T)this.`~.to!string(occ)));
+										return Variant(mixin(`cast(`~x~`)cast(T)this.`~.to!string(occ)),to);
 								}
 								case Tok!"void": return this;
 								default: assert(0);
@@ -398,56 +324,58 @@ struct Variant{
 			}
 		}else if(type.isDynArrTy()){
 			// assert(to.getHeadUnqual().getElementType()!is null);
-			if(to is Type.get!string()){
+			if(tou is Type.get!string()){
 				string s;
 				foreach(x; this.arr) s~=cast(char)x.int64;
-				return Variant(s);
-			}else if(to is Type.get!wstring()){
+				return Variant(s,to);
+			}else if(tou is Type.get!wstring()){
 				wstring s;
 				foreach(x; this.arr) s~=cast(wchar)x.int64;
-				return Variant(s);
-			}else if(to is Type.get!dstring()){
+				return Variant(s,to);
+			}else if(tou is Type.get!dstring()){
 				dstring s;
 				foreach(x; this.arr) s~=cast(wchar)x.int64;
-				return Variant(s);
+				return Variant(s,to);
 			}
-			// TODO: Sanity check.
-			return this;
+			// TODO: Sanity check?
+			if(tou.getUnqual() is Type.get!(void[])()) return this;
+			return Variant(arr,cnt,to);
 		}else if(type is Type.get!EmptyArray()){
-			assert(to.isDynArrTy());
-			if(to.isSomeString()){
+			assert(tou.isDynArrTy());
+			if(tou.isSomeString()){
 				foreach(T;Seq!(string,wstring,dstring))
-					if(to is Type.get!T()) return Variant(T.init/+,T.init+/);
+					if(tou is Type.get!T()) return Variant(T.init/+,T.init+/,to);
 			}
-			return Variant((Variant[]).init,(Variant[]).init);
+			return Variant((Variant[]).init,(Variant[]).init,to);
 		}
 		return this;
 	}
 
 	bool opCast(T)()if(is(T==bool)){
-		assert(id.type == Type.get!bool(), to!string(id.type)~" "~toString());
+		assert(type == Type.get!bool(), to!string(type)~" "~toString());
 		return cast(bool)int64;
 	}
 
 	private Variant strToArr()in{
-		assert(occString(id.occupies));
+		assert(occString(occupies));
 	}body{ // TODO: get rid of this
 		Variant[] r = new Variant[length];
-		theswitch:switch(id.occupies){
+		auto elt=type.getElementType().getUnqual(); // TODO: should this be const sometimes?
+		theswitch:switch(occupies){
 			foreach(occ;ToTuple!([Occupies.str, Occupies.wstr, Occupies.dstr])){
 				case occ:
-					foreach(i,x; mixin(to!string(occ))) r[i] = Variant(x);
+					foreach(i,x; mixin(to!string(occ))) r[i] = Variant(x,elt);
 					break theswitch;
 			}
 			default: assert(0);
 		}
-		return Variant(r,r);
+		return Variant(r,r,elt.getDynArr());
 	}
 
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
 
 	size_t toHash()@trusted{
-		final switch(id.occupies){
+		final switch(occupies){
 			case Occupies.none: return 0;
 				foreach(x; EnumMembers!Occupies[1..$]){
 					case x: return typeid(mixin(to!string(x))).getHash(&mixin(to!string(x)));
@@ -459,58 +387,79 @@ struct Variant{
 	// TODO: BUG: shift ops not entirely correct
 	Variant opBinary(string op)(Variant rhs)in{
 		static if(isShiftOp(Tok!op)){
-			assert(id.occupies == Occupies.int64 && rhs.id.occupies == Occupies.int64);
+			assert(occupies == Occupies.int64 && rhs.occupies == Occupies.int64);
 		}else{
-			//assert(id.occupies == Occupies.arr || id.whichBasicType!=Tok!"" && id.whichBasicType == rhs.id.whichBasicType,
+			//assert(occupies == Occupies.arr || id.whichBasicType!=Tok!"" && id.whichBasicType == rhs.id.whichBasicType,
 			//       to!string(id.whichBasicType)~"!="~to!string(rhs.id.whichBasicType));
-			assert(id.occupies==rhs.id.occupies
-			    || id.occupies == Occupies.arr && occString(rhs.id.occupies)
-			    || rhs.id.occupies == Occupies.arr && occString(id.occupies)
-			    || op == "%" && id.occupies == Occupies.cmp80 &&
-			       (rhs.id.occupies == Occupies.flt80 || rhs.id.occupies == Occupies.fli80),
+			assert(occupies == rhs.occupies
+			    || occupies == Occupies.arr && occString(rhs.occupies)
+			    || rhs.occupies == Occupies.arr && occString(occupies)
+			    || op == "%" && occupies == Occupies.cmp80 &&
+			       (rhs.occupies == Occupies.flt80 || rhs.occupies == Occupies.fli80),
 			       to!string(this)~" is incompatible with "~
 			       to!string(rhs)~" in binary '"~op~"' expression");
 		}
 	}body{
-		if(id.occupies == Occupies.arr){
-			if(rhs.id.occupies != Occupies.arr) rhs=rhs.strToArr();
+		if(occupies == Occupies.arr){
+			if(rhs.occupies != Occupies.arr) rhs=rhs.strToArr();
 			static if(op=="~"){
 				auto r=arr~rhs.arr;
-				return Variant(r,r);
+				return Variant(r,r,type);
 			}static if(op=="is"||op=="!is"){
-				return Variant(mixin(`arr `~op~` rhs.arr`));
+				return Variant(mixin(`arr `~op~` rhs.arr`),Type.get!bool());
 			}static if(op=="in"||op=="!in"){
 				// TODO: implement this
 				assert(0,"TODO");
 			}else static if(isRelationalOp(Tok!op)){
 				// TODO: create these as templates instead
 				auto l1 = length, l2=rhs.length;
-				static if(op=="=="){if(l1!=l2) return Variant(false);}
-				else static if(op=="!=") if(l1!=l2) return Variant(true);
+				static if(op=="=="){if(l1!=l2) return Variant(false,Type.get!bool());}
+				else static if(op=="!=") if(l1!=l2) return Variant(true,Type.get!bool());
 				if(l1&&l2){
-					auto tyd = arr[0].id.type.combine(rhs.arr[0].id.type);
+					auto tyd = arr[0].type.combine(rhs.arr[0].type);
 					assert(!tyd.dependee);// should still be ok though.
 					Type ty = tyd.value;
 					foreach(i,v; arr[0..l1<l2?l1:l2]){
 						auto l = v.convertTo(ty), r = rhs.arr[i].convertTo(ty);
 						if(l.opBinary!"=="(r)) continue;
 						else{
-							static if(op=="==") return Variant(false);
-							else static if(op=="!=") return Variant(true);
+							static if(op=="==") return Variant(false,Type.get!bool());
+							else static if(op=="!=") return Variant(true,Type.get!bool());
 							else return l.opBinary!op(r);
 						}
 					}
 				}
 				// for ==, != we know that the lengths must be equal
-				static if(op=="==") return Variant(true);
-				else static if(op=="!=") return Variant(false);
-				else return Variant(mixin(`l1 `~op~` l2`));
+				static if(op=="==") return Variant(true,Type.get!bool());
+				else static if(op=="!=") return Variant(false,Type.get!bool());
+				else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
 			}
-		}else if(id.occupies == Occupies.none){
+		}else if(occupies == Occupies.none){
 			static if(is(typeof(mixin(`null `~op~` null`))))
-				return Variant(mixin(`null `~op~` null`));
+				return Variant(mixin(`null `~op~` null`),
+				         Type.get!(typeof(mixin(`null `~op~` null`)))());
 			assert(0);
-		}else switch(id.whichBasicType){
+		}
+
+		if(type.getHeadUnqual().isSomeString()){
+			foreach(x; ToTuple!(["``c","``w","``d"])){
+				alias typeof(mixin(x)) T;
+				alias getOccupied!T occ;
+				assert(occupies == occ);
+				enum code = to!string(occ)~` `~op~` rhs.`~to!string(occ);
+				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
+				static if(is(typeof(mixin(code)))){
+					if(type.getHeadUnqual() is Type.get!(typeof(mixin(x)))()){ 
+						if(rhs.occupies == occupies)
+							return Variant(mixin(code),Type.get!(typeof(mixin(code)))());
+						else return strToArr().opBinary!op(rhs);
+					}
+				}
+			}
+		}
+
+		assert(cast(BasicType)type.getHeadUnqual(),text(type));
+		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
 				static if(x!="void"){
 					alias typeof(mixin(x~`.init`)) T;
@@ -520,55 +469,43 @@ struct Variant{
 						// relies on same representation for flt and fli
 						enum occ2 = Occupies.flt80;
 					else enum occ2 = occ;
-					assert(id.occupies == occ);
-					//assert(rhs.id.occupies == occ2);
+					assert(occupies == occ);
+					//assert(rhs.occupies == occ2);
 					static if(isShiftOp(Tok!op)|| occ2 != occ) enum cst = ``;
 					else enum cst = q{ cast(T) };
 					enum code = q{
-						Variant(mixin(`cast(T)` ~ to!string(occ) ~ op ~
-						              cst~`rhs.` ~ to!string(occ2)))
+						mixin(`cast(T)` ~ to!string(occ) ~` `~ op ~ cst~`rhs.` ~ to!string(occ2))
 					};
-					static if(is(typeof(mixin(code)))) case Tok!x: return mixin(code);
-				}
-			}
-			foreach(x; ToTuple!(["``c","``w","``d"])){
-				alias typeof(mixin(x)) T;
-				alias getOccupied!T occ;
-				assert(id.occupies == occ);
-				enum code = to!string(occ)~` `~op~` rhs.`~to!string(occ);
-				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
-				static if(is(typeof(mixin(code)))){
-					case Tok!x: 
-					if(rhs.id.occupies == id.occupies)
-						return Variant(mixin(code));
-					else return strToArr().opBinary!op(rhs);
+					static if(is(typeof(mixin(code))))
+						case Tok!x: return Variant(mixin(code),Type.get!(typeof(mixin(code)))());
 				}
 			}
 			default: break;
 		}
-		assert(0, "no binary '"~op~"' support for "~id.type.toString());
+		assert(0, "no binary '"~op~"' support for "~type.toString());
 	}
 	Variant opUnary(string op)(){
-		switch(id.whichBasicType){
+		assert(cast(BasicType)type.getHeadUnqual());
+		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
 				static if(x!="void"){
 					alias typeof(mixin(x~`.init`)) T;
 					alias getOccupied!T occ;
 					enum code = q{ mixin(op~`cast(T)`~to!string(occ)) };
 					static if(is(typeof(mixin(code))==T))
-					case Tok!x: return Variant(mixin(code));
+					case Tok!x: return Variant(mixin(code), Type.get!T());
 				}
 			}
-			default: assert(0, "no unary '"~op~"' support for "~id.type.toString());
+			default: assert(0, "no unary '"~op~"' support for "~type.toString());
 		}
 	}
 
 	@property size_t length()in{
-		assert(id.occupies==Occupies.arr||id.occupies == Occupies.str
-		       || id.occupies == Occupies.wstr || id.occupies == Occupies.dstr);
+		assert(occupies==Occupies.arr||occupies == Occupies.str
+		       || occupies == Occupies.wstr || occupies == Occupies.dstr);
 	}body{
-		if(id.occupies == Occupies.arr) return arr.length;
-		else switch(id.occupies){
+		if(occupies == Occupies.arr) return arr.length;
+		else switch(occupies){
 			foreach(x; ToTuple!(["str","wstr","dstr"])){
 				case mixin(`Occupies.`~x): return mixin(x).length;
 			}
@@ -577,45 +514,45 @@ struct Variant{
 	}
 
 	Variant opIndex(Variant index)in{
-		assert(index.id.occupies==Occupies.int64);
-		assert(id.occupies == Occupies.arr||id.occupies == Occupies.str
-		       || id.occupies == Occupies.wstr || id.occupies == Occupies.dstr);
+		assert(index.occupies==Occupies.int64);
+		assert(occupies == Occupies.arr||occupies == Occupies.str
+		       || occupies == Occupies.wstr || occupies == Occupies.dstr);
 	}body{
-		if(id.occupies == Occupies.arr){
+		if(occupies == Occupies.arr){
 			assert(index.int64<arr.length, to!string(index.int64)~">="~to!string(arr.length));
 			return arr[cast(size_t)index.int64];
-		}else switch(id.occupies){
+		}else switch(occupies){
 			foreach(x; ToTuple!(["str","wstr","dstr"])){
 				case mixin(`Occupies.`~x):
 					assert(index.int64<mixin(x).length);
-					return Variant(mixin(x)[cast(size_t)index.int64]);
+					return Variant(mixin(x)[cast(size_t)index.int64], Type.get!(ElementType!(typeof(mixin(x)))));
 			}
 			default: assert(0);
 		}
 	}
 	Variant opIndex(size_t index){
-		return this[Variant(index)];
+		return this[Variant(index,Type.get!Size_t())];
 	}
 
 	Variant opSlice(Variant l, Variant r)in{
-		assert(l.id.occupies==Occupies.int64);
-		assert(id.occupies == Occupies.arr||id.occupies == Occupies.str
-		       || id.occupies == Occupies.wstr || id.occupies == Occupies.dstr);
+		assert(l.occupies==Occupies.int64);
+		assert(occupies == Occupies.arr||occupies == Occupies.str
+		       || occupies == Occupies.wstr || occupies == Occupies.dstr);
 	}body{
-		if(id.occupies == Occupies.arr){
+		if(occupies == Occupies.arr){
 			assert(l.int64<=arr.length && r.int64<=arr.length);
 			assert(l.int64<=r.int64);
-			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64],cnt); // aliasing ok?
-		}else switch(id.occupies){
+			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64],cnt,type.getElementType().getDynArr()); // aliasing ok?
+		}else switch(occupies){
 			foreach(x; ToTuple!(["str","wstr","dstr"])){
 				case mixin(`Occupies.`~x):
 					assert(l.int64<mixin(x).length && r.int64<=mixin(x).length);
-					return Variant(mixin(x)[cast(size_t)l.int64..cast(size_t)r.int64]);
+					return Variant(mixin(x)[cast(size_t)l.int64..cast(size_t)r.int64],Type.get!(ElementType!(typeof(mixin(x)))));
 			}
 			default: assert(0);
 		}
 	}
 	Variant opSlice(size_t l, size_t r){
-		return this[Variant(l)..Variant(r)];
+		return this[Variant(l,Type.get!Size_t())..Variant(r,Type.get!Size_t())];
 	}
 }

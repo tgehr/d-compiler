@@ -107,13 +107,17 @@ mixin template Interpret(T) if(is(T==Expression)){
 
 	Variant interpretV()in{assert(sstate == SemState.completed, to!string(this));}body{
 		//return Variant.error(format("expression '%s' is not interpretable at compile time"),loc.rep);
-		return Variant("TODO: cannot interpret "~to!string(this)~" yet");
+		return Variant("TODO: cannot interpret "~to!string(this)~" yet",Type.get!string());
 		//return Variant.init;
 	}
 
 	final Expression cloneConstant()in{assert(!!isConstant());}body{
 		auto r = interpretV().toExpr();
 		r.type = type;
+		if(isArrayLiteralExp()){
+			assert(cast(LiteralExp)r);
+			r = (cast(LiteralExp)cast(void*)r).toArrayLiteral();
+		}
 		return r;
 	}
 
@@ -155,7 +159,7 @@ mixin template Interpret(T) if(is(T==CastExp)){
 			// TODO: allocation ok?
 			Variant[] r = new Variant[vle.length];
 			foreach(i,ref x;r) x = vle[i].convertTo(el);
-			return Variant(r,r);
+			return Variant(r,r,type);
 		}else return e.interpretV().convertTo(type);
 	}
 
@@ -216,7 +220,7 @@ mixin template Interpret(T) if(is(T==LengthExp)){
 		return e.checkInterpret(sc);
 	}
 	override Variant interpretV(){
-		return Variant(e.interpretV().length);
+		return Variant(e.interpretV().length, Type.get!Size_t());
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
@@ -227,7 +231,7 @@ mixin template Interpret(T) if(is(T==LengthExp)){
 mixin template Interpret(T) if(is(T==DollarExp)){
 	override bool checkInterpret(Scope sc){ return true; }
 	ulong ivalue = 0xDEAD_BEEF__DEAD_BEEF;
-	override Variant interpretV(){ return Variant(ivalue); }
+	override Variant interpretV(){ return Variant(ivalue, Type.get!Size_t()); }
 
 	static void resolveValue(Expression[] e, ulong value){
 		static struct DollarResolve{
@@ -271,14 +275,15 @@ mixin template Interpret(T) if(is(T==LiteralExp)){
 					alias typeof(mixin(x)) U;
 					enum occ = getTokOccupied!U;
 					static if(x=="``w"||x=="``d"){
-						case Tok!x: value=Variant(to!U(mixin(`lit.`~occ))); break swtch;
+						case Tok!x: value=Variant(to!U(mixin(`lit.`~occ)),Type.get!U()); break swtch;
 					}else static if(x==".0fi"||x==".0i"||x==".0Li"){
-						case Tok!x: value=Variant(cast(U)(mixin(`lit.`~occ)*1i)); break swtch;
+						case Tok!x: value=Variant(cast(U)(mixin(`lit.`~occ)*1i),Type.get!U()); break swtch;
 					}else{
-						case Tok!x: value=Variant(cast(U)mixin(`lit.`~occ)); break swtch;
+						case Tok!x: value=Variant(cast(U)mixin(`lit.`~occ),Type.get!U()); break swtch;
 					}
 				}else{
-					case Tok!x: value=Variant(null); break swtch;
+					// TODO: DMD allows Variant(null). Why?
+					case Tok!x: value=Variant(null,Type.get!(typeof(null))()); break swtch;
 				}
 			}
 			default: assert(0, to!string(lit.type));
@@ -332,7 +337,7 @@ mixin template Interpret(T) if(is(T==ArrayLiteralExp)){
 		// TODO: this GC allocation is probably justified
 		Variant[] res = new Variant[lit.length];
 		foreach(i, ref x; res) x = lit[i].interpretV();
-		return Variant(res,res);
+		return Variant(res,res,type);
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
@@ -441,7 +446,7 @@ mixin template Interpret(T) if(is(T==AssertExp)){
 	override bool checkInterpret(Scope sc){
 		return a[0].checkInterpret(sc) & (a.length<2 || a[1].checkInterpret(sc));
 	}
-	override Variant interpretV(){return Variant(toString());} // good enough
+	override Variant interpretV(){return Variant(toString(),Type.get!string());} // good enough
 
 	override void _interpretFunctionCalls(Scope sc){
 		a[0]._interpretFunctionCalls(sc);
@@ -492,9 +497,9 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 	override Variant interpretV(){
 		// first two conditions are a workaround for a segfault in DMD
 		static if(S==Tok!"is"){
-			return Variant(!e1.interpretV().opBinary!"!is"(e2.interpretV));
+			return Variant(!e1.interpretV().opBinary!"!is"(e2.interpretV),Type.get!bool());
 		}else static if(S==Tok!"in"){
-			return Variant(!e1.interpretV().opBinary!"!in"(e2.interpretV));
+			return Variant(!e1.interpretV().opBinary!"!in"(e2.interpretV),Type.get!bool());
 		}else static if(S==Tok!","){
 			return e2.interpretV();
 		}else static if(isRelationalOp(S)||isArithmeticOp(S)||isBitwiseOp(S)||isShiftOp(S)||isLogicalOp(S))
@@ -507,12 +512,12 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 				if(ety.equals(e2.type)){
 					Variant rhs = e2.interpretV();
 					if(ety is Type.get!(immutable(char))())
-						rhs = Variant(""c~rhs.get!char());
+						rhs = Variant(""c~rhs.get!char(),type);
 					else if(ety is Type.get!(immutable(wchar))())
-						rhs = Variant(""w~rhs.get!wchar());
+						rhs = Variant(""w~rhs.get!wchar(),type);
 					else if(ety is Type.get!(immutable(dchar))())
-						rhs = Variant(""d~rhs.get!dchar());
-					else{ auto r=[rhs];rhs = Variant(r,r); }
+						rhs = Variant(""d~rhs.get!dchar(),type);
+					else{ auto r=[rhs];rhs = Variant(r,r,ety.getDynArr()); }
 					return e1.interpretV().opBinary!"~"(rhs);
 				}
 			}
@@ -522,12 +527,12 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 			auto ety = e1.type;
 			auto lhs = e1.interpretV();
 			if(ety is Type.get!(immutable(char))())
-				lhs = Variant(""c~lhs.get!char());
+				lhs = Variant(""c~lhs.get!char(),ety);
 			else if(ety is Type.get!(immutable(wchar))())
-				lhs = Variant(""w~lhs.get!wchar());
+				lhs = Variant(""w~lhs.get!wchar(),ety);
 			else if(ety is Type.get!(immutable(dchar))())
-				lhs = Variant(""d~lhs.get!dchar());
-			else{ auto l=[lhs];lhs = Variant(l,l); }
+				lhs = Variant(""d~lhs.get!dchar(),ety);
+			else{ auto l=[lhs];lhs = Variant(l,l,ety.getDynArr()); }
 			return lhs.opBinary!"~"(e2.interpretV());
 		}else return super.interpretV();
 	}
@@ -535,7 +540,7 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 	override void _interpretFunctionCalls(Scope sc){
 		static if(S==Tok!"/"){
 			mixin(IntFCChldNoEplg!q{e1,e2});
-			if(type.isIntegral() && e2.interpretV() == Variant(0)){
+			if(type.isIntegral() && e2.interpretV() == Variant(0,type)){
 				sc.error("divide by zero",loc);
 				mixin(ErrEplg);
 			}
@@ -2652,7 +2657,7 @@ Lcastfailure:
 	assert(!!cast(CastExp)castinfo);
 	auto cae = cast(CastExp)cast(void*)castinfo;
 	auto t1 = cast(Type)cast(void*)tmp[0];
-	handler.error(format("cannot interpret cast from '%s' ('%s') to '%s' at compile time", cae.e.type,t1,cae.type), cae.loc);
+	handler.error(format("cannot interpret cast from '%s' aliasing a '%s' to '%s' at compile time", cae.e.type,t1,cae.type), cae.loc); // TODO: 'an'
 	goto Lfail;
 Linvfunction:
 	auto info6 = obtainErrorInfo();
@@ -4852,11 +4857,11 @@ struct VariantToMemoryContext{
 		if(auto bt = ret.isBasicType()){
 		swtch:switch(bt.op){
 				foreach(x; ToTuple!integralTypes){
-					case Tok!x: return Variant(mixin(`cast(`~x~`)memory.consume()`));
+					case Tok!x: return Variant(mixin(`cast(`~x~`)memory.consume()`),type);
 				}
 				import std.typetuple;
 				foreach(T; TypeTuple!(float, ifloat, double, idouble, real, ireal))
-				case Tok!(T.stringof): return Variant(memory.consume!T());
+				case Tok!(T.stringof): return Variant(memory.consume!T(),type);
 				default: break;
 			}
 		}
@@ -4871,11 +4876,11 @@ struct VariantToMemoryContext{
 			assert((memory.length-1)*ulong.sizeof<=getCTSizeof(ret)&&getCTSizeof(ret)<=memory.length*ulong.sizeof);
 			auto slice = (cast(void*)memory.ptr)[0..getCTSizeof(ret)];
 			memory=[];
-			return VariantFromBCSlice(BCSlice(slice,slice),ret,supported);
+			return VariantFromBCSlice(BCSlice(slice,slice),type,supported);
 		}
 
-		// TODO: preserve aliasing of pointers and slices correctly.
-		if(ret.getElementType()) return VariantFromBCSlice(memory.consume!BCSlice(),ret,supported);
+		// TODO: preserve aliasing of pointers correctly.
+		if(ret.getElementType()) return VariantFromBCSlice(memory.consume!BCSlice(),type,supported);
 		if(auto pt=ret.isPointerTy()){
 			auto ptr=memory.consume!BCPointer();
 			if(ptr.ptr is null) return Variant(null);
@@ -4892,9 +4897,9 @@ struct VariantToMemoryContext{
 			if(at.decl.isReferenceAggregateDecl()){
 				auto ptr=memory.consume!BCPointer();
 				if(ptr.ptr is null) return Variant(null);
-				return VariantFromAggregate(cast(ulong[])ptr.container, at.decl, supported);
+				return VariantFromAggregate(cast(ulong[])ptr.container, type, supported);
 			}
-			auto r=VariantFromAggregate(memory, at.decl, supported);
+			auto r=VariantFromAggregate(memory, type, supported);
 			assert(memory.length==at.decl.getBCSize());
 			memory=[];
 			return r;
@@ -4942,11 +4947,11 @@ struct VariantToMemoryContext{
 
 	Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{assert(type.getElementType());}body{
 		auto v = bc.container;
-		auto el = type.getElementType().getHeadUnqual();
+		auto el = type.getElementType();
 		auto tyu=type.getHeadUnqual();
 		import std.typetuple;
 		foreach(T;TypeTuple!(string, wstring, dstring))
-			if(tyu is Type.get!T()) return Variant(cast(T)bc.slice); // TODO: aliasing!
+			if(tyu is Type.get!T()) return Variant(cast(T)bc.slice,type); // TODO: aliasing!
 		auto computeContainer(){
 			if(el.getElementType()){
 				auto from = cast(BCSlice[])v;
@@ -4955,7 +4960,7 @@ struct VariantToMemoryContext{
 				return res;
 			}
 			if(type is Type.get!EmptyArray()) return (Variant[]).init;
-			if(auto bt = el.isBasicType()){
+			if(auto bt = el.getHeadUnqual().isBasicType()){
 			swtch:switch(bt.op){
 					foreach(xx;ToTuple!basicTypes){
 						static if(xx!="void"){
@@ -4963,7 +4968,7 @@ struct VariantToMemoryContext{
 							case Tok!xx:
 								auto from = cast(T[])v;
 								auto res = new Variant[from.length];
-								foreach(i, ref x; res) x=Variant(from[i]);
+								foreach(i, ref x; res) x=Variant(from[i],el);
 								return res;
 						}
 					}
@@ -4987,12 +4992,12 @@ struct VariantToMemoryContext{
 			sl_aliasing_rev[v.ptr]=container;
 		}
 		auto siz = getCTSizeof(el);
-		if(!siz) return Variant(container,container); // TODO: can we assert siz!=0?
+		if(!siz) return Variant(container,container,type); // TODO: can we assert siz!=0?
 		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
 		assert(!(bc.slice.length%siz));
 		auto start=(bc.slice.ptr-bc.container.ptr)/siz;
 		auto end=start+bc.slice.length/siz;
-		return Variant(container[start..end],container);
+		return Variant(container[start..end],container,type);
 	}
 
 	BCSlice VariantToBCSlice(Variant value, Type type){
@@ -5063,7 +5068,11 @@ struct VariantToMemoryContext{
 		return finish(siz*ulong.sizeof);
 	}
 
-	Variant VariantFromAggregate(ulong[] memory, AggregateDecl decl, ref bool supported){
+	Variant VariantFromAggregate(ulong[] memory, Type type, ref bool supported)in{
+		assert(type.getHeadUnqual().isAggregateTy());
+	}body{
+		auto ret = type.getHeadUnqual();
+		auto decl = (cast(AggregateTy)cast(void*)ret).decl;
 		// TODO: What about pointers with an offset?
 		if(memory.ptr in aliasing_reverse) return aliasing_reverse[memory.ptr];
 		Variant[VarDecl] res;
@@ -5073,15 +5082,17 @@ struct VariantToMemoryContext{
 			if(!initialized){ // (stupid built-in AAs)
 				res[vd]=Variant(null);
 				res.remove(vd);
-				aliasing_reverse[memory.ptr]=Variant(res, decl.getType());
+				aliasing_reverse[memory.ptr]=Variant(res, type);
 				initialized = true;
 			}
 
 			size_t len, off = vd.getBCLoc(len);
 			assert(len != -1);
-			res[vd]=VariantFromBCMemory(memory[off..off+len],vd.type,supported);
+			res[vd]=VariantFromBCMemory(memory[off..off+len],
+			                            vd.type.applySTC(type.getHeadSTC()),
+			                            supported);
 		}
-		return Variant(res, decl.getType());
+		return Variant(res, type);
 	}
 
 

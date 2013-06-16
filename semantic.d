@@ -857,18 +857,19 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 mixin template Semantic(T) if(is(T==LiteralExp)){
 
-	static Expression factory(Variant value, Type type)in{assert(type.sstate == SemState.completed);}body{
-		value=value.convertTo(type);
+	static Expression factory(Variant value)in{
+		assert(!!value.getType());
+	}body{
 		auto r = New!LiteralExp(value);
 		r.semantic(null);
 		mixin(Rewrite!q{r});
-		assert(r.type is type);
+		assert(r.type is value.getType());
 		r.dontConstFold();
 		return r;
 	}
 
 	static Expression polyStringFactory(string value){
-		Expression r = factory(Variant(value), Type.get!string());
+		Expression r = factory(Variant(value, Type.get!string()));
 		assert(cast(LiteralExp)r);
 		(cast(LiteralExp)cast(void*)r).lit.type = Tok!"``";
 		return r;
@@ -3505,7 +3506,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						    && e2.sstate == SemState.completed);
 						static if(S == Tok!"/" || S==Tok!"%"){
 							if(bt1.isIntegral() && bt2.isIntegral())
-							if(e2.isConstant() && e2.interpretV() == Variant(0)){
+							if(e2.isConstant() && e2.interpretV() == Variant(0,e2.type)){
 								sc.error("divide by zero", loc);
 								mixin(ErrEplg);
 							}
@@ -4964,6 +4965,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		mixin(SemEplg);
 	}
 
+
 	override bool isConstant(){
 		if(sstate == SemState.error) return false;
 		assert(sstate == SemState.completed);
@@ -5931,7 +5933,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		}
 		if(auto tp=e1.isTuple()){
 			if(name=="length"){
-				r=LiteralExp.factory(Variant(tp.length), Type.get!Size_t());
+				r=LiteralExp.factory(Variant(tp.length, Type.get!Size_t()));
 				goto Lrewrite;
 			}
 		}
@@ -6028,7 +6030,7 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 				Expression init;
 				if(auto tp=e.isTuple()){
 					stc |= STCenum;
-					init = LiteralExp.factory(Variant(tp.length), Type.get!Size_t());
+					init = LiteralExp.factory(Variant(tp.length, Type.get!Size_t()));
 				}
 
 				// dollar variables at module scope are static
@@ -8384,8 +8386,9 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		assert(init.isConstant());
 		// re-allocate mutable dynamic array constants everywhere:
 		if(init.type.isDynArrTy()&&init.type.getElementType().isMutable()){
-			if(auto lexp=init.isLiteralExp())
+			if(auto lexp=init.isLiteralExp()){
 				init=lexp.toArrayLiteral();
+			}
 		}
 		// TODO: check for mutable indirections. Here?
 	}
