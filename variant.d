@@ -42,7 +42,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptrslc, vars, err
 }
 
 template getOccupied(T){
@@ -64,7 +64,7 @@ template getOccupied(T){
 	else static if(is(T==Variant[]))
 		enum getOccupied = Occupies.arr;
 	else static if(is(T==Variant*))
-		enum getOccupied = Occupies.ptr_;
+		enum getOccupied = Occupies.ptrslc;
 	else static if(is(T==typeof(null)))
 		enum getOccupied = Occupies.none;
 	else static if(is(T==Vars))
@@ -112,7 +112,7 @@ struct Variant{
 		if(tu is Type.get!wstring()) return Occupies.wstr;
 		if(tu is Type.get!dstring()) return Occupies.dstr;
 		if(tu.getElementType()) return Occupies.arr;
-		if(tu.isPointerTy()) return Occupies.ptr_;
+		if(tu.isPointerTy()) return Occupies.ptrslc;
 
 		if(auto bt=tu.isBasicType()){
 			switch(bt.op){
@@ -141,10 +141,10 @@ struct Variant{
 	}
 
 	this()(Variant[] arr, Variant[] cnt, Type type)in{
-		assert(cnt.ptr<=arr.ptr&&arr.ptr+arr.length<=cnt.ptr+cnt.length);
 		assert(type.getElementType(),text(type));
 		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
-		foreach(x;cnt) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
+		if(tt !is Type.get!(void*)()&&tt!is Type.get!(void[])())
+			foreach(x;cnt) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
 	}body{
 		this.type=type;
 		this.arr=arr;
@@ -155,10 +155,12 @@ struct Variant{
 		auto pt=type.isPointerTy();
 		assert(!!pt);
 		auto tt=pt.ty.getUnqual();
-		foreach(x;cnt) assert(tt is x.type.getUnqual());
+
+		if(tt !is Type.get!(void*)()&&tt!is Type.get!(void[])())
+			foreach(x;cnt) assert(tt is x.type.getUnqual());
 	}body{
 		this.type=type;
-		this.ptr_=ptr;
+		this.ptrslc=ptr;
 		this.cnt=cnt;
 	}
 
@@ -177,7 +179,7 @@ struct Variant{
 		struct{
 			union{
 				Variant[] arr;
-				Variant* ptr_;
+				Variant* ptrslc;
 			}
 			Variant[] cnt;
 		}
@@ -215,7 +217,7 @@ struct Variant{
 	}
 
 	Variant[] getContainer()in{
-		assert(occupies == Occupies.arr||occupies == Occupies.ptr_);
+		assert(occupies == Occupies.arr||occupies == Occupies.ptrslc);
 	}body{
 		return cnt;
 	}
@@ -238,7 +240,11 @@ struct Variant{
 	}
 
 	string toString(){
-		auto type=getType().getHeadUnqual();
+		if(!type){
+			assert(occupies==Occupies.vars);
+			return to!string(vars);
+		}
+		auto type=type.getHeadUnqual();
 		if(type is Type.get!(typeof(null))()) return "null";
 		if(type.isSomeString()){
 			foreach(T;Seq!(string,wstring,dstring)){
@@ -283,7 +289,7 @@ struct Variant{
 			return '['~join(map!(to!string)(this.arr),",")~']';
 		}
 		if(type.isPointerTy()){
-			return "&("~ptr_.toString()~")";
+			return "&("~ptrslc.toString()~")";
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -455,11 +461,11 @@ struct Variant{
 				else static if(op=="!=") return Variant(false,Type.get!bool());
 				else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
 			}
-		}else if(occupies == Occupies.ptr_){
-			assert(rhs.occupies==Occupies.ptr_);
+		}else if(occupies == Occupies.ptrslc){
+			assert(rhs.occupies==Occupies.ptrslc);
 			// TODO: other relational operators
 			static if(op=="is"||op=="=="||op=="!is"||op=="!="){
-				return Variant((op=="!is"||op=="!=")^(ptr_ is rhs.ptr_),Type.get!bool());
+				return Variant((op=="!is"||op=="!=")^(ptrslc is rhs.ptrslc),Type.get!bool());
 			}else assert(0);
 		}else if(occupies == Occupies.vars){
 			assert(rhs.occupies==Occupies.vars);
@@ -553,9 +559,9 @@ struct Variant{
 	}
 
 	Variant* getPointer()in{
-		assert(occupies==Occupies.ptr_);
+		assert(occupies==Occupies.ptrslc);
 	}body{
-		return ptr_;
+		return ptrslc;
 	}
 
 

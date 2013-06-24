@@ -3292,7 +3292,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		}~SemEplg;
 		static if(isAssignOp(S)){
 			// TODO: properties, array ops \ ~=
-			if(e1.canMutate()){
+			if(e1.canMutate()||e1.isLengthExp()){
 				type = e1.type;
 				static if(S==Tok!"~="){
 					if(auto tt=type.isDynArrTy()){
@@ -3307,7 +3307,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						assert(tt.getSizeof() == s_t.getSizeof());
 						e2=e2.implicitlyConvertTo(s_t);
 					}else e2=e2.implicitlyConvertTo(type);
-					}else e2=e2.implicitlyConvertTo(type);
+				}else e2=e2.implicitlyConvertTo(type);
 				mixin(SemChld!q{e2});
 				mixin(ConstFold!q{e2});
 				/+if(e2.implicitlyConvertsTo(type)){
@@ -5232,11 +5232,6 @@ class StructConsExp: TemporaryExp{
 	override string toString(){ return strd.name.toString()~"("~join(map!(to!string)(args),",")~")"; }
 
 
-	override bool isConstant(){
-		foreach(x;args) if(!x.isConstant()) return false;
-		return true;
-	}
-
 	mixin DownCastMethod;
 	mixin Visitors;
 }
@@ -6025,6 +6020,7 @@ class LengthExp: Expression{
 
 	override void semantic(Scope sc){mixin(SemPrlg); assert(0);}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 

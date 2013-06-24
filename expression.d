@@ -117,6 +117,7 @@ abstract class Expression: Node{
 		Identifier,
 		LookupIdentifier,
 		FieldExp,
+		LengthExp,
 		SuperExp,
 		TemplateInstanceExp,
 		IndexExp,

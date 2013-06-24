@@ -569,70 +569,26 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 
 mixin template Interpret(T) if(is(T==StructConsExp)){
-	override void interpret(Scope sc){
-		return; // TODO!
+	override bool checkInterpret(Scope sc){
+		return true; // be optimistic
 	}
+	override void _interpretFunctionCalls(Scope sc){
+		callWrapper(sc,ctfeCallWrapper);		
+	}
+private:
+	FunctionDef ctfeCallWrapper;
 }
 
 mixin template Interpret(T) if(is(T==CallExp)){
-	private Variant val;
+	//private Variant val;
 	override bool checkInterpret(Scope sc){
 		// TODO: ok?
-		if(fun.type.getFunctionTy().ret is Type.get!void()) return super.checkInterpret(sc);
+		if(fun.type.getHeadUnqual().getFunctionTy().ret is Type.get!void()) return super.checkInterpret(sc);
 		return true; // be optimistic
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
-		if(sstate == SemState.error) return;
-		if(rewrite) return;
-		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
-		static struct MakeStrong{
-			void perform(Symbol sym){
-				// allow interpretation of partially analyzed functions
-				// (TODO: fix implementation)
-/+				if(sym.meaning &&
-				   (!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)){
-					sym.makeStrong();
-				}+/
-				sym.makeStrong();
-			}
-		}
-		runAnalysis!MakeStrong(this);
-		mixin(SemChld!q{e});
-		Expression r;
-		try{
-
-			if(!ctfeCallWrapper){
-				//if(args.length == 0) ctfeCallWrapper = fn;
-				//else{
-					auto bdy = New!BlockStm(cast(Statement[])[New!ReturnStm(this)]);
-					auto fty=New!FunctionTy(STC.init,cast(Expression)null,cast(Parameter[])null,VarArgs.none);
-					auto dg=New!FunctionDef(STCstatic,fty,New!Identifier("__ctfeCallWrapper"),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, false);
-					dg.sstate = SemState.begin;
-					dg.scope_ = sc;
-					dg.semantic(sc);
-					mixin(Rewrite!q{dg});
-					while(dg.sstate!=SemState.completed){
-						dg.semantic(sc);
-						mixin(Rewrite!q{dg});
-					}
-					ctfeCallWrapper = dg;
-					ctfeCallWrapper.loc = loc;
-					//}
-			}
-			r = ctfeCallWrapper.interpretCall(sc.handler).toExpr();
-			r.type = type;
-			r.loc = this.loc;
-			mixin(RewEplg!q{r});
-		}catch(CTFERetryException e){
-			mixin(PropRetry!q{e.node});
-			needRetry = true;
-		}catch(UnwindException){
-			sc.note("during evaluation requested here", loc);
-			mixin(ErrEplg);
-		}catch(SilentUnwindException){
-			mixin(ErrEplg);
-		}
+		callWrapper(sc,ctfeCallWrapper);
 	}
 	//sc.error(format("cannot interpret function call '%s' at compile time",toString()),loc);
 	//	mixin(ErrEplg);
@@ -1272,21 +1228,22 @@ abstract class LValueStrategy{
 
 	abstract void emitPointer(ref ByteCodeBuilder);
 
-	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, ErrorInfo info){
+	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info){
 		emitPointer(bld);
-		auto r = LVfield(off, len, info);
+		auto r = LVfield(off, len, ctlen, info);
 		return r;
 	}
 }
 static class LVfield: LValueStrategy{
-	size_t off, len;
+	size_t off, len, ctlen;
 	ErrorInfo info;
-	static opCall(size_t off, size_t len, ErrorInfo info){
-		return new LVfield(off, len, info);
+	static opCall(size_t off, size_t len, size_t ctlen, ErrorInfo info){
+		return new LVfield(off, len, ctlen, info);
 	}
-	private this(size_t off, size_t len, ErrorInfo info){
+	private this(size_t off, size_t len, size_t ctlen, ErrorInfo info){
 		this.off=off;
 		this.len=len;
+		this.ctlen=ctlen;
 		this.info=info;
 	}
 	override void emitStore(ref ByteCodeBuilder bld){
@@ -1317,7 +1274,7 @@ static class LVfield: LValueStrategy{
 	override void emitPointer(ref ByteCodeBuilder bld){
 		bld.emitUnsafe(Instruction.ptrf, info);
 		bld.emitConstant(off);
-		bld.emitConstant(len);
+		bld.emitConstant(ctlen);
 	}
 }
 
@@ -1428,7 +1385,7 @@ class LVpopr: LValueStrategy{
 		assert(0, "cannot create stack references");
 	}
 
-	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, ErrorInfo){
+	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo){
 		assert(off+len<=n);
 		static class FieldLV: LVpopr{
 			size_t off;
@@ -2520,12 +2477,13 @@ Ltailcall:
 				}
 				break;
 			case I.ptrf:
-				auto off = cast(size_t)byteCode[ip++];
+				auto off = cast(size_t)byteCode[ip++]*ulong.sizeof;
 				auto len = cast(size_t)byteCode[ip++];
 				auto ptr = stack.pop!BCPointer();
 				import std.algorithm: min;
-				stack.push(BCPointer((cast(ulong[])ptr.container)[min(off,$)..min(off+len,$)],
-				                     cast(ulong*)ptr.ptr+off));
+				void[] container=ptr.ptr[off..off+len];
+				if(!(ptr.container.ptr<=container.ptr&&container.ptr+len<=ptr.container.ptr+ptr.container.length)) container=[];
+				stack.push(BCPointer(container,ptr.ptr+off));
 				break;
 			// virtual methods
 			case I.fetchvtbl:
@@ -2691,6 +2649,63 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 		if(isRefReturn) UnaryExp!(Tok!"&").emitAddressOf(bld,this);
 		else byteCompile(bld);
 		bld.emit(Instruction.ret);
+	}
+
+	final FunctionDef createCallWrapper(Scope sc){
+		auto bdy = New!BlockStm(cast(Statement[])[New!ReturnStm(this)]);
+		auto fty=New!FunctionTy(STC.init,cast(Expression)null,cast(Parameter[])null,VarArgs.none);
+		auto dg=New!FunctionDef(STCstatic,fty,New!Identifier("__ctfeCallWrapper"),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, false);
+		dg.sstate = SemState.begin;
+		dg.scope_ = sc;
+		dg.semantic(sc);
+		mixin(Rewrite!q{dg});
+		while(dg.sstate!=SemState.completed){
+			dg.semantic(sc);
+			mixin(Rewrite!q{dg});
+		}
+		dg.loc = loc;
+		return dg;
+	}
+	final void callWrapper(Scope sc, ref FunctionDef ctfeCallWrapper){
+		if(sstate == SemState.error) return;
+		if(rewrite) return;
+		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
+		static struct MakeStrong{
+			void perform(Symbol sym){
+				// allow interpretation of partially analyzed functions
+				// (TODO: fix implementation)
+/+				if(sym.meaning &&
+				   (!sym.meaning.isFunctionDecl() || sym.meaning.sstate != SemState.started)){
+					sym.makeStrong();
+				}+/
+				sym.makeStrong();
+			}
+		}
+		runAnalysis!MakeStrong(this);
+		//mixin(SemChld!q{e});
+		semantic(sc);
+		mixin(SemCheck);
+		Expression r;
+		if(!ctfeCallWrapper){
+			//if(args.length == 0) ctfeCallWrapper = fn;
+			//else{
+			ctfeCallWrapper = createCallWrapper(sc);
+			//}
+		}
+		try{
+			r = ctfeCallWrapper.interpretCall(sc.handler).toExpr();
+			r.type = type;
+			r.loc = this.loc;
+			mixin(RewEplg!q{r});
+		}catch(CTFERetryException e){
+			mixin(PropRetry!q{e.node});
+			needRetry = true;
+		}catch(UnwindException){
+			sc.note("during evaluation requested here", loc);
+			mixin(ErrEplg);
+		}catch(SilentUnwindException){
+			mixin(ErrEplg);
+		}
 	}
 }
 
@@ -3800,10 +3815,10 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 			size_t len, off = aggrt.getBCLocOf(vd, len);
 			if(aggrt.decl.isValueAggregateDecl()){
 				auto lv=this_.byteCompileLV(bld);
-				lv.emitFieldLV(bld, off, len, this).emitLoad(bld);
+				lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), this).emitLoad(bld);
 			}else{
 				this_.byteCompile(bld);
-				LVfield(off, len, this).emitLoad(bld);
+				LVfield(off, len, getCTSizeof(vd.type), this).emitLoad(bld);
 			}
 			return;
 		}
@@ -3878,10 +3893,10 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 		size_t len, off = aggrt.getBCLocOf(vd, len);
 		if(aggrt.decl.isValueAggregateDecl()){
 			auto lv=this_.byteCompileLV(bld);
-			return lv.emitFieldLV(bld, off, len, this);
+			return lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), this);
 		}else{
 			this_.byteCompile(bld);
-			return LVfield(off, len, this);
+			return LVfield(off, len, getCTSizeof(vd.type), this);
 		}
 	}
 }
@@ -3988,9 +4003,9 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		bcSize = off;
 		layoutKnown = true;
 	}
-	size_t getBCSize(){
+	final size_t getBCSize(){
 		if(!isLayoutKnown()) updateLayout();
-		return bcSize;
+		return bcSize?bcSize:1;
 	}
 	static ulong getVersion(){
 		return vers;
@@ -4023,6 +4038,10 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 			bld.emitConstant(cast(ulong)cast(void*)this);
 		}
 		byteCompileFields(bld);
+		if(!bcSize){
+			bld.emit(Instruction.push);
+			bld.emitConstant(0);
+		}
 	}
 
 	protected void byteCompileFields(ref ByteCodeBuilder bld){
@@ -4237,7 +4256,7 @@ mixin template CTFEInterpret(T) if(is(T==CurrentExp)){
 }
 
 // get compile time size of a type in bytes
-size_t getCTSizeof(Type type){
+size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 	type = type.getHeadUnqual();
 	if(type.getUnqual().among(Type.get!(void*)(), Type.get!(void[])()))
 		return getBCSizeof(type)*ulong.sizeof;
@@ -4416,13 +4435,27 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	// emit code and get the LValueStrategy to access the raw variable memory
 	final LValueStrategy byteCompileInitLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
 		size_t len, off = getBCLoc(len);
-		// dw(this," ",len," ",off);
 		if(!~off){
 			if(stc&(STCimmutable|STCconst)&&init){
-				// TODO: this can be inefficient for immutable variables
-				init.byteCompile(bld);
-				emitMakeArray(bld,type.getDynArr(),1);
-				bld.emit(Instruction.ptra);
+				if(stc&STCstatic){
+					static LiteralExp[VarDecl] decls;
+					if(this !in decls){
+						assert(cast(LiteralExp)init,text(init," ",));
+						auto v=init.interpretV();
+						auto s=[v]; // TODO: allocation here
+						auto p=Variant(s.ptr, s, type.getPointer());
+						auto e=p.toExpr();
+						assert(cast(LiteralExp)e);
+						decls[this]=cast(LiteralExp)cast(void*)e;
+					}
+					decls[this].byteCompile(bld);
+				}else{
+					// global local variables
+					// TODO: aliasing
+					init.byteCompile(bld);
+					emitMakeArray(bld,type.getDynArr(), 1);
+					bld.emit(Instruction.ptra);
+				}
 				return LVpointer(type, this);
 			}
 			bld.error(format("cannot access variable '%s' at compile time", name.toString()),loader.loc);
@@ -4487,7 +4520,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				// for value types, having one member in the heap frame
 				// implies that the entire value is stored there
 				if(auto this_=self.e1.extractThis())
-				if(auto aggrty=this_.type.isAggregateTy())
+				if(auto aggrty=this_.type.getHeadUnqual().isAggregateTy())
 				if(aggrty.decl.isValueAggregateDecl()){
 					runAnalysis!MarkHeapContext(this_);
 				}
@@ -4520,9 +4553,13 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			void perform(UnaryExp!(Tok!"&") self){
 				runAnalysis!MarkHeapContext(self.e);
 			}
+			void perform(PtrExp self){
+				if(self.e.type&&self.e.type.getHeadUnqual().isArrayTy())
+					runAnalysis!MarkHeapContext(self.e);
+			}
 			void perform(IndexExp self){
 				// TODO: remove this, do not require static arrays to reside on the heap!
-				if(self.e.type&&self.e.type.isArrayTy())
+				if(self.e.type&&self.e.type.getHeadUnqual().isArrayTy())
 					runAnalysis!MarkHeapContext(self.e);
 			}
 			void perform(Symbol self){
@@ -4535,8 +4572,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			void perform(CallExp self){
 				if(self.tmpVarDecl) self.tmpVarDecl.inHeapContext = true;
 				if(!self.fun || !self.fun.type) return; // TODO: ok?
-				auto tt=self.fun.type.getFunctionTy();
-				assert(!!tt);
+				auto tt=self.fun.type.getHeadUnqual().getFunctionTy();
+				assert(!!tt,text(self.fun.type));
 				foreach(i,x; self.args){
 					if(tt.params[i].stc&STCbyref)
 						runAnalysis!MarkHeapContext(x);
@@ -4546,7 +4583,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				// the implicit this pointer is passed by reference
 				// for value types
 				if(self.type) // alias declarations can contain such expressions (TODO: should they?)
-				if(self.type.getFunctionTy())
+				if(self.type.getHeadUnqual().getFunctionTy())
 				if(auto this_=self.e1.extractThis())
 				if(auto aggrty=this_.type.isAggregateTy())
 				if(aggrty.decl.isValueAggregateDecl()){
@@ -4705,13 +4742,14 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 		if(!ctx && fun.type.isDelegateTy()) ctx = true;
 
 		FunctionTy ft;
-		if(auto fty=fun.type.isFunctionTy()) ft = fty;
-		else if(auto ptr=fun.type.isPointerTy()){
+		auto tt=fun.type.getHeadUnqual();
+		if(auto fty=tt.isFunctionTy()) ft = fty;
+		else if(auto ptr=tt.isPointerTy()){
 			assert(cast(FunctionTy)ptr.ty);
 			ft=cast(FunctionTy)cast(void*)ptr.ty;
 		}else{
-			assert(cast(DelegateTy)fun.type);
-			ft=(cast(DelegateTy)cast(void*)fun.type).ft;
+			assert(cast(DelegateTy)tt);
+			ft=(cast(DelegateTy)cast(void*)tt).ft;
 		}
 
 		fun.byteCompile(bld);
@@ -4739,10 +4777,10 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 	}
 	override void byteCompile(ref ByteCodeBuilder bld){
 		emitCall(bld);
-		if(fun.type.getFunctionTy().stc&STCref) LVpointer(type, this).emitLoad(bld);
+		if(fun.type.getHeadUnqual().getFunctionTy().stc&STCref) LVpointer(type, this).emitLoad(bld);
 	}
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
-		if(!(fun.type.getFunctionTy().stc&STCref)) return super.byteCompileLV(bld);
+		if(!(fun.type.getHeadUnqual().getFunctionTy().stc&STCref)) return super.byteCompileLV(bld);
 		emitCall(bld);
 		return LVpointer(type, this);
 	}
@@ -4896,8 +4934,11 @@ struct VariantToMemoryContext{
 			// TODO: proper pointer support!
 			auto siz=getCTSizeof(pt.ty);
 			auto slc=BCSlice(ptr.container,ptr.ptr[0..siz]);
-			auto slice=VariantFromBCSlice(slc, pt.ty.getDynArr(), supported);
-			return slice.ptr;
+			return VariantFromBCSlice(slc, pt, supported);
+		}
+		if(ret.isDelegateTy()){
+			memory=[];
+			return Variant(null,type); // TODO!
 		}
 
 		if(ret is Type.get!(typeof(null))){
@@ -4912,7 +4953,7 @@ struct VariantToMemoryContext{
 				return VariantFromAggregate(cast(ulong[])ptr.container, type, supported);
 			}
 			auto r=VariantFromAggregate(memory, type, supported);
-			assert(memory.length==at.decl.getBCSize());
+			assert(memory.length==at.decl.getBCSize(),text(memory," ",at.decl," ",at.decl.getBCSize()," ",at.decl.isLayoutKnown()));
 			memory=[];
 			return r;
 		}
@@ -4942,6 +4983,9 @@ struct VariantToMemoryContext{
 		if(ret.isPointerTy()){
 			return [VariantToBCPointer(value)];
 		}
+		if(ret.isDelegateTy()){
+			return new ulong[getBCSizeof(ret)]; // TODO!
+		}
 		if(auto at=ret.isAggregateTy()){
 			Variant[VarDecl] vars = value.get!(Variant[VarDecl])();
 			if(vars is null){
@@ -4960,21 +5004,28 @@ struct VariantToMemoryContext{
 		assert(0,ret.text);
 	}
 
-	Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{assert(type.getElementType());}body{
+	Variant VariantFromBCSlice(BCSlice bc, Type type, ref bool supported)in{
+		assert(type.getElementType()||type.getHeadUnqual().isPointerTy());
+	}body{
 		auto v = bc.container;
 		auto el = type.getElementType();
+		if(!el) el=type.getHeadUnqual().isPointerTy().ty;
 		auto tyu=type.getHeadUnqual();
 		import std.typetuple;
 		foreach(T;TypeTuple!(string, wstring, dstring))
 			if(tyu is Type.get!T()) return Variant(cast(T)bc.slice,type); // TODO: aliasing!
+		auto tag=q(type.getUnqual(),v.ptr);
 		auto computeContainer(){
-			if(el.getElementType()){
+			if(el.getHeadUnqual().isDynArrTy()){
 				auto from = cast(BCSlice[])v;
 				auto res = new Variant[from.length];
+				sl_aliasing_rev[tag]=res;
 				foreach(i,ref x; res) x = VariantFromBCSlice(from[i],el,supported);
 				return res;
 			}
-			if(type is Type.get!EmptyArray()) return (Variant[]).init;
+			if(type is Type.get!EmptyArray()){
+				return sl_aliasing_rev[tag]=(Variant[]).init;
+			}
 			if(auto bt = el.getHeadUnqual().isBasicType()){
 			swtch:switch(bt.op){
 					foreach(xx;ToTuple!basicTypes){
@@ -4984,6 +5035,7 @@ struct VariantToMemoryContext{
 								auto from = cast(T[])v;
 								auto res = new Variant[from.length];
 								foreach(i, ref x; res) x=Variant(from[i],el);
+								sl_aliasing_rev[tag]=res;
 								return res;
 						}
 					}
@@ -4996,22 +5048,24 @@ struct VariantToMemoryContext{
 			if(!siz) return (Variant[]).init;
 			assert(siz&&!(v.length%siz));
 			auto res = new Variant[memory.length/siz];
+			sl_aliasing_rev[tag]=res;
 			foreach(i,ref x; res) x = VariantFromBCMemory(memory[siz*i..siz*i+siz],el,supported);
 			return res;
 		}
 		Variant[] container;
 		auto siz = getCTSizeof(el);
-		if(!siz) return Variant(container,container,type); // TODO: can we assert siz!=0?
+		assert(siz!=0);
 		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
 		assert(!(bc.slice.length%siz));
-		if(v.ptr in sl_aliasing_rev){
-			container=sl_aliasing_rev[v.ptr];
+		if(tag in sl_aliasing_rev){
+			container=sl_aliasing_rev[tag];
 		}else{
 			container = computeContainer();
-			sl_aliasing_rev[v.ptr]=container;
+			assert(tag in sl_aliasing_rev);
 		}
 		auto start=(bc.slice.ptr-bc.container.ptr)/siz;
 		auto end=start+bc.slice.length/siz;
+		if(type.getHeadUnqual().isPointerTy()) return Variant(container.ptr+start, container, type);
 		return Variant(container[start..end],container,type);
 	}
 
@@ -5043,9 +5097,9 @@ struct VariantToMemoryContext{
 		auto finish(size_t siz){
 			if(!cached){
 				sl_aliasing[cnt.ptr]=rcnt;
-				sl_aliasing_rev[rcnt.ptr]=cnt;
+				sl_aliasing_rev[q(ret.getUnqual(),rcnt.ptr)]=cnt;
 			}
-			return BCSlice(rcnt, rcnt[start*siz..end*siz]);
+			return BCSlice(rcnt, rcnt.ptr[start*siz..end*siz]);
 		}
 
 		assert(ret.getElementType());
@@ -5097,7 +5151,7 @@ struct VariantToMemoryContext{
 		auto cnt = value.getContainer();
 		assert(cnt.ptr<=value.getPointer());
 		auto id = value.getPointer()-cnt.ptr;
-		auto slc = VariantToBCSlice(Variant(cnt[id..id+1],cnt,tt.ty.getDynArr()));
+		auto slc = VariantToBCSlice(Variant(cnt.ptr[id..id+1],cnt,tt.ty.getDynArr()));
 		return BCPointer(slc.container, slc.slice.ptr);
 	}
 
@@ -5108,18 +5162,19 @@ struct VariantToMemoryContext{
 		auto ret = type.getHeadUnqual();
 		auto decl = (cast(AggregateTy)cast(void*)ret).decl;
 		// TODO: What about pointers with an offset?
-		if(memory.ptr in aliasing_reverse) return aliasing_reverse[memory.ptr];
+		auto tag=q(ret.getUnqual(),memory.ptr);
+		if(tag in aliasing_reverse){
+			// there can be structs with a first field of struct type,
+			// hence multiple pieces of data may start at the same location
+			return aliasing_reverse[tag];
+		}
+		// (stupid built-in AAs)
 		Variant[VarDecl] res;
-		bool initialized = false;
+		res[cast(VarDecl)cast(void*)type]=Variant(null);
+		res.remove(cast(VarDecl)cast(void*)type);
+		aliasing_reverse[tag]=Variant(res, type);
 		assert(decl.isLayoutKnown);
 		foreach(vd;&decl.traverseFields){
-			if(!initialized){ // (stupid built-in AAs)
-				res[vd]=Variant(null);
-				res.remove(vd);
-				aliasing_reverse[memory.ptr]=Variant(res, type);
-				initialized = true;
-			}
-
 			size_t len, off = vd.getBCLoc(len);
 			assert(len != -1);
 			res[vd]=VariantFromBCMemory(memory[off..off+len],
@@ -5134,7 +5189,8 @@ struct VariantToMemoryContext{
 		if(vars.byid in aliasing_cache) return aliasing_cache[vars.byid];
 		auto res = new ulong[decl.getBCSize()];
 		aliasing_cache[vars.byid]=res;
-		aliasing_reverse[res.ptr]=Variant(vars,decl.getType());
+		auto tag=q(cast(Type)decl.getType(),res.ptr);
+		aliasing_reverse[tag]=Variant(vars,decl.getType());
 		static assert(ReferenceAggregateDecl.sizeof<=ulong.sizeof);
 		if(auto rd=decl.isReferenceAggregateDecl())
 			res[ReferenceAggregateDecl.bcTypeidOffset]=cast(ulong)cast(void*)rd;
@@ -5144,17 +5200,20 @@ struct VariantToMemoryContext{
 			if(vd !in vars && vd.init){
 				vars[vd]=vd.init.interpretV(); // TODO: ok?
 			}
-			auto var = vars[vd];
-			res[off..off+len]=VariantToBCMemory(var);
+			if(vd in vars){
+				auto var = vars[vd];
+				res[off..off+len]=VariantToBCMemory(var);
+			}
 		}
 		return res;
 	}
-
+   
+	import std.typecons : q=tuple, Q=Tuple;
 	ulong[][AAbyIdentity!(VarDecl,Variant)] aliasing_cache; // preserve aliasing
-	Variant[ulong*] aliasing_reverse; // preserve aliasing on reverse translation
+	Variant[Q!(Type,ulong*)] aliasing_reverse; // preserve aliasing on reverse translation
 
 	void[][Variant*] sl_aliasing; // preserve aliasing
-	Variant[][void*] sl_aliasing_rev; // preserve aliasing on reverse translation
+	Variant[][Q!(Type,void*)] sl_aliasing_rev; // preserve aliasing on reverse translation
 
 	void flushCaches(){
 		aliasing_cache=null;
