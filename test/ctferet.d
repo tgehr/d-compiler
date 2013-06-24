@@ -1,24 +1,100 @@
 
+struct StaticVariableAliasing{
+	static immutable x = 2;
+	enum ptr = (()=>&x)();
+	
+	pragma(msg, (()=>*ptr)());
+	static assert((()=>ptr is &x)()); // TODO!
+}
+
+/+struct VoidPointer{
+	static void*[2] a = { // TODO!
+		int x;
+		double y;
+		void* a=&x;
+		void* b=&y;
+		return [a,b];
+	}();
+}+/
+
+
+struct FieldAliasing{
+	struct S{
+		int[2] x=[1,2];
+		int y = 3;
+	}
+	
+	static immutable s=S();
+	//static s=immutable(S)();
+	static immutable ptr = (()=>s.x.ptr+2)();
+	static immutable ptr2 = (()=>s.x.ptr+2)();
+	static immutable ptr3 = (()=>&s.y)();
+	static immutable ptr4 = (()=>&s.y)();
+	static assert((()=>ptr is ptr2)()); // TODO
+	static assert((()=>ptr3 is ptr4)()); // TODO
+	static assert((()=>*(ptr-1)==2&&*(ptr-2)==1)());
+}
+
+immutable dg = (()=>delegate()immutable=>1)();
+pragma(msg, (()=>dg())()); // TODO
+
+class YY{
+	int x=2;
+}
+
+auto fooo(){
+	immutable YY x=new YY;
+	auto xx=(&x.x)[0..2]; // error
+	return xx[1];
+}
+pragma(msg, fooo);
+
+struct EmptyStructPointer{
+	struct XX{}
+	
+	static x = (()=>immutable(XX)())();
+	static food(){
+		auto x = &x;
+		return x;
+	}
+	pragma(msg, food);
+}
+
+
+struct LocalVariableAliasing{
+	struct TwoPointers{
+		immutable(int)* a, b;
+		this(immutable(int)* a,immutable(int)* b){ this.a=a; this.b=b; }
+	}
+	
+	static foo(){
+		immutable x=2;
+		return TwoPointers(&x,&x);
+	}
+	static immutable fofo = foo();
+	pragma(msg, (()=>fofo.a is fofo.b)());
+}
+
 class Pointers{
 	immutable int[1] u=[333];
 	int x = 123;
 	static immutable s = (()=>new immutable(Pointers)())();
 	static immutable t = (()=>s)();
 	pragma(msg, s is t);
-	//static assert((()=>&s.x is &t.x)());
+	static assert((()=>&s.x is &t.x)());
 
-	//static immutable a = (()=>&s.x)(); // TODO
-	//static immutable b = (()=>&t.x)(); // TODO
-	//static assert(a is b);
+	static immutable a = (()=>&s.x)();
+	static immutable b = (()=>&t.x)();
+	static assert(a is b); // TODO
 
 
-	/+immutable void*[2] a = { // TODO!
+	static void*[2] vpa = {
 		void* a;
 		void* b;
 		a=&b;
 		b=&a;
 		return [a,b];
-	}();+/
+	}();
 
 
 	static assert((()=>s.u.ptr is t.u.ptr)());
@@ -51,7 +127,7 @@ struct TestVoidArrayVoidPtr{
 	static immutable int x = 2;
 	static testvptr(){ void* ptr = cast(void*)&x; return ptr; }
 	pragma(msg, "testvptr: ", testvptr());
-	static assert(testvptr() is testvptr()); // TODO
+	static assert(testvptr() is testvptr());
 
 	static test1(){ auto x = [1,2,3]; return cast(immutable(int)[])cast(void[])x; } // error
 	pragma(msg, test1()," ",typeof(test1()));
