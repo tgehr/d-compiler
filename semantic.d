@@ -88,14 +88,14 @@ template PropErr(string s) if(!s.canFind(",")){
 }
 template PropErr(string s) if(s.canFind(",")){ alias MultiArgument!(.PropErr,s) PropErr; }
 
-template PropRetryNoRew(string s) if(!s.canFind(",")){
+template PropRetryNoRew(string s,bool reset=true) if(!s.canFind(",")){
 	enum sp = splitScope(s);
 	enum PropRetryNoRew=mixin(X!q{
 		static assert(!is(typeof(_nR)));
 		if(auto _nR=@(sp[1]).needRetry){
 			assert(_nR!=2 || sstate != SemState.error,"error in cdep");
 			if(sstate != SemState.error){
-				if(sstate == SemState.completed) sstate = SemState.begin;
+				static if(@(reset.to!string)) if(sstate == SemState.completed) sstate = SemState.begin;
 				needRetry = _nR;
 				if(_nR==2){mixin(SetErr!q{@(sp[1])});}
 				// dw("propagated retry ",_nR," from ",@(sp[1])," to ",toString()," ",__LINE__);
@@ -106,9 +106,9 @@ template PropRetryNoRew(string s) if(!s.canFind(",")){
 	});
 }
 
-template PropRetry(string s) if(!s.canFind(",")){
+template PropRetry(string s,bool reset=true) if(!s.canFind(",")){
 	enum sp = splitScope(s);
-	enum PropRetry=Rewrite!(sp[1])~PropRetryNoRew!s;
+	enum PropRetry=Rewrite!(sp[1])~PropRetryNoRew!(s,reset);
 }
 
 template PropRetry(string s) if(s.canFind(",")){ alias MultiArgument!(.PropRetry,s) PropRetry; }
@@ -4158,11 +4158,11 @@ class Symbol: Expression{ // semantic node
 		if(isSymbolMatcher){
 			//assert(!!cast(SymbolMatcher)meaning,to!string(meaning));
 			if(meaning.isSymbolMatcher()){
-			meaning.semantic(scope_);
-			mixin(CircErrMsg);
-			if(meaning.rewrite)
-				inoutRes = (cast(SymbolMatcher)cast(void*)meaning)
-					.context.inoutRes;
+				meaning.semantic(scope_);
+				mixin(CircErrMsg);
+				if(meaning.rewrite)
+					inoutRes = (cast(SymbolMatcher)cast(void*)meaning)
+						.context.inoutRes;
 				mixin(SemProp!q{sc=scope_;meaning});
 			}
 			isSymbolMatcher=false;
@@ -8597,6 +8597,7 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 		mixin(ConvertTo!q{a[0],bl});
 		mixin(IntChld!q{a[0]});
 
+
 		if(!a[0].interpretV()){
 			// work around finally block goto limitation...
 			void printMessage(){
@@ -10526,7 +10527,9 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 
 	override void semantic(Scope sc){
 		auto r=evaluate(sc);
-		static if(is(T==MixinDecl)) scope(success) sc.removeMixin(this);
+		static if(is(T==MixinDecl)){
+			scope(success) if(rewrite||sstate==SemState.error) sc.removeMixin(this);
+		}
 		mixin(SemCheck);
 		mixin(RewEplg!q{r});
 	}

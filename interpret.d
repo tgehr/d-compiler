@@ -21,7 +21,7 @@ template IntFCChldNoEplg(string s){
 		foreach(t; ss){
 			r~=mixin(X!q{
 				@(t)._interpretFunctionCalls(sc);
-				mixin(PropRetry!q{@(t)}); // TODO: this now resets sstate, implement better solution
+				mixin(PropRetry!(q{@(t)},false)); 
 			});
 		}
 		return r~PropErr!s;
@@ -549,7 +549,6 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 			if(cast(bool)e1.interpretV()^(S==Tok!"&&")){mixin(RewEplg!q{e1});}
 			mixin(IntFCChld!q{e2});
 		}else mixin(IntFCChld!q{e1,e2});
-
 	}
 }
 
@@ -573,7 +572,7 @@ mixin template Interpret(T) if(is(T==StructConsExp)){
 		return true; // be optimistic
 	}
 	override void _interpretFunctionCalls(Scope sc){
-		callWrapper(sc,ctfeCallWrapper);		
+		callWrapper(sc,ctfeCallWrapper,consCall?consCall.e:null);		
 	}
 private:
 	FunctionDef ctfeCallWrapper;
@@ -588,7 +587,7 @@ mixin template Interpret(T) if(is(T==CallExp)){
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
-		callWrapper(sc,ctfeCallWrapper);
+		callWrapper(sc,ctfeCallWrapper,e);
 	}
 	//sc.error(format("cannot interpret function call '%s' at compile time",toString()),loc);
 	//	mixin(ErrEplg);
@@ -1387,6 +1386,7 @@ class LVpopr: LValueStrategy{
 
 	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo){
 		assert(off+len<=n);
+		// TODO: byte code support for offsetted poprs
 		static class FieldLV: LVpopr{
 			size_t off;
 			alias n len;
@@ -1422,6 +1422,12 @@ class LVpopr: LValueStrategy{
 			override void emitLoadKR(ref ByteCodeBuilder bld){
 				adjust(bld);
 				super.emitLoadKR(bld);
+				// reset adjustment
+				bld.emitTmppush(len);
+				bld.emit(Instruction.push);
+				bld.emitConstant(off);
+				bld.emit(Instruction.subi);
+				bld.emitTmppop(len);
 			}
 		}
 		return new FieldLV(off, len);
@@ -2666,10 +2672,10 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 		dg.loc = loc;
 		return dg;
 	}
-	final void callWrapper(Scope sc, ref FunctionDef ctfeCallWrapper){
+	final void callWrapper(Scope sc, ref FunctionDef ctfeCallWrapper, Expression e){
 		if(sstate == SemState.error) return;
 		if(rewrite) return;
-		Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
+		//Scheduler().add(this,sc); //(the scheduler might already have finished off the expression) TODO: more elegant solution
 		static struct MakeStrong{
 			void perform(Symbol sym){
 				// allow interpretation of partially analyzed functions
@@ -2682,9 +2688,7 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 			}
 		}
 		runAnalysis!MakeStrong(this);
-		//mixin(SemChld!q{e});
-		semantic(sc);
-		mixin(SemCheck);
+		if(e) mixin(SemChld!q{e});
 		Expression r;
 		if(!ctfeCallWrapper){
 			//if(args.length == 0) ctfeCallWrapper = fn;
@@ -2698,7 +2702,7 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 			r.loc = this.loc;
 			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
-			mixin(PropRetry!q{e.node});
+			mixin(PropRetry!(q{e.node},false));
 			needRetry = true;
 		}catch(UnwindException){
 			sc.note("during evaluation requested here", loc);
@@ -4513,8 +4517,10 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			enum manualPropagate = true;
 			void perform(Symbol self){
 				if(!self.meaning) return;
-				if(auto vd = self.meaning.isVarDecl())
+				if(auto vd = self.meaning.isVarDecl()){
+					if(vd.stc&STCbyref) return;
 					vd.inHeapContext = true;
+				}
 			}
 			void perform(FieldExp self){
 				// for value types, having one member in the heap frame
@@ -5014,7 +5020,10 @@ struct VariantToMemoryContext{
 		import std.typetuple;
 		foreach(T;TypeTuple!(string, wstring, dstring))
 			if(tyu is Type.get!T()) return Variant(cast(T)bc.slice,type); // TODO: aliasing!
-		auto tag=q(type.getUnqual(),v.ptr);
+
+		auto ttt=type.getUnqual();
+		if(auto ptr=ttt.isPointerTy()) ttt=ptr.ty.getDynArr();
+		auto tag=q(ttt,v.ptr);
 		auto computeContainer(){
 			if(el.getHeadUnqual().isDynArrTy()){
 				auto from = cast(BCSlice[])v;
@@ -5122,7 +5131,7 @@ struct VariantToMemoryContext{
 							rcnt=r;
 							return finish(U.sizeof);
 					}
-					default: import std.stdio; writeln(cnt);assert(0);
+					default: assert(0);
 				}
 			}
 			foreach(U; Seq!(float, double, real, ifloat, idouble, ireal, cfloat, cdouble, creal)){
@@ -5172,6 +5181,7 @@ struct VariantToMemoryContext{
 		Variant[VarDecl] res;
 		res[cast(VarDecl)cast(void*)type]=Variant(null);
 		res.remove(cast(VarDecl)cast(void*)type);
+		// now 'res' is initialized
 		aliasing_reverse[tag]=Variant(res, type);
 		assert(decl.isLayoutKnown);
 		foreach(vd;&decl.traverseFields){
