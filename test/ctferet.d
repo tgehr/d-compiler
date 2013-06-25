@@ -1,10 +1,15 @@
-
 struct StaticVariableAliasing{
 	static immutable x = 2;
 	enum ptr = (()=>&x)();
 	
 	pragma(msg, (()=>*ptr)());
-	static assert((()=>ptr is &x)()); // TODO!
+	static assert((()=>ptr is &x)());
+}
+
+struct StringAliasing{
+	static immutable y = "123";
+	static assert((()=>y.ptr == y.ptr)()); // TODO!
+	static assert({immutable(char)[] x = y; return x~=x;}()=="123123");
 }
 
 /+struct VoidPointer{
@@ -25,7 +30,6 @@ struct FieldAliasing{
 	}
 	
 	static immutable s=S();
-	//static s=immutable(S)();
 	static immutable ptr = (()=>s.x.ptr+2)();
 	static immutable ptr2 = (()=>s.x.ptr+2)();
 	static immutable ptr3 = (()=>&s.y)();
@@ -37,6 +41,8 @@ struct FieldAliasing{
 
 immutable dg = (()=>delegate()immutable=>1)();
 pragma(msg, (()=>dg())()); // TODO
+/+immutable fn = (()=>()immutable=>1)();
+pragma(msg, (()=>fn())()); // TODO+/
 
 class YY{
 	int x=2;
@@ -161,7 +167,7 @@ struct Qualified{
 	enum foo = (){return new immutable(Foo)();}();
 	enum bar = (){return new Foo();}();
 	enum baz = (){return new Foo();}();
-	static assert((()=>foo.x.ptr==bar.x.ptr)());
+	static assert((()=>bar.x.ptr==baz.x.ptr)());
 	static assert((){return foo.x.ptr != bar.x.ptr;}()); // TODO
 }
 

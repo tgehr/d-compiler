@@ -75,8 +75,8 @@ auto rrr(){
 	r.baz=2; // TODO
 	return r.x+u()+r.y;
 }
-static assert(rrr()==8); // TODO
-pragma(msg, "rrr: ", rrr); // TODO
+static assert(rrr()==8);
+pragma(msg, "rrr: ", rrr);
 
 
 

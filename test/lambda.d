@@ -146,13 +146,13 @@ struct S{
 	int a;
 	int foo(){return 2;}
 	pragma(msg, (()=>foo())()); // error: 'this' is missing
-	mixin({ // TODO!
+	mixin({
 		auto s="enum a0=0;";
 		for(int i=1;i<100;i++)
 			s~="enum int a"~toString(i)~"=a"~toString(i-1)~"+"~toString(i*2-1)~";";
 		return s;
 	}());
-	pragma(msg, "a5: ", a5); static assert(a5==25); // TODO
+	pragma(msg, "a5: ", a5); static assert(a5==25);
 }
 
 void testfunctiondeduction(){

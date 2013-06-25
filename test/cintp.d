@@ -1,4 +1,44 @@
 
+struct LVStackStruct{
+	struct Sum{
+		string name;
+		string[] types;
+	}
+
+	static Sum sum(string s){
+		Sum r;
+		r.types~=s;
+		return r;
+	}
+
+	static assert((){
+			string s="T S";
+			return sum(s).types.length;
+		}()==1);
+
+}
+
+struct PassRefRef{
+	static assert((){
+			auto s="P T S";
+			sum(s);
+			return s;
+		}()==" T S");
+	
+	static struct Sum{
+		string name;
+		string[] types;
+	}
+	
+	static Sum sum(ref string s){
+		Sum r;
+		r.types~=s;
+		popFront(s);
+		return r;
+	}
+	static void popFront(T)(ref T[] arr){ arr=arr[1..$]; }
+}
+
 string execLenses(){
 	string r;
 	void write(T...)(T x){
