@@ -8418,7 +8418,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		if(isField){
 			auto aggr = sc.getDeclaration().isAggregateDecl();
 			assert(!!aggr);
-			aggr.layoutChanged();
+			if(!(stc&(STCstatic|STCenum))) aggr.layoutChanged();
 		}
 		mixin(SemEplg);
 	}
