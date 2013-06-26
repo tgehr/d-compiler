@@ -1,10 +1,3 @@
-struct StaticVariableAliasing{
-	static immutable x = 2;
-	enum ptr = (()=>&x)();
-	
-	pragma(msg, (()=>*ptr)());
-	static assert((()=>ptr is &x)());
-}
 
 struct StringAliasing{
 	static immutable y = "123";
@@ -23,26 +16,67 @@ struct StringAliasing{
 }+/
 
 
-struct FieldAliasing{
+struct ClassFieldAliasing{
+	class C{
+		int[2] x=[1,2];
+		int y = 3;
+	}
+	
+	static immutable c=new immutable(C)();
+	static immutable ptr3 = (()=>&c.y)();
+	static immutable ptr4 = (()=>&c.y)();
+	static assert((()=>ptr3 is ptr4)());
+	static assert((()=>ptr3 is &c.y)());
+	static immutable ptr1 = (()=>c.x.ptr+2)();
+	static immutable ptr2 = (()=>c.x.ptr+2)();
+	static assert((()=>ptr1 is ptr2)());
+	static assert((()=>ptr1 is c.x.ptr+2)()); // TODO
+	static assert((()=>*(ptr1-1)==2&&*(ptr1-2)==1)());
+}
+
+struct StructFieldAliasing{
 	struct S{
 		int[2] x=[1,2];
 		int y = 3;
 	}
 	
 	static immutable s=S();
-	static immutable ptr = (()=>s.x.ptr+2)();
+	static immutable ptr1 = (()=>s.x.ptr+2)();
 	static immutable ptr2 = (()=>s.x.ptr+2)();
 	static immutable ptr3 = (()=>&s.y)();
 	static immutable ptr4 = (()=>&s.y)();
-	static assert((()=>ptr is ptr2)()); // TODO
-	static assert((()=>ptr3 is ptr4)()); // TODO
-	static assert((()=>*(ptr-1)==2&&*(ptr-2)==1)());
+	static assert((()=>ptr1 is ptr2)());
+	static assert((()=>ptr1 is s.x.ptr+2)()); // TODO
+	static assert((()=>ptr3 is ptr4)());
+	static assert((()=>ptr3 is &s.y)()); // TODO
+	static assert((()=>*(ptr1-1)==2&&*(ptr1-2)==1)());
 }
+
 
 immutable dg = (()=>delegate()immutable=>1)();
 pragma(msg, (()=>dg())()); // TODO
 /+immutable fn = (()=>()immutable=>1)();
 pragma(msg, (()=>fn())()); // TODO+/
+
+class Subclass{
+	static class Parent{int x=1;int foo()const{ return x; }}
+	static class Child : Parent{int y=2;override int foo()const{ return x+y; }}
+
+	static immutable pp = delegate immutable Parent(){
+		return new immutable(Child)();
+	}();
+	
+	pragma(msg, typeof(pp)," ",pp," ",pp.foo());
+	static assert(pp.foo()==3);
+}
+
+struct StaticVariableAliasing{
+	static immutable x = 2;
+	enum ptr = (()=>&x)();
+	
+	pragma(msg, (()=>*ptr)());
+	static assert((()=>ptr is &x)());
+}
 
 class YY{
 	int x=2;
@@ -91,7 +125,7 @@ class Pointers{
 
 	static immutable a = (()=>&s.x)();
 	static immutable b = (()=>&t.x)();
-	static assert(a is b); // TODO
+	static assert(a is b);
 
 
 	static void*[2] vpa = {
@@ -106,7 +140,7 @@ class Pointers{
 	static assert((()=>s.u.ptr is t.u.ptr)());
 	static immutable q = (()=>s.u.ptr)();
 	static immutable p = (()=>t.u.ptr)();
-	static assert(p is q); // TODO!
+	static assert(p is q);
 }
 
 
@@ -186,7 +220,7 @@ struct SliceAliasing{
 		return [x[0..3],x[0..4]];
 	}
 	static immutable x=retslices();
-	static assert(x[0].ptr==x[1].ptr); // TODO
+	static assert(x[0].ptr==x[1].ptr);
 	static assert((()=>x[0].ptr==x[1].ptr)()); // ok
 }
 

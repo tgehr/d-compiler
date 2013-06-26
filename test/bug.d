@@ -1,23 +1,4 @@
 
-struct TestVirtualCall{
-	class B{ string foo(){ return "B"; }}
-	template Mixin(string s){
-		mixin("alias "~s~" Mixin;");
-	}
-
-	template X(){
-		alias Mixin!({D d = new D; return d.foo();}()) X;
-	}
-	class D: X!(){
-		int foo(int x){ X!() y=new X!(); return x;}
-		override string foo(){
-			return "B";
-		}
-	}
-	static assert({D e = new D; return e.foo(2);}()==2);
-}
-
-
 /+@property int bar()=>2;
 
 struct PoorErrorMessage{
