@@ -10,7 +10,7 @@ private template NotYetImplemented(T){
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T==FieldExp) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T==FieldExp) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==PtrExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp) && !is(T==NewExp);
 }
 
 enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
@@ -210,12 +210,13 @@ mixin template Interpret(T) if(is(T==FieldExp)){
 }
 mixin template Interpret(T) if(is(T==BinaryExp!(Tok!"."))){ } // (workaround for DMD bug)
 
-mixin template Interpret(T) if(is(T==LengthExp)){
+mixin template Interpret(T) if(is(T==LengthExp)||is(T==PtrExp)){
 	override bool checkInterpret(Scope sc){
 		return e.checkInterpret(sc);
 	}
 	override Variant interpretV(){
-		return Variant(e.interpretV().length, Type.get!Size_t());
+		static if(is(T==LengthExp)) return Variant(e.interpretV().length, type);
+		else return e.interpretV().ptr;
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
@@ -567,7 +568,7 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 
-mixin template Interpret(T) if(is(T==StructConsExp)){
+mixin template Interpret(T) if(is(T==StructConsExp)||is(T==NewExp)){
 	override bool checkInterpret(Scope sc){
 		return true; // be optimistic
 	}
@@ -3757,7 +3758,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 				bld.emitUnsafe(Instruction.pushcontext, this);
 				bld.emitConstant(diff);
 			}
-			if(!(fd.stc&STCnonvirtual))
+			if(!isFunctionLiteral&&!(fd.stc&STCnonvirtual))
 			if(auto decl=fd.scope_.getDeclaration())
 			if(auto raggr=decl.isReferenceAggregateDecl()){
 				FieldExp.byteCompileVirtualCall(bld, raggr, fd, this);
@@ -4730,6 +4731,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		if(sstate != SemState.completed)
 			resetByteCode();
 
+		variantToMemory.discoverPointers(stack.stack[0..stack.stp+1], type.ret);
 		auto supported=true, res=variantToMemory.VariantFromBCMemory(stack.stack[0..stack.stp+1], type.ret, supported);
 		if(supported) return res;
 		// assert(0,"unsupported return type "~type.ret.toString());
@@ -4895,6 +4897,9 @@ T consume(T=ulong)(ref ulong[] memory){
 // TODO: this abstraction could maybe act as an arena allocator
 // (usage could even be extended into CTFE, but then some form of additional GC
 // during CTFE-runtime will be required.)
+
+// TODO: Common patterns should be factored out better.
+// TODO: This is the ugliest part of the interpreter. Fix.
 struct VariantToMemoryContext{
 	ulong[] VariantToBCMemory(Variant value){
 		auto va = VariantToMemory(value);
@@ -5066,16 +5071,32 @@ struct VariantToMemoryContext{
 		assert(siz!=0);
 		assert(!((bc.slice.ptr-bc.container.ptr)%siz));
 		assert(!(bc.slice.length%siz));
+		Variant computeResult(){
+			auto start=(bc.slice.ptr-bc.container.ptr)/siz;
+			auto end=start+bc.slice.length/siz;
+			if(type.getHeadUnqual().isPointerTy()) return Variant(container.ptr+start, container, type);
+			return Variant(container[start..end],container,type);
+		}
 		if(tag in sl_aliasing_rev){
 			container=sl_aliasing_rev[tag];
 		}else{
-			container = computeContainer();
+			if(tag in aggregate_aliasing){
+				auto varsvd = aggregate_aliasing[tag];
+				auto vars=varsvd[0], vd=varsvd[1];
+				assert(vd in vars);
+				if(vd.type.getHeadUnqual().isArrayTy())
+					container=vars[vd].getContainer();
+				else container=[vars[vd]];
+				sl_aliasing_rev[tag]=container;
+			}else container = computeContainer();
 			assert(tag in sl_aliasing_rev);
 		}
-		auto start=(bc.slice.ptr-bc.container.ptr)/siz;
-		auto end=start+bc.slice.length/siz;
-		if(type.getHeadUnqual().isPointerTy()) return Variant(container.ptr+start, container, type);
-		return Variant(container[start..end],container,type);
+		auto res=computeResult();
+		if(tag in aggregate_aliasing){
+			auto varsvd = aggregate_aliasing[tag];
+			res.initMemberPointer(varsvd.expand);
+		}
+		return res;
 	}
 
 	BCSlice VariantToBCSlice(Variant value)in{
@@ -5114,6 +5135,16 @@ struct VariantToMemoryContext{
 		assert(ret.getElementType());
 		if(ret.getUnqual() is Type.get!EmptyArray()) return BCSlice([]);
 		auto el = ret.getElementType().getHeadUnqual();
+
+		if(value.isMemberPointer()){
+			if(!cached){
+				auto varsvd=value.getMemberPointer();
+				rcnt=getFieldContainer(varsvd.expand);
+			}
+			auto siz=getCTSizeof(el);
+			return finish(siz);
+		}
+
 		if(el is Type.get!(void)()){
 			el = value.getType().getElementType(); // TODO: store the actual type
 		}
@@ -5148,7 +5179,10 @@ struct VariantToMemoryContext{
 		auto siz=getBCSizeof(el);
 		if(cached) return finish(siz*ulong.sizeof);
 		auto r = (new ulong[cnt.length*siz+1])[0..$-1];
-		foreach(i;0..cnt.length) r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i])[];
+		foreach(i;0..cnt.length){
+			r[i*siz..(i+1)*siz]=VariantToBCMemory(cnt[i])[];
+			discoverPointers(r[i*siz..(i+1)*siz],el);
+		}
 		rcnt=r;
 		return finish(siz*ulong.sizeof);
 	}
@@ -5160,7 +5194,9 @@ struct VariantToMemoryContext{
 		auto cnt = value.getContainer();
 		assert(cnt.ptr<=value.getPointer());
 		auto id = value.getPointer()-cnt.ptr;
-		auto slc = VariantToBCSlice(Variant(cnt.ptr[id..id+1],cnt,tt.ty.getDynArr()));
+		auto vslc=Variant(cnt.ptr[id..id+1],cnt,tt.ty.getDynArr());
+		vslc.inheritMemberPointer(value);
+		auto slc = VariantToBCSlice(vslc);
 		return BCPointer(slc.container, slc.slice.ptr);
 	}
 
@@ -5170,19 +5206,27 @@ struct VariantToMemoryContext{
 	}body{
 		auto ret = type.getHeadUnqual();
 		auto decl = (cast(AggregateTy)cast(void*)ret).decl;
-		// TODO: What about pointers with an offset?
-		auto tag=q(ret.getUnqual(),memory.ptr);
-		if(tag in aliasing_reverse){
-			// there can be structs with a first field of struct type,
-			// hence multiple pieces of data may start at the same location
-			return aliasing_reverse[tag];
-		}
-		// (stupid built-in AAs)
 		Variant[VarDecl] res;
-		res[cast(VarDecl)cast(void*)type]=Variant(null);
-		res.remove(cast(VarDecl)cast(void*)type);
-		// now 'res' is initialized
-		aliasing_reverse[tag]=Variant(res, type);
+		void initializeRes(){
+			assert(type !is null);
+			// (stupid built-in AAs)
+			res[cast(VarDecl)cast(void*)type]=Variant(null);
+			res.remove(cast(VarDecl)cast(void*)type);
+		}
+		if(auto rd=decl.isReferenceAggregateDecl()){
+			decl=cast(ReferenceAggregateDecl)cast(void*)memory[ReferenceAggregateDecl.bcTypeidOffset];
+			type = decl.getType().applySTC(type.getHeadSTC());
+			ret = type.getHeadUnqual();
+			// TODO: What about pointers with an offset?
+			auto tag=q(ret.getUnqual(),memory.ptr);
+			if(tag in aliasing_reverse){
+				// there can be structs with a first field of struct type,
+				// hence multiple pieces of data may start at the same location
+				return aliasing_reverse[tag];
+			}
+			initializeRes();
+			aliasing_reverse[tag]=Variant(res, type);
+		}else initializeRes();
 		assert(decl.isLayoutKnown);
 		foreach(vd;&decl.traverseFields){
 			size_t len, off = vd.getBCLoc(len);
@@ -5193,17 +5237,99 @@ struct VariantToMemoryContext{
 		}
 		return Variant(res, type);
 	}
+	
+	// aliasing for fields of aggregates and closures
+	std.typecons.Tuple!(Variant[VarDecl],VarDecl)[std.typecons.Tuple!(Type,void*)] aggregate_aliasing;// TODO: report DMD bug? (cannot use Q)
+	void discoverPointers(ulong[] memory, Type type, bool dereference=true){
+		bool[Q!(ulong*,Type)] vis;
+		bool visited(ulong[] memory, Type type){
+			auto tag=q(memory.ptr,type.getUnqual());
+			if(tag in vis) return true;
+			vis[tag]=true;
+			return false;
+		}
 
+		void discoverContainer()(void[] vmem, Type type){
+			if(visited(memory, type)) return;
+			auto tu=type.getHeadUnqual();
+			if(tu.isBasicType()) return;
+			assert(getCTSizeof(type)==getBCSizeof(type)*ulong.sizeof);
+			memory=cast(ulong[])vmem;
+			auto siz=getBCSizeof(type);
+			// TODO: DMD codegen bug shows if the following is replaced with foreach.
+			for(size_t i=0;i<memory.length/siz;i++){
+				discoverValue(memory[i*siz..(i+1)*siz],tu);
+			}
+		}
 
+		void discoverValue(ulong[] memory, Type type, bool dereference=true){
+			if(visited(memory, type)) return;
+			auto tu=type.getHeadUnqual();
+			if(tu.getUnqual().among(Type.get!(void*)(),Type.get!(void[])())){
+				auto ltt = memory.consume();
+				auto ty = cast(Type)cast(void*)ltt;
+				return discoverValue(memory, ty);
+			}
+			if(auto arr=tu.isArrayTy())
+				return discoverContainer(memory, arr.ty);
+			if(auto ptr=tu.isPointerTy()) 
+				return discoverContainer(memory.consume!BCPointer().container,ptr.ty);
+			if(auto dyn=tu.isDynArrTy()){
+				return discoverContainer(memory.consume!BCSlice().container,dyn.ty);
+			}
+			if(auto dgt=tu.isDelegateTy()){
+				// TODO!
+				return;
+			}
+
+			if(auto at=tu.isAggregateTy()){
+				auto decl=at.decl;
+				if(decl.isReferenceAggregateDecl()){
+					if(dereference){
+						auto bcp=memory.consume!BCPointer();
+						memory=cast(ulong[])bcp.container;
+						if(memory is null) return;
+					}
+					decl=cast(ReferenceAggregateDecl)cast(void*)memory[ReferenceAggregateDecl.bcTypeidOffset];
+				}
+				bool dummy;
+				auto v = VariantFromAggregate(memory, type, dummy);
+				auto vars=v.get!(Variant[VarDecl])();
+				foreach(vd;&decl.traverseFields){
+					size_t len, off = vd.getBCLoc(len);
+					assert(vd in vars);
+					auto ttt=vd.type.getUnqual();
+					if(auto arr=ttt.isArrayTy()) ttt=arr.ty;
+					ttt = ttt.getDynArr();
+					auto tag=q(ttt,cast(void*)(memory.ptr+off));
+					if(tag in aggregate_aliasing) return;
+					aggregate_aliasing[tag]=q(vars, vd);
+					discoverValue(memory[off..off+len],vd.type);
+				}
+			}
+		}
+		discoverValue(memory, type, dereference);
+	}
+
+	private void[] getFieldContainer(Variant[VarDecl] vars, VarDecl vd){
+		auto decl=vd.scope_.getAggregate();
+		auto memory=VariantToAggregate(vars, decl);
+		size_t len, off = vd.getBCLoc(len);
+		len=getCTSizeof(vd.type);
+		return (cast(void[])memory)[off*ulong.sizeof..off*ulong.sizeof+len];
+	}
+	
 	ulong[] VariantToAggregate(Variant[VarDecl] vars, AggregateDecl decl){
-		if(vars.byid in aliasing_cache) return aliasing_cache[vars.byid];
-		auto res = new ulong[decl.getBCSize()];
-		aliasing_cache[vars.byid]=res;
-		auto tag=q(cast(Type)decl.getType(),res.ptr);
-		aliasing_reverse[tag]=Variant(vars,decl.getType());
-		static assert(ReferenceAggregateDecl.sizeof<=ulong.sizeof);
-		if(auto rd=decl.isReferenceAggregateDecl())
+		ulong[] res;
+		if(auto rd=decl.isReferenceAggregateDecl()){
+			if(vars.byid in aliasing_cache) return aliasing_cache[vars.byid];
+			res = new ulong[decl.getBCSize()];
+			aliasing_cache[vars.byid]=res;
+			auto tag=q(cast(Type)decl.getType(),res.ptr);
+			aliasing_reverse[tag]=Variant(vars,decl.getType());
+			static assert(ReferenceAggregateDecl.sizeof<=ulong.sizeof);
 			res[ReferenceAggregateDecl.bcTypeidOffset]=cast(ulong)cast(void*)rd;
+		}else res = new ulong[decl.getBCSize()];
 		foreach(vd;&decl.traverseFields){
 			size_t len, off = vd.getBCLoc(len);
 			assert(len != -1);
@@ -5215,10 +5341,13 @@ struct VariantToMemoryContext{
 				res[off..off+len]=VariantToBCMemory(var);
 			}
 		}
+		if(decl.isReferenceAggregateDecl()) // value aggregate decls with an address are stored in slices
+			discoverPointers(res, decl.getType(), false);
 		return res;
 	}
    
 	import std.typecons : q=tuple, Q=Tuple;
+
 	ulong[][AAbyIdentity!(VarDecl,Variant)] aliasing_cache; // preserve aliasing
 	Variant[Q!(Type,ulong*)] aliasing_reverse; // preserve aliasing on reverse translation
 
