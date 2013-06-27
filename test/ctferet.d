@@ -26,7 +26,7 @@ struct ClassFieldAliasing{
 	static immutable ptr3 = (()=>&c.y)();
 	static immutable ptr4 = (()=>&c.y)();
 	static assert((()=>ptr3 is ptr4)());
-	static assert((()=>ptr3 is &c.y)());
+	static assert((()=>ptr3 is &c.y)()); // TODO
 	static immutable ptr1 = (()=>c.x.ptr+2)();
 	static immutable ptr2 = (()=>c.x.ptr+2)();
 	static assert((()=>ptr1 is ptr2)());
