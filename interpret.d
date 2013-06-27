@@ -4941,7 +4941,7 @@ struct VariantToMemoryContext{
 			return VariantFromBCSlice(BCSlice(slice,slice),type,isrvalue, supported);
 		}
 
-		if(ret.isDynArrTy()) return VariantFromBCSlice(memory.consume!BCSlice(),type,false,supported);
+		if(ret.isDynArrTy()||ret is Type.get!EmptyArray()) return VariantFromBCSlice(memory.consume!BCSlice(),type,false,supported);
 		if(auto pt=ret.isPointerTy()){
 			auto ptr=memory.consume!BCPointer();
 			if(ptr.ptr is null) return Variant(null,type);
@@ -5150,7 +5150,6 @@ struct VariantToMemoryContext{
 		auto end = start+arr.length;
 		bool cached = false;
 		if(cnt.ptr in sl_aliasing){
-			dw(value," ",isrvalue," ",rcnt," ",sl_aliasing[cnt.ptr]);
 			assert(rcnt is null || rcnt is sl_aliasing[cnt.ptr]);
 			rcnt=sl_aliasing[cnt.ptr];
 			cached = true;
