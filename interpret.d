@@ -10,7 +10,7 @@ private template NotYetImplemented(T){
 		enum NotYetImplemented = false;
 	else static if(is(T _==UnaryExp!S,TokenType S))
 		enum NotYetImplemented = false;
-		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T==FieldExp) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp);
+		else enum NotYetImplemented = !is(T==Expression) && !is(T==ExpTuple) && !is(T:Type) && !is(T:Symbol) && !is(T==FieldExp) && !is(T:LiteralExp) && !is(T==CastExp) && !is(T==ArrayLiteralExp) && !is(T==IndexExp) && !is(T==SliceExp) && !is(T==TernaryExp) && !is(T==CallExp) && !is(T==UFCSCallExp) && !is(T==MixinExp) && !is(T==IsExp) && !is(T==AssertExp) && !is(T==LengthExp) && !is(T==PtrExp) && !is(T==DollarExp) && !is(T==ThisExp) && !is(T==SuperExp) && !is(T==TemporaryExp) && !is(T==StructConsExp) && !is(T==NewExp);
 }
 
 enum IntFCEplg = mixin(X!q{needRetry = false; @(SemRet);});
@@ -210,12 +210,13 @@ mixin template Interpret(T) if(is(T==FieldExp)){
 }
 mixin template Interpret(T) if(is(T==BinaryExp!(Tok!"."))){ } // (workaround for DMD bug)
 
-mixin template Interpret(T) if(is(T==LengthExp)){
+mixin template Interpret(T) if(is(T==LengthExp)||is(T==PtrExp)){
 	override bool checkInterpret(Scope sc){
 		return e.checkInterpret(sc);
 	}
 	override Variant interpretV(){
-		return Variant(e.interpretV().length, Type.get!Size_t());
+		static if(is(T==LengthExp)) return Variant(e.interpretV().length, type);
+		else return e.interpretV().ptr;
 	}
 
 	override void _interpretFunctionCalls(Scope sc){
@@ -567,7 +568,7 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 
-mixin template Interpret(T) if(is(T==StructConsExp)){
+mixin template Interpret(T) if(is(T==StructConsExp)||is(T==NewExp)){
 	override bool checkInterpret(Scope sc){
 		return true; // be optimistic
 	}
@@ -3757,7 +3758,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 				bld.emitUnsafe(Instruction.pushcontext, this);
 				bld.emitConstant(diff);
 			}
-			if(!(fd.stc&STCnonvirtual))
+			if(!isFunctionLiteral&&!(fd.stc&STCnonvirtual))
 			if(auto decl=fd.scope_.getDeclaration())
 			if(auto raggr=decl.isReferenceAggregateDecl()){
 				FieldExp.byteCompileVirtualCall(bld, raggr, fd, this);
@@ -5172,10 +5173,16 @@ struct VariantToMemoryContext{
 		auto decl = (cast(AggregateTy)cast(void*)ret).decl;
 		// TODO: What about pointers with an offset?
 		auto tag=q(ret.getUnqual(),memory.ptr);
-		if(tag in aliasing_reverse){
-			// there can be structs with a first field of struct type,
-			// hence multiple pieces of data may start at the same location
-			return aliasing_reverse[tag];
+		if(auto rd=decl.isReferenceAggregateDecl()){
+			decl=cast(ReferenceAggregateDecl)cast(void*)memory[ReferenceAggregateDecl.bcTypeidOffset];
+			type = decl.getType().applySTC(type.getHeadSTC());
+			ret = type.getHeadUnqual();
+			// TODO: What about pointers with an offset?
+			if(tag in aliasing_reverse){
+				// there can be structs with a first field of struct type,
+				// hence multiple pieces of data may start at the same location
+				return aliasing_reverse[tag];
+			}
 		}
 		// (stupid built-in AAs)
 		Variant[VarDecl] res;
