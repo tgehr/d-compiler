@@ -42,7 +42,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptrslc, vars, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, err
 }
 
 template getOccupied(T){
@@ -64,10 +64,10 @@ template getOccupied(T){
 	else static if(is(T==Variant[]))
 		enum getOccupied = Occupies.arr;
 	else static if(is(T==Variant*))
-		enum getOccupied = Occupies.ptrslc;
+		enum getOccupied = Occupies.ptr_;
 	else static if(is(T==typeof(null)))
 		enum getOccupied = Occupies.none;
-	else static if(is(T==Vars))
+	else static if(is(T==Variant[VarDecl]))
 		enum getOccupied = Occupies.vars;
 	else static assert(0);
 }
@@ -84,7 +84,6 @@ template FullyUnqual(T){
 	else alias Unqual!T FullyUnqual;
 }+/
 
-private struct Vars{ enum null_ = (Variant[VarDecl]).init; }
 /+
 private struct WithLoc(T){
 	T payload;
@@ -112,7 +111,7 @@ struct Variant{
 		if(tu is Type.get!wstring()) return Occupies.wstr;
 		if(tu is Type.get!dstring()) return Occupies.dstr;
 		if(tu.getElementType()) return Occupies.arr;
-		if(tu.isPointerTy()) return Occupies.ptrslc;
+		if(tu.isPointerTy()) return Occupies.ptr_;
 
 		if(auto bt=tu.isBasicType()){
 			switch(bt.op){
@@ -160,8 +159,36 @@ struct Variant{
 			foreach(x;cnt) assert(tt is x.type.getUnqual());
 	}body{
 		this.type=type;
-		this.ptrslc=ptr;
+		this.ptr_=ptr;
 		this.cnt=cnt;
+	}
+
+	// pointers and slices referring to aggregate members
+	void initMemberPointer(Variant[VarDecl] vars, VarDecl vd)in{
+		assert(vd in vars);
+		assert(occupies.among(Occupies.ptr_, Occupies.arr));
+		assert(ptrvars is null && ptrvd is null);
+		assert(vars !is null && vd !is null);
+	}body{
+		ptrvars=vars;
+		ptrvd=vd;
+	}
+
+	void inheritMemberPointer(Variant rhs)in{
+		assert(occupies.among(Occupies.ptr_, Occupies.arr));
+		assert(ptrvars is null && ptrvd is null);
+	}body{
+		if(rhs.ptrvd is null) return;
+		assert(rhs.ptrvars!is null);
+		initMemberPointer(rhs.ptrvars, rhs.ptrvd);
+	}
+
+	bool isMemberPointer(){
+		assert((ptrvars is null) == (ptrvd is null));
+		return ptrvd !is null;
+	}
+	std.typecons.Tuple!(Variant[VarDecl],VarDecl) getMemberPointer(){
+		return std.typecons.tuple(ptrvars, ptrvd);
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
@@ -179,9 +206,11 @@ struct Variant{
 		struct{
 			union{
 				Variant[] arr;
-				Variant* ptrslc;
+				Variant* ptr_;
 			}
 			Variant[] cnt;
+			Variant[VarDecl] ptrvars;
+			VarDecl ptrvd;
 		}
 		Variant[VarDecl] vars; // structs, classes, closures
 		string err;
@@ -196,7 +225,7 @@ struct Variant{
 		}
 		else static if(is(T==wstring)){assert(occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(occupies == Occupies.dstr); return dstr;}
-		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
+		else static if(getOccupied!T==Occupies.int64){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
 		else static if(is(T==float)||is(T==double)||is(T==real)){
 			assert(occupies == Occupies.flt80||occupies == Occupies.fli80);
 			return flt80;
@@ -217,7 +246,7 @@ struct Variant{
 	}
 
 	Variant[] getContainer()in{
-		assert(occupies == Occupies.arr||occupies == Occupies.ptrslc);
+		assert(occupies == Occupies.arr||occupies == Occupies.ptr_);
 	}body{
 		return cnt;
 	}
@@ -289,7 +318,7 @@ struct Variant{
 			return '['~join(map!(to!string)(this.arr),",")~']';
 		}
 		if(type.isPointerTy()){
-			return "&("~ptrslc.toString()~")";
+			return "&("~ptr_.toString()~")";
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -305,7 +334,7 @@ struct Variant{
 		if(type is Type.get!(typeof(null))()){
 			if(tou is Type.get!(typeof(null))()) return this;
 			if(tou.getElementType()) return Variant((Variant[]).init,(Variant[]).init,to);
-			if(tou.isAggregateTy()) return Variant(Vars.null_, to);
+			if(tou.isAggregateTy()) return Variant((Variant[VarDecl]).init, to);
 			// TODO: null pointers and delegates
 			assert(0,"cannot convert");
 		}else if(type.isSomeString()){
@@ -461,11 +490,11 @@ struct Variant{
 				else static if(op=="!=") return Variant(false,Type.get!bool());
 				else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
 			}
-		}else if(occupies == Occupies.ptrslc){
-			assert(rhs.occupies==Occupies.ptrslc);
+		}else if(occupies == Occupies.ptr_){
+			assert(rhs.occupies==Occupies.ptr_);
 			// TODO: other relational operators
 			static if(op=="is"||op=="=="||op=="!is"||op=="!="){
-				return Variant((op=="!is"||op=="!=")^(ptrslc is rhs.ptrslc),Type.get!bool());
+				return Variant((op=="!is"||op=="!=")^(ptr_ is rhs.ptr_),Type.get!bool());
 			}else assert(0);
 		}else if(occupies == Occupies.vars){
 			assert(rhs.occupies==Occupies.vars);
@@ -559,9 +588,9 @@ struct Variant{
 	}
 
 	Variant* getPointer()in{
-		assert(occupies==Occupies.ptrslc);
+		assert(occupies==Occupies.ptr_);
 	}body{
-		return ptrslc;
+		return ptr_;
 	}
 
 
