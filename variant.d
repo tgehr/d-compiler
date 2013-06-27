@@ -67,7 +67,7 @@ template getOccupied(T){
 		enum getOccupied = Occupies.ptr_;
 	else static if(is(T==typeof(null)))
 		enum getOccupied = Occupies.none;
-	else static if(is(T==Vars))
+	else static if(is(T==Variant[VarDecl]))
 		enum getOccupied = Occupies.vars;
 	else static assert(0);
 }
@@ -84,7 +84,6 @@ template FullyUnqual(T){
 	else alias Unqual!T FullyUnqual;
 }+/
 
-private struct Vars{ enum null_ = (Variant[VarDecl]).init; }
 /+
 private struct WithLoc(T){
 	T payload;
@@ -226,7 +225,7 @@ struct Variant{
 		}
 		else static if(is(T==wstring)){assert(occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(occupies == Occupies.dstr); return dstr;}
-		else static if(is(T==ulong)||is(T==long)||is(T==char)||is(T==wchar)||is(T==dchar)){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
+		else static if(getOccupied!T==Occupies.int64){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
 		else static if(is(T==float)||is(T==double)||is(T==real)){
 			assert(occupies == Occupies.flt80||occupies == Occupies.fli80);
 			return flt80;
@@ -335,7 +334,7 @@ struct Variant{
 		if(type is Type.get!(typeof(null))()){
 			if(tou is Type.get!(typeof(null))()) return this;
 			if(tou.getElementType()) return Variant((Variant[]).init,(Variant[]).init,to);
-			if(tou.isAggregateTy()) return Variant(Vars.null_, to);
+			if(tou.isAggregateTy()) return Variant((Variant[VarDecl]).init, to);
 			// TODO: null pointers and delegates
 			assert(0,"cannot convert");
 		}else if(type.isSomeString()){
