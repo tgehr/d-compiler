@@ -4267,6 +4267,8 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 	if(type.getUnqual().among(Type.get!(void*)(), Type.get!(void[])()))
 		return getBCSizeof(type)*ulong.sizeof;
 	if(type.isDynArrTy()) return BCSlice.sizeof;
+	import std.algorithm;
+	if(auto arr=type.isArrayTy()) return cast(size_t)max(1, getCTSizeof(arr.ty)*arr.length);
 	if(type.isPointerTy()){
 		if(type.getFunctionTy()) return Symbol.sizeof;
 		else return BCPointer.sizeof;
@@ -4898,8 +4900,7 @@ T consume(T=ulong)(ref ulong[] memory){
 // (usage could even be extended into CTFE, but then some form of additional GC
 // during CTFE-runtime will be required.)
 
-// TODO: Common patterns should be factored out better.
-// TODO: This is the ugliest part of the interpreter. Fix.
+// TODO: Complete rewrite, Proper support for member pointers
 struct VariantToMemoryContext{
 	// TODO: allow to convert rvalues
 	ulong[] VariantToBCMemory(Variant value, void[] res, bool isrvalue)in{
@@ -5149,14 +5150,15 @@ struct VariantToMemoryContext{
 		auto start = arr.ptr-cnt.ptr;
 		auto end = start+arr.length;
 		bool cached = false;
-		if(cnt.ptr in sl_aliasing){
+
+		if(!isrvalue && cnt.ptr in sl_aliasing){
 			assert(rcnt is null || rcnt is sl_aliasing[cnt.ptr]);
 			rcnt=sl_aliasing[cnt.ptr];
 			cached = true;
 		}
 
 		auto finish(size_t siz){
-			if(!cached){
+			if(!isrvalue && !cached){
 				sl_aliasing[cnt.ptr]=rcnt;
 				sl_aliasing_rev[q(ret.getUnqual(),rcnt.ptr)]=cnt;
 			}
@@ -5209,6 +5211,7 @@ struct VariantToMemoryContext{
 				}
 			}
 		}
+		// TODO: static arrays
 		assert(getCTSizeof(el)==getBCSizeof(el)*ulong.sizeof);
 		auto siz=getBCSizeof(el);
 		if(cached) return finish(siz*ulong.sizeof);
@@ -5295,6 +5298,7 @@ struct VariantToMemoryContext{
 			if(visited(memory, type)) return;
 			auto tu=type.getHeadUnqual();
 			if(tu.isBasicType()) return;
+			if(auto arr=tu.isArrayTy()) if(arr.ty.getHeadUnqual().isBasicType()) return;
 			assert(getCTSizeof(type)==getBCSizeof(type)*ulong.sizeof);
 			memory=cast(ulong[])vmem;
 			auto siz=getBCSizeof(type);
@@ -5370,7 +5374,7 @@ struct VariantToMemoryContext{
 	}body{
 		assert(decl.getBCSize()!=0);
 		ulong[] res;
-		if(decl.isReferenceAggregateDecl()||vres!is null&&!isrvalue){
+		if(!isrvalue){
 			if(vars.byid in aliasing_cache) return aliasing_cache[vars.byid];
 			res = vres is null?new ulong[decl.getBCSize()]:cast(ulong[])vres;
 			aliasing_cache[vars.byid]=res;
@@ -5390,7 +5394,7 @@ struct VariantToMemoryContext{
 			}
 			if(vd in vars){
 				auto var = vars[vd];
-				auto mem=VariantToBCMemory(var, res[off..off+len], isrvalue);
+				auto mem=VariantToBCMemory(var, res[off..off+len], true);
 				assert(mem is res[off..off+len]);
 			}
 		}
