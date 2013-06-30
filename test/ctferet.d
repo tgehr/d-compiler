@@ -26,11 +26,11 @@ struct ClassFieldAliasing{
 	static immutable ptr3 = (()=>&c.y)();
 	static immutable ptr4 = (()=>&c.y)();
 	static assert((()=>ptr3 is ptr4)());
-	static assert((()=>ptr3 is &c.y)()); // TODO
+	static assert((()=>ptr3 is &c.y)());
 	static immutable ptr1 = (()=>c.x.ptr+2)();
 	static immutable ptr2 = (()=>c.x.ptr+2)();
 	static assert((()=>ptr1 is ptr2)());
-	static assert((()=>ptr1 is c.x.ptr+2)()); // TODO
+	static assert((()=>ptr1 is c.x.ptr+2)());
 	static assert((()=>*(ptr1-1)==2&&*(ptr1-2)==1)());
 }
 
@@ -51,7 +51,15 @@ struct StructFieldAliasing{
 	static assert((()=>ptr3 is &s.y)()); // TODO
 	static assert((()=>*(ptr1-1)==2&&*(ptr1-2)==1)());
 }
-
+/+// TODO add test
+struct StructEmptyStaticArrayFieldAliasing{
+	struct S{ int[0] x=[]; }
+	
+	static immutable s=new immutable(S)();
+	static immutable ptr3 = (()=>&s.x)();
+	static assert((()=>ptr3 is &s.x)()); // TODO
+	//static assert((()=>&s.y is ptr3)()); // TODO
+}+/
 
 immutable dg = (()=>delegate()immutable=>1)();
 pragma(msg, (()=>dg())()); // TODO
