@@ -397,7 +397,7 @@ struct Variant{
 			if(tou.getUnqual() is Type.get!(void[])()) return this;
 			return Variant(arr,cnt,to);
 		}else if(type is Type.get!EmptyArray()){
-			assert(tou.isDynArrTy());
+			assert(tou.isDynArrTy()||tou.isArrayTy()&&tou.isArrayTy().length==0);
 			if(tou.isSomeString()){
 				foreach(T;Seq!(string,wstring,dstring))
 					if(tou is Type.get!T()) return Variant(T.init/+,T.init+/,to);
