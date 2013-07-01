@@ -7,11 +7,12 @@ import semantic, scope_, vrange, visitors;
 
 import analyze;
 
+import variant;
 import rope_;
 
 import std.traits : Unqual;
 
-class Type: Expression{ //Types can be part of Expressions and vice-versa
+abstract class Type: Expression{ //Types can be part of Expressions and vice-versa
 	this(){type = get!void();}
 	private this(int){type = this;} // break infinite recursion for 'void'
 
@@ -189,6 +190,8 @@ class TypeofExp: Type{
 }
 class TypeofReturnExp: Type{
 	override string toString(){return _brk("typeof(return)");}
+
+	mixin Visitors;
 }
 
 enum integralTypes = ["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar"];

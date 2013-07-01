@@ -2,6 +2,7 @@
 
 import lexer, operators, expression, declaration, type, semantic, util;
 
+import std.algorithm: map;
 import std.traits: isIntegral, isFloatingPoint, Unqual;
 import std.range: ElementType;
 import std.conv: to;
@@ -99,6 +100,35 @@ private struct WithLoc(T){
 	WithLoc opIndex(
 }
 +/
+
+struct FieldAccess{
+	@property isIndex(){ return _isindex; }
+	@property index()in{assert(isIndex);}body{ return _index; }
+	@property field()in{assert(!isIndex);}body{ return _field; }
+
+	this(size_t index){
+		this._index = index;
+		_isindex = true;
+	}
+
+	this(VarDecl field)in{assert(field.isField);}body{
+		this._field = field;
+		_isindex = false;
+	}
+
+	string toString(){
+		if(isIndex) return "["~index.to!string~"]";
+		return "."~field.name.to!string;
+	}
+
+private:
+	union{
+		size_t _index;
+		VarDecl _field;
+	}
+	bool _isindex;
+}
+
 struct Variant{
 	private Type type;
 	private @property Occupies occupies(){
@@ -150,7 +180,7 @@ struct Variant{
 		this.cnt=cnt;
 	}
 
-	this()(Variant* ptr, Variant[] cnt, Type type)in{
+	this()(FieldAccess[] ptr, Variant[] cnt, Type type)in{
 		auto pt=type.isPointerTy();
 		assert(!!pt);
 		auto tt=pt.ty.getUnqual();
@@ -161,34 +191,6 @@ struct Variant{
 		this.type=type;
 		this.ptr_=ptr;
 		this.cnt=cnt;
-	}
-
-	// pointers and slices referring to aggregate members
-	void initMemberPointer(Variant[VarDecl] vars, VarDecl vd)in{
-		assert(vd in vars);
-		assert(occupies.among(Occupies.ptr_, Occupies.arr));
-		assert(ptrvars is null && ptrvd is null);
-		assert(vars !is null && vd !is null);
-	}body{
-		ptrvars=vars;
-		ptrvd=vd;
-	}
-
-	void inheritMemberPointer(Variant rhs)in{
-		assert(occupies.among(Occupies.ptr_, Occupies.arr));
-		assert(ptrvars is null && ptrvd is null);
-	}body{
-		if(rhs.ptrvd is null) return;
-		assert(rhs.ptrvars!is null);
-		initMemberPointer(rhs.ptrvars, rhs.ptrvd);
-	}
-
-	bool isMemberPointer(){
-		assert((ptrvars is null) == (ptrvd is null));
-		return ptrvd !is null;
-	}
-	std.typecons.Tuple!(Variant[VarDecl],VarDecl) getMemberPointer(){
-		return std.typecons.tuple(ptrvars, ptrvd);
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
@@ -206,7 +208,7 @@ struct Variant{
 		struct{
 			union{
 				Variant[] arr;
-				Variant* ptr_;
+				FieldAccess[] ptr_;
 			}
 			Variant[] cnt;
 			Variant[VarDecl] ptrvars;
@@ -318,7 +320,7 @@ struct Variant{
 			return '['~join(map!(to!string)(this.arr),",")~']';
 		}
 		if(type.isPointerTy()){
-			return "&("~ptr_.toString()~")";
+			return "&("~ptr_.map!(to!string).join~")"; // TODO: fix
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -571,7 +573,7 @@ struct Variant{
 	@property Variant ptr()in{
 		assert(occupies==Occupies.arr); // TODO: pointers to string
 	}body{
-		return Variant(arr.ptr, cnt, type.getElementType().getPointer());
+		return Variant([FieldAccess(arr.ptr-cnt.ptr)], cnt, type.getElementType().getPointer());
 	}
 
 	@property size_t length()in{
@@ -587,7 +589,7 @@ struct Variant{
 		}
 	}
 
-	Variant* getPointer()in{
+	FieldAccess[] getFieldAccess()in{
 		assert(occupies==Occupies.ptr_);
 	}body{
 		return ptr_;

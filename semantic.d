@@ -1708,8 +1708,9 @@ class MatcherTy: Type{
 	override bool hasPseudoTypes(){ return true; }
 
 	mixin DownCastMethod;
-	mixin DeepDup!MatcherTy;
+	mixin Visitors;
 }
+mixin template Semantic(T) if(is(T==MatcherTy)){}
 
 
 struct TemplArgsWithTypes{
@@ -7687,6 +7688,10 @@ mixin template Semantic(T) if(is(T==TypeofExp)){
 	}
 private:
 	Expression f; // semantically analyzed 'e', needed for nice error handling
+}
+
+mixin template Semantic(T) if(is(T==TypeofReturnExp)){
+	// TODO
 }
 
 mixin template Semantic(T) if(is(T==AggregateTy)){
