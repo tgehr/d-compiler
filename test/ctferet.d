@@ -1,4 +1,47 @@
 
+struct FunctionLiterals{
+	enum foo = (()=>()=>2)();
+	static assert(foo()==2);
+	
+	static immutable fooi = (()=>()=>3)();
+	static assert(fooi()==3);
+	
+	enum bar = ()=>4;
+	static assert(bar()==4);
+	
+	static immutable bari = ()=>5;
+	static assert(bari()==5);
+}
+
+struct PointersDirect{
+	static immutable x = "this is x";
+	enum foo = &x;
+	static immutable fooi = &x;
+	enum bar = &fooi;
+	immutable bari = &fooi;
+
+	static assert(foo is fooi);
+	static assert(bar is bari);
+
+	static assert(*bari is fooi);
+	static assert(*bar is foo);
+	static assert(*fooi == x);
+	static assert(&x is fooi);
+
+	static assert(**bari == x);
+	static assert(**bar == x);
+
+	static assert(*foo is *fooi);
+	static assert(**bar is *foo);
+	
+	static assert(*foo is x); // TODO: aliasing for strings
+}
+
+struct LocalGlobalPointer{
+	immutable fooi=2;
+	enum ptr=&fooi; // TODO: should this be an error?
+}
+
 struct StringAliasing{
 	static immutable y = "123";
 	static assert((()=>y.ptr == y.ptr)()); // TODO!

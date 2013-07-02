@@ -5,9 +5,9 @@ ubyte moo;
 //pragma(__range, cast(uint)-536870912);
 
 auto a = [[[[&moo]]]]; // TODO
-auto b = [[[[&a]]]];   // TODO
-auto c = [[[[&b]]]];   // TODO
-auto d = [[[[&c]]]];   // TODO
+auto b = [[[[&a]]]];
+auto c = [[[[&b]]]];
+auto d = [[[[&c]]]];
 pragma(msg, typeof(*d)); // error
 //int xyz;
 int xyz();
