@@ -15,7 +15,6 @@ struct StringAliasing{
 	}();
 }+/
 
-
 struct ClassFieldAliasing{
 	class C{
 		int[2] x=[1,2];
@@ -26,11 +25,11 @@ struct ClassFieldAliasing{
 	static immutable ptr3 = (()=>&c.y)();
 	static immutable ptr4 = (()=>&c.y)();
 	static assert((()=>ptr3 is ptr4)());
-	static assert((()=>ptr3 is &c.y)());
+	static assert((()=>ptr3 is &c.y)()); // TODO
 	static immutable ptr1 = (()=>c.x.ptr+2)();
 	static immutable ptr2 = (()=>c.x.ptr+2)();
 	static assert((()=>ptr1 is ptr2)());
-	static assert((()=>ptr1 is c.x.ptr+2)());
+	static assert((()=>ptr1 is c.x.ptr+2)()); // TODO
 	static assert((()=>*(ptr1-1)==2&&*(ptr1-2)==1)());
 }
 
@@ -107,7 +106,6 @@ struct EmptyStructPointer{
 	}
 	pragma(msg, food);
 }
-
 
 struct LocalVariableAliasing{
 	struct TwoPointers{
@@ -193,7 +191,6 @@ struct TestVoidArrayVoidPtr{
 	}
 	static assert(testVarrayStruct()==[1,2,3,4,5]);
 }
-
 
 struct ArrayLiteralConv{
 	static int[2] a2=(()=>[1,2])();

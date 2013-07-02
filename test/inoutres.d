@@ -8,9 +8,9 @@ pragma(msg, typeof(civc(cast(const)[1,2,3])));
 pragma(msg, typeof(((inout int)=>civc(cast(inout)[1,2,3]))(cast(immutable)0)));
 
 
-/+
+
 inout(int) constinout(const inout int x){ return x; }
-static assert(is(typeof(constinout(cast(const)2))==const(int))); // TODO: ok this way?
+static assert(is(typeof(constinout(cast(const)2))==const(int))); // // TODO: ok this way?
 
 inout(int) inoutfun(inout int x){
 	static assert(is(typeof((delegate inout double (inout x)=>cast(double)x)(cast(shared const inout)2))==const(inout(double))));
