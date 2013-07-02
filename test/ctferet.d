@@ -1,4 +1,85 @@
 
+struct DisplayDelegates{
+	static immutable foo=()=>1;
+	pragma(msg, foo);
+	pragma(msg, (delegate()=>foo)());
+	pragma(msg, (delegate()=>foo));
+}
+
+struct ClassDelegates{
+	class C{
+		int x = 3;
+		int delegate()const dg;
+		int foo()const{ return dg()+1; }
+		int bar()const{ return x; }
+	}
+	immutable c = (){
+		auto x = new C;
+		auto y = new C;
+		auto z = new C;
+		
+		x.dg=&x.bar;
+		y.dg=&x.foo;
+		z.dg=&y.foo;
+
+		return z;
+	}(); // // TODO: make implicit conversion work for the right reason.
+
+	static assert(c.dg()==5);
+	static assert(c.foo()==6);
+
+	pragma(msg, "ClassDelegates1: ", c.dg());
+	pragma(msg, "ClassDelegates2: ", c.foo());
+
+	class D{
+		int x;
+		int delegate(int)const dg;
+		int foo(int t)const{
+			return t?dg(t-1)+x:0;
+		}
+	}
+
+	static immutable d = {
+		auto x = new D;
+		auto y = new D;
+		auto z = new D;
+		x.x=1;
+		y.x=2;
+		z.x=3;
+		x.dg=&y.foo;
+		y.dg=&z.foo;
+		z.dg=&x.foo;
+
+		return y;
+	}();
+
+	static immutable r = {
+		int[] r;
+		for(int i=0;i<20;i++)
+			r~=d.foo(i);
+		return r;
+	}();
+
+	pragma(msg, "ClassDelegates3: ", r);
+	static assert(r == [0,2,5,6,8,11,12,14,17,18,20,23,24,26,29,30,32,35,36,38]);
+}
+
+struct Closures{
+	static add2(immutable int x)pure immutable{
+		auto foo(){
+			immutable int y=2;
+			immutable int z=0;
+			return (int u)pure immutable=>x+y; // // TOOD: check, infer
+		}
+		return foo();
+	}
+	static immutable add23 = add2(3);
+	static assert(is(typeof(add23):immutable(immutable(int) delegate(int)pure)));
+	pragma(msg, "add23: ",add23(3));
+	static assert(add23(3)==5);
+}
+
+
 struct FunctionLiterals{
 	enum foo = (()=>()=>2)();
 	static assert(foo()==2);
@@ -104,9 +185,9 @@ struct StructEmptyStaticArrayFieldAliasing{
 }+/
 
 immutable dg = (()=>delegate()immutable=>1)();
-pragma(msg, (()=>dg())()); // TODO
-/+immutable fn = (()=>()immutable=>1)();
-pragma(msg, (()=>fn())()); // TODO+/
+pragma(msg, (()=>dg())());
+immutable fn = (()=>()=>1)();
+pragma(msg, (()=>fn())());
 
 class Subclass{
 	static class Parent{int x=1;int foo()const{ return x; }}
