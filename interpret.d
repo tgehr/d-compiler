@@ -4,6 +4,7 @@ import lexer, expression, semantic, scope_, type;
 import util;
 import std.string;
 import std.conv: to;
+import std.typecons : q=tuple, Q=Tuple;
 
 private template NotYetImplemented(T){
 	static if(is(T _==BinaryExp!S,TokenType S) || is(T==ABinaryExp) || is(T==AssignExp))
@@ -1143,6 +1144,23 @@ struct ByteCodeBuilder{
 			byteCode~=*((cast(ulong*)&c)+1);
 		}else static assert(0);
 	}
+
+	void emitPushConstant()(void[] mem){
+		auto len=mem.length/ulong.sizeof;
+		auto ul=cast(ulong[])mem[0..len*ulong.sizeof];
+		foreach(x;ul){
+			emit(Instruction.push);
+			emitConstant(x);
+		}
+		if(mem.length%ulong.sizeof){
+			auto diff=mem.length-len*ulong.sizeof;
+			ulong x=0;
+			(cast(void*)&x)[0..diff]=mem[len*ulong.sizeof..$];
+			emit(Instruction.push);
+			emitConstant(x);
+		}
+	}
+	void emitPushConstant(T)(T v)if(!is(T==void[])){ emitPushConstant((cast(void*)&v)[0..T.sizeof]); }
 
 	struct Label{
 		private{
@@ -3523,30 +3541,26 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				bld.emitConstant(value.get!real());
 				return;
 			}
-		}else if(tu.getElementType()){
-			auto arr=tu.isArrayTy();
+		}else if(auto arr=tu.isArrayTy()){
+			auto siz=getCTSizeof(arr);
+			auto tmp=new void[siz]; // TODO: allocate deterministically
+			arr.variantToMemory(value, tmp);
+			bld.emitPushConstant(tmp);
+			return;
+		}else if(auto dyn=tu.isDynArrTy()){
 			BCSlice r;
-			arr.variantToMemory(value, (cast(void*)&r)[0..BCSlice.sizeof], true);
+			dyn.variantToMemory(value, (cast(void*)&r)[0..BCSlice.sizeof]);
+			
 			size_t size = getBCSizeof(tu.getElementType().getDynArr());
 			if(tu.getUnqual() is Type.get!(void[])()){
 				bld.emit(Instruction.push);
 				bld.emitConstant(cast(ulong)cast(void*)value.getType());
 			}else assert(!(size&1),text(tu));
-			for(size_t i=0;i<(size&~1);i+=2){
-				bld.emit(Instruction.push2);
-				bld.emitConstant(*(cast(ulong*)&r+i));
-				bld.emitConstant(*(cast(ulong*)&r+i+1));
-			}
-			if(arr){ // static array literal (TODO: this is a horrible kludge, duplicated in ArrayLiteralExp)
-				bld.emit(Instruction.push);
-				bld.emitConstant(0);
-				bld.emitUnsafe(Instruction.loada,this);
-				bld.emitConstant(getCTSizeof(tu));
-			}
+			bld.emitPushConstant(r);
 			return;
 		}else if(auto pt=tu.isPointerTy()){
 			BCPointer r;
-			pt.variantToMemory(value,(cast(void*)&r)[0..BCPointer.sizeof], true);
+			pt.variantToMemory(value,(cast(void*)&r)[0..BCPointer.sizeof]);
 			size_t size = getBCSizeof(tu);
 			if(tu.getUnqual() is Type.get!(void*)()){
 				bld.emit(Instruction.push);
@@ -3561,13 +3575,10 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 		}else if(auto at=tu.isAggregateTy()){
 			auto vars = value.get!(Variant[VarDecl])();
 			if(vars is null) goto Lnull;
-			// TODO: can/should this be done more efficiently?
-			ulong[] memory = new ulong[getBCSizeof(at)];
-			at.variantToMemory(value, memory, true);
-			foreach(v;memory){
-				bld.emit(Instruction.push);
-				bld.emitConstant(v);
-			}
+			// TODO: do more efficiently
+			void[] tmp = new void[getCTSizeof(at)];
+			value.getType().variantToMemory(value, tmp);
+			bld.emitPushConstant(tmp);
 		}else{
 		Lnull:
 			// TODO: solve more elegantly
@@ -3960,7 +3971,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		subscribers[notified]=true;
 	}
 	void notifyLayoutChanged(AggregateDecl decl){
-		// variantToMemory.flushCaches(); // TODO!
+		vmtr.flushCaches(); // TODO!
 		layoutKnown = false;
 		foreach(s,_;subscribers) s.notifyLayoutChanged(this);
 	}
@@ -4265,14 +4276,17 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 	if(type.isDynArrTy()) return BCSlice.sizeof;
 	import std.algorithm;
 	if(auto arr=type.isArrayTy()) return cast(size_t)max(1, getCTSizeof(arr.ty)*arr.length);
-	if(type.isPointerTy()){
+	if(type.isPointerTy()||type is Type.get!(typeof(null))()){
 		if(type.getFunctionTy()) return Symbol.sizeof;
 		else return BCPointer.sizeof;
 	}
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return getBCSizeof(type)*ulong.sizeof;
 	if(type is Type.get!real()) return real.sizeof;
-	if(type.isAggregateTy()) return getBCSizeof(type)*ulong.sizeof;
+	if(auto at=type.isAggregateTy()){
+		if(at.decl.isReferenceAggregateDecl()) return BCPointer.sizeof;
+		return getBCSizeof(at)*ulong.sizeof;
+	}
 	return cast(size_t)type.getSizeof();
 }
 
@@ -4290,7 +4304,7 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSiz;
-	ptr: return bcPointerBCSize+(type is Type.get!(void*)());
+	ptr: return bcPointerBCSize+(type.getUnqual() is Type.get!(void*)());
 	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return bcPointerBCSize+bcFunPointerBCSiz;
@@ -4729,11 +4743,15 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		if(sstate != SemState.completed)
 			resetByteCode();
 
-		// type.ret.discoverPointers(stack.stack[0..stack.stp+1]); // TODO
-		auto res=type.ret.variantFromMemory(stack.stack[0..stack.stp+1], type.ret);
-		// assert(0,"unsupported return type "~type.ret.toString());
-		handler.error(format("return type '%s' not yet supported in CTFE", type.ret.toString()),loc);
-		throw new UnwindException();
+		// TODO: this relies on the little-endianness of the host system for built-in integers!
+		version(LittleEndian) enum endiannessok=true;
+		static assert(endiannessok);
+
+		auto ctsize=getCTSizeof(type.ret);
+		// SliceCollection slices; // TODO?
+		// type.ret.collectSlices((cast(void[])stack.stack)[0..ctsize], type.ret, slices);
+		assert(ctsize<=(stack.stp+1)*ulong.sizeof);
+		return type.ret.variantFromMemory((cast(void[])stack.stack)[0..ctsize], type.ret);
 	}
 }
 
@@ -4871,7 +4889,7 @@ mixin template CTFEInterpret(T) if(is(T==PragmaDecl)){
 }
 
 
-// TODO: this is similar to Stack.pop
+/+// TODO: this is similar to Stack.pop
 T consume(T=ulong)(ref ulong[] memory){
 	static if(is(T==ulong)){
 		auto res = memory[0];
@@ -4889,19 +4907,15 @@ T consume(T=ulong)(ref ulong[] memory){
 		memory=memory[sz..$];
 		return c;
 	}
-}
-
-// TODO: this abstraction could maybe act as an arena allocator
-// (usage could even be extended into CTFE, but then some form of additional GC
-// during CTFE-runtime will be required.)
+}+/
 
 mixin template CTFEInterpret(T) if(is(T==Type)){
-	abstract void variantToMemory(Variant value, void[] mem, bool isrvalue);
+	abstract void variantToMemory(Variant value, void[] mem);
 	abstract Variant variantFromMemory(void[] mem, Type type);
 }
 
 mixin template NoCTFEInterpretType(){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(0);
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
@@ -4914,16 +4928,16 @@ mixin template CTFEInterpret(T) if(is(T==ErrorTy)||is(T==MatcherTy)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy)||is(T==InoutTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
-		return ty.variantToMemory(value, mem, isrvalue);
+	override void variantToMemory(Variant value, void[] mem){
+		return getHeadUnqual().variantToMemory(value, mem);
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
-		return variantFromMemory(mem, type);
+		return getHeadUnqual().variantFromMemory(mem, type);
 	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==NullPtrTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
 		assert(mem.length==BCPointer.sizeof);
 		*(cast(BCPointer*)mem.ptr)=BCPointer([],null);
@@ -4938,7 +4952,7 @@ mixin template CTFEInterpret(T) if(is(T==NullPtrTy)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==EmptyArrTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
 		assert(mem.length==BCSlice.sizeof);
 		*(cast(BCSlice*)mem.ptr)=BCSlice([],[]);
@@ -4966,7 +4980,7 @@ mixin template CTFEInterpret(T) if(is(T==BasicType)){
 		}
 	};
 
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
 		enum res=q{ *(cast(T*)mem.ptr)=value.get!T(); return; };
 		mixin(ctfeinterpretbody);
@@ -4980,7 +4994,7 @@ mixin template CTFEInterpret(T) if(is(T==BasicType)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==FunctionTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
 		assert(0, "TODO");
 	}
@@ -4991,13 +5005,14 @@ mixin template CTFEInterpret(T) if(is(T==FunctionTy)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
-		assert(0, "TODO");
+		// assert(0, "TODO");
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
 		assert(type.getHeadUnqual() is this);
-		assert(0, "TODO");
+		// assert(0, "TODO");
+		return Variant(null, type);
 	}
 }
 
@@ -5006,40 +5021,171 @@ mixin template CTFEInterpret(T) if(is(T==TypeofExp)||is(T==TypeofReturnExp)){
 }
 
 mixin template CTFEInterpret(T) if(is(T==PointerTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	// TODO: move common parts out instead of relying on DynArrTy implementation?
+	override void variantToMemory(Variant value, void[] mem){
+		assert(getUnqual() !is Type.get!(void*)()); // this case is handled elsewhere (TODO: move here?)
 		assert(value.getType().getHeadUnqual() is this);
-		assert(0, "TODO");
+		assert(mem.length==BCPointer.sizeof);
+		auto cnt = value.getContainer();
+		auto slt = ty.getDynArr();
+		auto vcnt = variantArrayToContainer(cnt,slt);
+		auto fa = value.getFieldAccess();
+		size_t offset = parseFieldAccess(fa,slt);
+		*(cast(BCPointer*)mem.ptr)=BCPointer(vcnt, vcnt.ptr+offset);
 	}
+	private size_t parseFieldAccess(scope FieldAccess[] fa,Type type){
+		if(!fa.length) return 0;
+		size_t x;
+		Type nty;
+		auto faf=fa.front;
+		if(faf.isIndex){
+			auto el=type.getElementType();
+			assert(!!el);
+			auto ctsize=getCTSizeof(el);
+			x=ctsize*faf.index;
+			nty=el;
+		}else{
+			assert(!!type.isAggregateTy());
+			size_t len, off = faf.field.getBCLoc(len);
+			x=off;
+			nty=faf.field.type;
+		}
+		return x+parseFieldAccess(fa[1..$],nty);
+	}
+
 	override Variant variantFromMemory(void[] mem, Type type){
+		if(type is Type.get!(void*)()){// TODO: merge with the respective code in
+			assert(mem.length==getCTSizeof(Type.get!(void*)()));
+			return voidPointerOrArrayToVariant(mem,BCPointer.sizeof);
+		}
 		assert(type.getHeadUnqual() is this);
-		assert(0, "TODO");
+		assert(mem.length == getCTSizeof(this));
+		auto ptr=*cast(BCPointer*)mem.ptr;
+		auto offset = ptr.ptr-ptr.container.ptr;
+		// TODO: correctly handle pointers to members
+		auto cnt=variantArrayFromContainer(ptr.container, ty);
+		auto ctsize=getCTSizeof(ty);
+		return Variant([FieldAccess(offset/ctsize)], cnt, type);
 	}
 }
 
+Variant voidPointerOrArrayToVariant(void[] mem, size_t size){
+	auto ul=cast(ulong[])mem;
+	auto type = cast(Type)cast(void*)ul[0];
+	void[] nmem=ul[1..$];
+	return type.variantFromMemory(nmem[0..size], type);
+}
+
+void variantArrayToContainer(Variant[] arr, void[] mem){
+	// TODO: this is wasteful
+	foreach(i;0..arr.length){
+		auto el=arr[i].getType();
+		auto ctsize=getCTSizeof(el);
+		assert(ctsize&&mem.length==arr.length*ctsize,text(arr," ",ctsize," ",mem));
+		el.variantToMemory(arr[i], mem[i*ctsize..(i+1)*ctsize]);
+	}
+}
+
+void[] variantArrayToContainer(Variant[] cnt, Type tt){
+	void[] vcnt;
+	if(cnt.ptr in vmtr.sl_aliasing) vcnt=vmtr.sl_aliasing[cnt.ptr];
+	else{
+		auto ctsize = cnt.length?getCTSizeof(cnt[0].getType()):1;
+		vcnt = (new void[cnt.length*ctsize+1])[0..$-1]; // prevent in-place update to make caching based on .ptr valid.
+		if(vcnt !is null){
+			vmtr.sl_aliasing[cnt.ptr]=vcnt;
+			auto tag=q(tt.getUnqual(),vcnt.ptr);
+			vmtr.sl_aliasing_rev[tag]=cnt;
+			variantArrayToContainer(cnt, vcnt);
+		}
+	}
+	return vcnt;
+}
+
+Variant[] variantArrayFromContainer(void[] mem, Type el, bool remember=true){
+	auto ctsize=getCTSizeof(el);
+	assert(!(mem.length%ctsize));
+	auto tag=q(cast(Type)el.getUnqual().getDynArr(),mem.ptr);
+	if(remember&&tag in vmtr.sl_aliasing_rev) return vmtr.sl_aliasing_rev[tag];
+	auto len=mem.length/ctsize;
+	auto res=new Variant[len];
+
+	if(remember){
+		vmtr.sl_aliasing_rev[tag]=res;
+		vmtr.sl_aliasing[res.ptr]=mem;
+	}
+
+	foreach(i;0..len) res[i]=el.variantFromMemory(mem[i*ctsize..(i+1)*ctsize], el);
+	return res;
+}
+
 mixin template CTFEInterpret(T) if(is(T==DynArrTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
+		assert(getUnqual() !is Type.get!(void[])()); // this case is handled elsewhere (TODO: move here?)
 		assert(value.getType().getHeadUnqual() is this);
-		assert(0, "TODO");
+		assert(mem.length == BCSlice.sizeof);
+
+		if(value.getType().getHeadUnqual().isSomeString()){
+			// TODO: aliasing
+			foreach(T;Seq!(string,wstring,dstring)){
+				if(value.getType().getHeadUnqual() is Type.get!T()){
+					BCSlice slc;
+					auto str=value.get!T();
+					auto cnt=str~'\0';
+					*cast(BCSlice*)mem.ptr=BCSlice(cast(void[])cnt,cast(void[])cnt[0..$-1]);
+					return;
+				}
+			}
+			assert(0);
+		}
+
+		auto arr = value.get!(Variant[])();
+		auto cnt = value.getContainer();
+		auto start = arr.ptr-cnt.ptr;
+		auto end = start+arr.length;
+		auto ctsize = getCTSizeof(ty);
+		auto vcnt = variantArrayToContainer(cnt, this);
+		*cast(BCSlice*)mem.ptr=BCSlice(vcnt, vcnt[ctsize*start..ctsize*end]);		
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
+		if(type is Type.get!(void[])()){
+			assert(mem.length==getCTSizeof(Type.get!(void[])()));
+			return voidPointerOrArrayToVariant(mem,BCSlice.sizeof);
+		}
 		assert(type.getHeadUnqual() is this);
-		assert(0, "TODO");
+		assert(mem.length == BCSlice.sizeof);
+		auto slc = *cast(BCSlice*)mem.ptr;		
+		if(type.getHeadUnqual().isSomeString()){
+			// TODO: aliasing
+			foreach(T;Seq!(string,wstring,dstring)){
+				if(type.getHeadUnqual() is Type.get!T())
+					return Variant(cast(T)slc.slice,type);
+			}
+			assert(0);
+		}
+		auto cnt = variantArrayFromContainer(slc.container,ty);
+		auto ctsize = getCTSizeof(ty);
+		size_t start = slc.slice.ptr-slc.container.ptr;
+		size_t end = start+slc.slice.length;
+		auto rslc = cnt[start/ctsize..end/ctsize];
+		return Variant(rslc, cnt, type);
 	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==ArrayTy)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
-		assert(value.getType().getHeadUnqual() is this);
-		assert(0, "TODO");
+	override void variantToMemory(Variant value, void[] mem){
+		assert(value.getType().getUnqual() is getUnqual());
+		variantArrayToContainer(value.getContainer(), mem);
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
-		assert(type.getHeadUnqual() is this);
-		assert(0, "TODO");
+		assert(type.getUnqual() is getUnqual());
+		auto cnt=variantArrayFromContainer(mem, type.getElementType(), false);
+		return Variant(cnt,cnt,type);
 	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==TypeTuple)){
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
+	override void variantToMemory(Variant value, void[] mem){
 		assert(value.getType().getHeadUnqual() is this);
 		assert(0, "TODO");
 	}
@@ -5054,12 +5200,110 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 		return vd.getBCLoc(len);
 	}
 
-	override void variantToMemory(Variant value, void[] mem, bool isrvalue){
-		assert(value.getType().getHeadUnqual() is this);
-		assert(0, "TODO");
+	override void variantToMemory(Variant value, void[] mem){
+		assert(value.getType().getUnqual() is this);
+		assert(decl.getBCSize()!=0);
+
+		void[] res;
+		void emplacePointer(){
+			assert(res.length == BCPointer.sizeof);
+			*cast(BCPointer*)res.ptr=BCPointer(mem,mem.ptr);
+		}
+
+		auto vars = value.get!(Variant[VarDecl])();
+		if(auto rd=decl.isReferenceAggregateDecl()){
+			res=mem;
+			if(vars.byid in vmtr.aggr_aliasing){
+				mem = vmtr.aggr_aliasing[vars.byid];
+				emplacePointer();
+				return;
+			}else mem = new void[decl.getBCSize()*ulong.sizeof];
+			vmtr.aggr_aliasing[vars.byid]=mem;
+			auto tag=q(cast(Type)this,mem.ptr);
+			vmtr.aggr_aliasing_rev[tag]=Variant(vars,decl.getType());
+			static assert(ReferenceAggregateDecl.sizeof<=ulong.sizeof);
+			(cast(ulong[])mem)[ReferenceAggregateDecl.bcTypeidOffset]=cast(ulong)cast(void*)rd;
+		}else assert(mem.length==getCTSizeof(this));
+
+		assert(!(mem.length%ulong.sizeof));
+		assert(!mem.length||mem.length==decl.getBCSize()*ulong.sizeof);
+
+		foreach(vd;&decl.traverseFields){
+			size_t len, off = vd.getBCLoc(len);
+			auto ctlen=getCTSizeof(vd.type);
+			assert(len != -1);
+			if(vd !in vars && vd.init){
+				vars[vd]=vd.init.interpretV(); // TODO: ok?
+			}
+			if(vd in vars){
+				auto var = vars[vd];
+				assert(getCTSizeof(vd.type)==getCTSizeof(var.getType()));
+				var.getType().variantToMemory(var, mem[off*ulong.sizeof..off*ulong.sizeof+ctlen]);
+			}
+		}
+		if(decl.isReferenceAggregateDecl()){
+			emplacePointer();
+			// discoverPointers(res, decl.getType(), false);
+		}
 	}
+
 	override Variant variantFromMemory(void[] mem, Type type){
 		assert(type.getHeadUnqual() is this);
-		assert(0, "TODO");
+		auto decl=this.decl;
+		Variant[VarDecl] res;
+		void initializeRes(){
+			assert(type !is null);
+			// (stupid built-in AAs)
+			res[cast(VarDecl)cast(void*)type]=Variant(null);
+			res.remove(cast(VarDecl)cast(void*)type);
+		}
+		if(decl.isReferenceAggregateDecl()){
+			assert(mem.length==getCTSizeof(this));
+			auto ptr=*cast(BCPointer*)mem.ptr;
+			assert(ptr.ptr==ptr.container.ptr);
+			mem=ptr.container;
+
+			decl=cast(ReferenceAggregateDecl)cast(void*)(cast(ulong[])mem)[ReferenceAggregateDecl.bcTypeidOffset];
+			type = decl.getType().applySTC(type.getHeadSTC());
+			auto tag=q(cast(Type)decl.getType(),mem.ptr);
+			// TODO: What about pointers with an offset?
+			if(tag in vmtr.aggr_aliasing_rev) return vmtr.aggr_aliasing_rev[tag];
+		}
+		initializeRes();
+		if(decl.isReferenceAggregateDecl){
+			auto tag=q(cast(Type)decl.getType(),mem.ptr);
+			vmtr.aggr_aliasing_rev[tag]=Variant(res,type);
+		}
+
+		assert(decl.isLayoutKnown);
+		foreach(vd;&decl.traverseFields){
+			size_t len, off = vd.getBCLoc(len);
+			auto ctlen=getCTSizeof(vd.type);
+			assert(len != -1);
+			auto tt=vd.type.applySTC(type.getHeadSTC());
+			res[vd]=tt.variantFromMemory(mem[off*ulong.sizeof..off*ulong.sizeof+ctlen], tt);
+		}
+		return Variant(res, type);
 	}	
 }
+
+// TODO: this abstraction could maybe act as an arena allocator
+// (usage could even be extended into CTFE, but then some form of additional GC
+// during CTFE-runtime will be required.)
+
+struct VariantMemoryTranslation{
+	void[][AAbyIdentity!(VarDecl,Variant)] aggr_aliasing; // preserve aliasing
+	Variant[Q!(Type,void*)] aggr_aliasing_rev; // preserve aliasing on reverse translation
+
+	void[][Variant*] sl_aliasing; // preserve aliasing
+	Variant[][Q!(Type,void*)] sl_aliasing_rev; // preserve aliasing on reverse translation
+
+	void flushCaches(){
+		aggr_aliasing=null;
+		sl_aliasing=null;
+		// may still need reverse translation
+		// hashtables with weak keys would be neat to resolve the memory leak this causes
+		// TODO: fix memory leak
+	}
+}
+VariantMemoryTranslation vmtr; // TODO: get rid of thread-local state?

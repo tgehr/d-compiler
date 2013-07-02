@@ -170,6 +170,7 @@ struct Variant{
 	}
 
 	this()(Variant[] arr, Variant[] cnt, Type type)in{
+		assert(cnt.ptr<=arr.ptr && arr.ptr+arr.length<=cnt.ptr+cnt.length); // TODO: relax?
 		assert(type.getElementType(),text(type));
 		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
 		if(tt !is Type.get!(void*)()&&tt!is Type.get!(void[])())
@@ -242,7 +243,7 @@ struct Variant{
 			assert(occupies == Occupies.vars,text(occupies));
 			return vars;
 		}else static if(is(T==Variant[])){
-			assert(occupies == Occupies.arr);
+			assert(occupies == Occupies.arr,text(occupies));
 			return arr;
 		}else static assert(0, "cannot get this field (yet?)");
 	}
@@ -320,7 +321,7 @@ struct Variant{
 			return '['~join(map!(to!string)(this.arr),",")~']';
 		}
 		if(type.isPointerTy()){
-			return "&("~ptr_.map!(to!string).join~")"; // TODO: fix
+			return "&("~cnt.to!string~ptr_.map!(to!string).join~")"; // TODO: fix
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -405,6 +406,8 @@ struct Variant{
 					if(tou is Type.get!T()) return Variant(T.init/+,T.init+/,to);
 			}
 			return Variant((Variant[]).init,(Variant[]).init,to);
+		}else if(type.isPointerTy()){
+			if(tou is Type.get!bool()) return Variant(cnt !is null,to); // TODO: fix?
 		}
 		return this;
 	}
@@ -496,7 +499,7 @@ struct Variant{
 			assert(rhs.occupies==Occupies.ptr_);
 			// TODO: other relational operators
 			static if(op=="is"||op=="=="||op=="!is"||op=="!="){
-				return Variant((op=="!is"||op=="!=")^(ptr_ is rhs.ptr_),Type.get!bool());
+				return Variant((op=="!is"||op=="!=")^(cnt is rhs.cnt && ptr_ == rhs.ptr_),Type.get!bool());
 			}else assert(0);
 		}else if(occupies == Occupies.vars){
 			assert(rhs.occupies==Occupies.vars);
