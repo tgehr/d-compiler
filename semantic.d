@@ -4424,6 +4424,7 @@ class Symbol: Expression{ // semantic node
 			return vd.stc&STCenum
 				|| vd.stc&(STCimmutable|STCconst)
 				&& vd.init && vd.init.isConstant();
+		if(auto vd = meaning.isFunctionDecl()) return true;
 		return false;
 	}
 

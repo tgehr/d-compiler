@@ -43,7 +43,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, err
 }
 
 template getOccupied(T){
@@ -141,7 +141,9 @@ struct Variant{
 		if(tu is Type.get!wstring()) return Occupies.wstr;
 		if(tu is Type.get!dstring()) return Occupies.dstr;
 		if(tu.getElementType()) return Occupies.arr;
-		if(tu.isPointerTy()) return Occupies.ptr_;
+		if(auto ptr=tu.isPointerTy())
+			return ptr.ty.isFunctionTy()?Occupies.fptr:Occupies.ptr_;
+		if(tu.isDelegateTy()) return Occupies.dg;
 
 		if(auto bt=tu.isBasicType()){
 			switch(bt.op){
@@ -160,7 +162,7 @@ struct Variant{
 		return Occupies.none;
 	}
 
-	this(T)(T value, Type type)if(!is(T==Variant[])&&!is(T==Variant[VarDecl]))in{
+	this(T)(T value, Type type)if(!is(T==Variant[])&&!is(T==Variant[VarDecl])&&!is(T==Symbol))in{
 		assert(type.sstate==SemState.completed);
 		// TODO: suitable in contract for type based on T
 	}body{
@@ -169,7 +171,7 @@ struct Variant{
 		mixin(to!string(getOccupied!T)~` = value;`);
 	}
 
-	this()(Variant[] arr, Variant[] cnt, Type type)in{
+	this()(Variant[] arr, Variant[] cnt, Type type)in{ // TODO: extend FieldAccess and merge with ptr constructor
 		assert(cnt.ptr<=arr.ptr && arr.ptr+arr.length<=cnt.ptr+cnt.length); // TODO: relax?
 		assert(type.getElementType(),text(type));
 		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
@@ -182,7 +184,7 @@ struct Variant{
 	}
 
 	this()(FieldAccess[] ptr, Variant[] cnt, Type type)in{
-		auto pt=type.isPointerTy();
+		auto pt=type.getHeadUnqual().isPointerTy();
 		assert(!!pt);
 		auto tt=pt.ty.getUnqual();
 
@@ -198,6 +200,36 @@ struct Variant{
 		//id = RTTypeID.get!Vars(type);
 		this.type=type;
 		this.vars=vars;
+	}
+	
+	this()(Symbol fptr, Type type)in{
+		auto tu=type.getHeadUnqual();
+		assert(tu.isPointerTy()&&tu.getFunctionTy());
+		if(fptr&&fptr.type){
+			auto ft=fptr.type.isFunctionTy();
+			assert(!!ft);
+			assert(tu.getFunctionTy().equals(ft));
+		}
+	}out{
+		assert(occupies == Occupies.fptr);
+	}body{
+		this.type=type;
+		this.fptr=fptr;
+	}
+
+	this()(Symbol dgfptr, Variant[VarDecl] dgctx, Type type)in{
+		if(dgfptr&&dgfptr.type){
+			auto ft=dgfptr.type.isFunctionTy();
+			assert(!!ft);
+		}
+		auto tu=type.getHeadUnqual();
+		assert(tu.isDelegateTy());
+	}out{
+		assert(occupies == Occupies.dg);
+	}body{
+		this.type=type;
+		this.dgfptr=dgfptr;
+		this.dgctx=dgctx;
 	}
 
 
@@ -216,6 +248,11 @@ struct Variant{
 			VarDecl ptrvd;
 		}
 		Variant[VarDecl] vars; // structs, classes, closures
+		Symbol fptr;
+		struct{
+			Symbol dgfptr;
+			Variant[VarDecl] dgctx;
+		}
 		string err;
 	}
 
@@ -252,6 +289,24 @@ struct Variant{
 		assert(occupies == Occupies.arr||occupies == Occupies.ptr_);
 	}body{
 		return cnt;
+	}
+
+	Symbol getFunctionPointer()in{
+		assert(occupies == Occupies.fptr);
+	}body{
+		return fptr;
+	}
+
+	Symbol getDelegateFunctionPointer()in{
+		assert(occupies == Occupies.dg);
+	}body{
+		return dgfptr;
+	}
+
+	Variant[VarDecl] getDelegateContext()in{
+		assert(occupies == Occupies.dg);
+	}body{
+		return dgctx;
 	}
 
 	/* returns a type that fully specifies the memory layout
@@ -321,7 +376,16 @@ struct Variant{
 			return '['~join(map!(to!string)(this.arr),",")~']';
 		}
 		if(type.isPointerTy()){
+			if(type.getFunctionTy()){
+				assert(occupies==Occupies.fptr);
+				return fptr.loc.line?fptr.loc.rep:fptr.toString();
+			}
+			assert(occupies==Occupies.ptr_);
 			return "&("~cnt.to!string~ptr_.map!(to!string).join~")"; // TODO: fix
+		}
+		if(type.isDelegateTy()){
+			assert(occupies==Occupies.dg);
+			return dgfptr.loc.line?dgfptr.loc.rep:dgfptr.toString();
 		}
 		if(type.isAggregateTy()){
 			if(this.vars is null) return "null";
@@ -357,14 +421,13 @@ struct Variant{
 					return Variant(r,r,to);//TODO: aliasing?
 				}
 				return this; // TODO: this is a hack and might break stuff (?)
-				break;
 			}
 		}else if(auto tbt=type.isBasicType()){
 			if(auto bt = tou.isBasicType()){
 				switch(tbt.op){
 					foreach(tx;ToTuple!basicTypes){
 						static if(tx!="void"){
-							case Tok!tx:// TODO: code generated for integral types is identical
+							case Tok!tx:// TODO: code generated for integral types is more or less identical
 							mixin(`alias typeof(`~tx~`.init) T;`); // dmd parser workaround
 							enum occ=getOccupied!T;
 							switch(bt.op){
@@ -436,11 +499,16 @@ struct Variant{
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
 
 	size_t toHash()@trusted{
+		// TODO: differing containers should result in the same template instantiations!
+		// -> strip containers?
 		final switch(occupies){
 			case Occupies.none: return 0;
 				foreach(x; EnumMembers!Occupies[1..$]){
+					static if(x!=Occupies.dg)
 					case x: return typeid(mixin(to!string(x))).getHash(&mixin(to!string(x)));
 				}
+			case Occupies.dg: // TODO!
+				return 0;
 		}
 		assert(0); // TODO: file bug
 	}

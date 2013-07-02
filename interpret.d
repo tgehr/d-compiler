@@ -5,6 +5,7 @@ import util;
 import std.string;
 import std.conv: to;
 import std.typecons : q=tuple, Q=Tuple;
+import std.algorithm : max;
 
 private template NotYetImplemented(T){
 	static if(is(T _==BinaryExp!S,TokenType S) || is(T==ABinaryExp) || is(T==AssignExp))
@@ -464,8 +465,19 @@ mixin template Interpret(T) if(is(T==AssertExp)){
 
 mixin template Interpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 	static if(is(T _==UnaryExp!S,TokenType S)):
-	static if(S!=Tok!"&"&&S!=Tok!"*"): // TODO: implement where possible
-	static if(S!=Tok!"++"&&S!=Tok!"--"):
+	static if(S==Tok!"&"||S==Tok!"*"){
+		// TODO: some operations may be handled more efficiently than invoking byte code
+		// compilation by doing direct computation.
+		override bool checkInterpret(Scope sc){
+			return e.checkInterpret(sc);
+		}
+		override void _interpretFunctionCalls(Scope sc){
+			callWrapper(sc,ctfeCallWrapper,null);
+		}
+	private:
+		FunctionDef ctfeCallWrapper;
+		
+	}else static if(S!=Tok!"++"&&S!=Tok!"--"):
 	override bool checkInterpret(Scope sc){return e.checkInterpret(sc);}
 	override Variant interpretV(){
 		return e.interpretV().opUnary!(TokChars!S)();
@@ -569,6 +581,7 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 
+
 mixin template Interpret(T) if(is(T==StructConsExp)||is(T==NewExp)){
 	override bool checkInterpret(Scope sc){
 		return true; // be optimistic
@@ -579,6 +592,7 @@ mixin template Interpret(T) if(is(T==StructConsExp)||is(T==NewExp)){
 private:
 	FunctionDef ctfeCallWrapper;
 }
+
 
 mixin template Interpret(T) if(is(T==CallExp)){
 	//private Variant val;
@@ -3559,6 +3573,12 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 			bld.emitPushConstant(r);
 			return;
 		}else if(auto pt=tu.isPointerTy()){
+			if(pt.getFunctionTy()){
+				Symbol s;// TODO: merge?
+				pt.variantToMemory(value, (cast(void*)&s)[0..Symbol.sizeof]);
+				bld.emitPushConstant(s);
+				return;
+			}
 			BCPointer r;
 			pt.variantToMemory(value,(cast(void*)&r)[0..BCPointer.sizeof]);
 			size_t size = getBCSizeof(tu);
@@ -3566,21 +3586,22 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 				bld.emit(Instruction.push);
 				bld.emitConstant(cast(ulong)cast(void*)value.getType());
 			}else assert(!(size&1),text(tu));
-			for(size_t i=0;i<(size&~1);i+=2){
-				bld.emit(Instruction.push2);
-				bld.emitConstant(*(cast(ulong*)&r+i));
-				bld.emitConstant(*(cast(ulong*)&r+i+1));
-			}
+			bld.emitPushConstant(r);
 			return;
 		}else if(auto at=tu.isAggregateTy()){
 			auto vars = value.get!(Variant[VarDecl])();
-			if(vars is null) goto Lnull;
+			if(vars is null){ assert(at.decl.isReferenceAggregateDecl()); goto Lnull; }
 			// TODO: do more efficiently
 			void[] tmp = new void[getCTSizeof(at)];
 			value.getType().variantToMemory(value, tmp);
 			bld.emitPushConstant(tmp);
+		}else if(auto dgt=tu.isDelegateTy()){
+			void[(bcPointerBCSize+1)*ulong.sizeof] mem=void;
+			value.getType().variantToMemory(value, mem[]);
+			bld.emitPushConstant(mem[]);
 		}else{
 		Lnull:
+			assert(tu.getUnqual() is Type.get!(typeof(null))()||tu.isAggregateTy());
 			// TODO: solve more elegantly
 			foreach(i;0..getBCSizeof(Type.get!(typeof(null))())){
 				bld.emit(Instruction.push);
@@ -4276,10 +4297,11 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 	if(type.isDynArrTy()) return BCSlice.sizeof;
 	import std.algorithm;
 	if(auto arr=type.isArrayTy()) return cast(size_t)max(1, getCTSizeof(arr.ty)*arr.length);
-	if(type.isPointerTy()||type is Type.get!(typeof(null))()){
-		if(type.getFunctionTy()) return Symbol.sizeof;
+	if(auto ptr=type.isPointerTy()){
+		if(ptr.ty.isFunctionTy()) return Symbol.sizeof;
 		else return BCPointer.sizeof;
 	}
+	if(type is Type.get!(typeof(null))()) return BCPointer.sizeof;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return getBCSizeof(type)*ulong.sizeof;
 	if(type is Type.get!real()) return real.sizeof;
@@ -4625,6 +4647,23 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		runAnalysis!HeapContextAnalysis(this);
 	}
 
+	int traverseHeapContext(scope int delegate(VarDecl) dg){
+		foreach(p;type.params.filter!(p=>p.inHeapContext))
+			if(auto r=dg(p)) return r;
+		// TODO: collect variables more efficiently
+		static struct CollectVariables{
+			FunctionDef self;
+			typeof(dg) found;
+			int r=0;
+			void perform(VarDecl vd){
+				if(!vd.scope_||vd.scope_.getFunction() !is self) return;
+				if(!r&&vd.inHeapContext) r = found(vd);
+			}
+		}
+		return runAnalysis!CollectVariables(this,this,dg).r;
+	}
+
+
 	void resetByteCode(){
 		_byteCode = null;
 	}
@@ -4762,10 +4801,10 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
 		if(auto f = fun.isFieldExp())if(auto m = f.e2.meaning)
 			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
-		if(!ctx && fun.type.isDelegateTy()) ctx = true;
+		auto tt=fun.type.getHeadUnqual();
+		if(!ctx && tt.isDelegateTy()) ctx = true;
 
 		FunctionTy ft;
-		auto tt=fun.type.getHeadUnqual();
 		if(auto fty=tt.isFunctionTy()) ft = fty;
 		else if(auto ptr=tt.isPointerTy()){
 			assert(cast(FunctionTy)ptr.ty);
@@ -5004,18 +5043,6 @@ mixin template CTFEInterpret(T) if(is(T==FunctionTy)){
 	}
 }
 
-mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
-	override void variantToMemory(Variant value, void[] mem){
-		assert(value.getType().getHeadUnqual() is this);
-		// assert(0, "TODO");
-	}
-	override Variant variantFromMemory(void[] mem, Type type){
-		assert(type.getHeadUnqual() is this);
-		// assert(0, "TODO");
-		return Variant(null, type);
-	}
-}
-
 mixin template CTFEInterpret(T) if(is(T==TypeofExp)||is(T==TypeofReturnExp)){
 	mixin NoCTFEInterpretType;
 }
@@ -5025,6 +5052,11 @@ mixin template CTFEInterpret(T) if(is(T==PointerTy)){
 	override void variantToMemory(Variant value, void[] mem){
 		assert(getUnqual() !is Type.get!(void*)()); // this case is handled elsewhere (TODO: move here?)
 		assert(value.getType().getHeadUnqual() is this);
+		if(ty.isFunctionTy()){
+			assert(mem.length == Symbol.sizeof);
+			*cast(Symbol*)mem.ptr = value.getFunctionPointer();
+			return;
+		}
 		assert(mem.length==BCPointer.sizeof);
 		auto cnt = value.getContainer();
 		auto slt = ty.getDynArr();
@@ -5054,11 +5086,15 @@ mixin template CTFEInterpret(T) if(is(T==PointerTy)){
 	}
 
 	override Variant variantFromMemory(void[] mem, Type type){
+		assert(type.getHeadUnqual() is this);
+		if(ty.isFunctionTy()){
+			assert(mem.length == Symbol.sizeof);
+			return Variant(*cast(Symbol*)mem.ptr,type);
+		}
 		if(type is Type.get!(void*)()){// TODO: merge with the respective code in
 			assert(mem.length==getCTSizeof(Type.get!(void*)()));
 			return voidPointerOrArrayToVariant(mem,BCPointer.sizeof);
 		}
-		assert(type.getHeadUnqual() is this);
 		assert(mem.length == getCTSizeof(this));
 		auto ptr=*cast(BCPointer*)mem.ptr;
 		auto offset = ptr.ptr-ptr.container.ptr;
@@ -5194,6 +5230,7 @@ mixin template CTFEInterpret(T) if(is(T==TypeTuple)){
 		assert(0, "TODO");
 	}
 }
+
 mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 	final size_t getBCLocOf(VarDecl vd, out size_t len){
 		if(!decl.isLayoutKnown()) decl.updateLayout();
@@ -5285,6 +5322,128 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 		}
 		return Variant(res, type);
 	}	
+}
+
+mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
+	override void variantToMemory(Variant value, void[] mem){
+		assert(value.getType().getHeadUnqual() is this);
+		assert(mem.length==(bcPointerBCSize+1)*ulong.sizeof);
+		auto fun = value.getDelegateFunctionPointer();
+		assert(cast(FunctionDef)fun.meaning);
+		auto fd = cast(FunctionDef)cast(void*)fun.meaning;
+		auto ctx = buildContext(value.getDelegateContext(), fd);
+		assert(ctx.length==bcPointerBCSize*ulong.sizeof);
+		auto ptr = *cast(BCPointer*)ctx.ptr;
+		mem[0..BCPointer.sizeof]=(cast(void*)&ptr)[0..BCPointer.sizeof];
+		*cast(Symbol*)(mem.ptr+bcPointerBCSize*ulong.sizeof)=fun;
+	}
+
+	private static void[] buildContext(Variant[VarDecl] vars, FunctionDef fd){
+		if(vars.byid in vmtr.aggr_aliasing) return vmtr.aggr_aliasing[vars.byid];
+		size_t size=0;
+		foreach(vd,_;vars){
+			if(vd is outerContext){
+				assert(!(fd.stc&STCstatic),text(fd));
+				size = max(size, bcPointerBCSize);
+				continue;
+			}
+			size_t len, off = vd.getBCLoc(len);
+			size=max(size,off+len);
+		}
+		void[] mem = new void[ulong.sizeof*size];
+		auto tag=q(Type.init,mem.ptr);
+		vmtr.aggr_aliasing[vars.byid]=mem;
+		vmtr.aggr_aliasing_rev[tag]=Variant(vars);
+
+		if(!(fd.stc&STCstatic)){
+			assert(outerContext in vars);
+			auto ctx=vars[outerContext];
+			auto decl=fd.scope_.getDeclaration();
+			assert(!!decl);
+			if(auto efd=decl.isFunctionDef()){
+				auto emem = buildContext(ctx.get!(Variant[VarDecl])(), efd);
+				auto ptr = BCPointer(emem, emem.ptr);
+				assert(mem.length>=BCPointer.sizeof);
+				*cast(BCPointer*)mem.ptr=ptr;
+			}else if(auto agg=decl.isAggregateDecl()){
+				assert({
+					auto ty=agg.getType().applySTC(fd.stc&STCtypeconstructor);
+					if(!decl.isReferenceAggregateDecl()) ty=ty.getPointer();
+					return ty.getConst() is ctx.getType().getConst();
+				}());
+				auto ty=ctx.getType();
+				auto ctsiz=getCTSizeof(ty);
+				ty.variantToMemory(ctx, mem[0..ctsiz]);
+			}
+		}
+
+		foreach(vd;&fd.traverseHeapContext){
+			size_t len, off = vd.getBCLoc(len);
+			auto ctlen=getCTSizeof(vd.type);
+			assert(len != -1);
+			assert(vd in vars);
+			auto var = vars[vd];
+			assert(getCTSizeof(vd.type)==getCTSizeof(var.getType()));
+			var.getType().variantToMemory(var, mem[off*ulong.sizeof..off*ulong.sizeof+ctlen]);
+		}
+
+		return mem;
+	}
+
+	@property static VarDecl outerContext(){
+		static VarDecl outer;
+		if(outer is null) outer = new VarDecl(STC.init, null, new Identifier("$__outerContext"), null);
+		return outer;
+	}
+
+	private static Variant[VarDecl] parseContext(void[] mem, FunctionDef fd, bool remember=true){
+		auto tag=q(Type.init,mem.ptr);
+		// TODO: What about pointers with an offset?
+		if(remember&&tag in vmtr.aggr_aliasing_rev)
+			return vmtr.aggr_aliasing_rev[tag].get!(Variant[VarDecl])();
+
+		Variant[VarDecl] r;
+		// (stupid built-in AAs)
+		assert(fd !is null);
+		r[cast(VarDecl)cast(void*)fd]=Variant(null);
+		r.remove(cast(VarDecl)cast(void*)fd);
+
+		if(remember) vmtr.aggr_aliasing_rev[tag]=Variant(r);
+
+		if(!(fd.stc&STCstatic)){
+			if(auto decl=fd.scope_.getDeclaration()){
+				assert(mem.length>=BCPointer.sizeof);
+				auto ptr=*cast(BCPointer*)mem.ptr;
+				assert(ptr.ptr is ptr.container.ptr);
+				if(auto efd=decl.isFunctionDef())
+					r[outerContext]=Variant(parseContext(ptr.container, efd));
+				else if(auto agg=decl.isAggregateDecl()){
+					auto ty=agg.getType().applySTC(fd.stc&STCtypeconstructor);
+					if(!decl.isReferenceAggregateDecl()) ty=ty.getPointer();
+					r[outerContext]=ty.variantFromMemory((cast(void*)&ptr)[0..BCPointer.sizeof],ty);
+				}else assert(0);
+			}
+		}
+		foreach(vd;&fd.traverseHeapContext){
+			size_t len, off = vd.getBCLoc(len);
+			auto tt=vd.type;
+			auto ctlen=getCTSizeof(tt);
+			assert(len != -1);
+			r[vd]=tt.variantFromMemory(mem[off*ulong.sizeof..off*ulong.sizeof+ctlen], tt);
+		}
+		return r;
+	}
+
+	override Variant variantFromMemory(void[] mem, Type type){
+		assert(type.getHeadUnqual() is this);
+		assert(mem.length==(bcPointerBCSize+1)*ulong.sizeof);
+		auto ul=cast(ulong[])mem;
+		auto fun=cast(Symbol)cast(void*)ul[$-1];
+		assert(!!cast(FunctionDef)fun.meaning);
+		auto fd=cast(FunctionDef)cast(void*)fun.meaning;
+		auto vars = parseContext(mem[0..bcPointerBCSize*ulong.sizeof], fd, false);
+		return Variant(fun, vars, type);
+	}
 }
 
 // TODO: this abstraction could maybe act as an arena allocator
