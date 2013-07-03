@@ -1,12 +1,10 @@
 // Written in the D programming language
 
-module rope_; // underscore to not conflict with the eponymous function...
+module rope_; // underscore to not conflict with the eponymous function
 
 import std.random, std.range, std.algorithm, std.conv;
 import util;
 // treap-based rope container
-
-import hashtable; // TODO: is there a good way to separate those better?
 
 auto rope(R)(R arg) if(isInputRange!R){ return arg.array.Rope!(ElementType!R); }
 auto ropeCapture(T)(T[] arg){ return arg.Rope!T; } // transfers ownership!
@@ -152,6 +150,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
 		@property bool empty(){ return !length; }
 		@property Rope save(){ return this; }
 		void popFront(){ this=this[1..length]; }
+		void popBack(){ this=this[0..length-1]; }
 	}
 
 	// implementation (does not own array.)
