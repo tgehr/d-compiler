@@ -43,6 +43,7 @@ abstract class Declaration: Statement{
 		UnionDecl,
 		ValueAggregateDecl,
 		ReferenceAggregateDecl,
+		EnumDecl,
 		ErrorDecl,
 	);
 
@@ -84,12 +85,24 @@ class ImportDecl: Declaration{
 	this(STC stc, Expression[] sym){symbols=sym; super(stc,null);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"import "~join(map!(to!string)(symbols),", ")~";";}
 }
+
+class EnumVarDecl: VarDecl{
+	this(Expression rtype, Identifier name, Expression initializer){
+		super(STCenum, rtype, name, initializer);
+	}
+
+	mixin Visitors;
+}
+
 class EnumDecl: Declaration{
-	Expression base;
-	Expression[2][] members;
-	this(STC stc,Identifier name, Expression base, Expression[2][] mem){this.base=base; members=mem; super(stc,name);}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"enum"~(name?" "~name.toString():"")~(base?":"~base.toString():"")~
-			"{"~join(map!((a){return a[0].toString()~(a[1]?"="~a[1].toString():"");})(members),",")~"}";}
+	Expression rbase;
+	EnumVarDecl[] members;
+	this(STC stc,Identifier name, Expression rbase, EnumVarDecl[] mem){this.rbase=rbase; members=mem; super(stc,name);}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"enum"~(name?" "~name.toString():"")~(rbase?":"~rbase.toString():"")~
+			"{"~join(map!(a=>a.name.toString()~(a.init?"="~a.init.toString():""))(members),",")~"}";}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 abstract class GenerativeDecl: Declaration{

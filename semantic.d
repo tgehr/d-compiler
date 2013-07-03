@@ -1458,7 +1458,14 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		static if(S==Tok!"&") e.willTakeAddress();
 		mixin(SemChldExp!q{e});
 
-		static if(S!=Tok!"&"&&S!=Tok!"!") auto ty=e.type.getHeadUnqual();
+		static if(S!=Tok!"&"&&S!=Tok!"!"){
+			auto ty=e.type.getHeadUnqual();
+			// integral promote enum types to unqualified base
+			if(auto et=ty.isEnumTy()){
+				mixin(GetEnumBase!q{ty;et.decl});
+				ty=ty.getHeadUnqual();
+			}
+		}
 		static if(S==Tok!"!"){
 			auto bl = Type.get!bool();
 			mixin(ConvertTo!q{e,bl});
@@ -3368,6 +3375,11 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			}
 			if(ty){
 				auto tyu=ty.getHeadUnqual();
+				// promote comparison method of the enum base type
+				if(auto et=tyu.isEnumTy()){
+					mixin(GetEnumBase!q{tyu;et.decl});
+					tyu=tyu.getHeadUnqual();
+				}
 				if(tyu.isBasicType() || tyu.isPointerTy() || tyu is Type.get!(typeof(null))() || tyu.getElementType()){
 					mixin(ImplConvertToPar!q{e1,ty});
 					mixin(ImplConvertTo!q{e2,ty});
@@ -3416,6 +3428,16 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			mixin(SemEplg);
 		}else static if(isShiftOp(S)||isArithmeticOp(S)||isBitwiseOp(S)){
 			auto t1=e1.type.getHeadUnqual(), t2=e2.type.getHeadUnqual();
+			// integral promote enum types to unqualified base
+			if(auto et1=t1.isEnumTy()){
+				mixin(GetEnumBase!q{t1;et1.decl});
+				t1=t1.getHeadUnqual();
+			}
+			if(auto et2=t2.isEnumTy()){
+				mixin(GetEnumBase!q{t2;et2.decl});
+				t2=t2.getHeadUnqual();
+			}
+
 			auto bt1=t1.isBasicType(), bt2=t2.isBasicType();
 			auto v = Type.get!void();
 			static if(isShiftOp(S)){
@@ -4280,6 +4302,12 @@ class Symbol: Expression{ // semantic node
 
 		if(auto at=meaning.isAggregateDecl()){
 			auto r = at.getType();
+			sstate = SemState.begin;
+			mixin(RewEplg!q{r});
+		}
+
+		if(auto et=meaning.isEnumDecl()){
+			auto r = et.getType();
 			sstate = SemState.begin;
 			mixin(RewEplg!q{r});
 		}
@@ -6278,6 +6306,10 @@ mixin template Semantic(T) if(is(T==Type)){
 	}
 
 	override Dependent!bool convertsTo(Type rhs){
+		if(auto et=rhs.getHeadUnqual().isEnumTy()){
+			mixin(GetEnumBase!q{auto base;et.decl});
+			return convertsTo(base.applySTC(rhs.getHeadSTC()));
+		}
 		return rhs.getHeadUnqual() is Type.get!void() ?true.independent:
 			implicitlyConvertsTo(rhs.getUnqual().getConst());
 	}
@@ -7757,6 +7789,50 @@ mixin template Semantic(T) if(is(T==AggregateTy)){
 	}
 }
 
+mixin template Semantic(T) if(is(T==EnumTy)){
+	override Scope getMemberScope(){
+		return decl.msc;
+	}
+	
+	override string toString(){
+		assert(!!decl.name);
+		return decl.name.toString();
+	}
+
+
+	// (remove this for strongly typed enums)
+	override Dependent!bool implicitlyConvertsTo(Type to){
+		if(auto t=super.implicitlyConvertsTo(to).prop) return t;
+		mixin(GetEnumBase!q{auto base;decl});
+		return base.implicitlyConvertsTo(to);
+	}
+
+	override Dependent!bool convertsTo(Type to){
+		if(auto t=super.convertsTo(to).prop) return t;
+		mixin(GetEnumBase!q{auto base;decl});
+		return base.convertsTo(to);
+	}
+
+	static string valueToString(Type type, Variant value)in{
+		assert(cast(EnumTy)type.getHeadUnqual());
+	}body{
+		auto et=cast(EnumTy)cast(void*)type.getHeadUnqual();
+		string r;
+		foreach(m;et.decl.members){
+			if(m.sstate!=SemState.completed) continue;
+			assert(m.rinit&&m.rinit.isConstant());
+			if(m.rinit.interpretV().opBinary!"is"(value)){
+				return m.name.name;
+/+				r=et.toString()~"."~m.name.name;
+				if(type.isEnumTy()) return r;
+				goto Laddcast;+/
+			}
+		}
+		r=value.toString();
+		Laddcast: return "cast("~type.toString()~")"~r;
+	}
+}
+
 
 // statements
 
@@ -8274,6 +8350,11 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 
 	}
 
+	// allow EnumVarDecl to continue semantic
+	void doSemEplg(){
+		mixin(SemEplg);
+	}
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(rtype){
@@ -8374,11 +8455,13 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				sstate = SemState.completed;
 				init = makeMultiReturn(cast(CallExp)cast(void*)init);
 			}
-			mixin(SemEplg); // Symbol will rewrite the meaning
+			return doSemEplg(); // Symbol will rewrite the meaning
 		}
 
 		{scope(exit) if(sstate==SemState.error) type=null;
+			needRetry=false;
 			mixin(SemProp!q{type});
+			mixin(SemCheck);
 		}
 		type = type.applySTC(stc);
 		// add appropriate storage classes according to type
@@ -8426,7 +8509,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			assert(!!aggr);
 			if(!(stc&(STCstatic|STCenum))) aggr.layoutChanged();
 		}
-		mixin(SemEplg);
+		return doSemEplg();
 	}
 
 	private void prepareEnumInitializer(){
@@ -8495,6 +8578,118 @@ mixin template Semantic(T) if(is(T==EmptyDecl)){
 		mixin(SemEplg);
 	}
 }
+
+mixin template Semantic(T) if(is(T==EnumVarDecl)){
+	EnumDecl enc;
+	Expression rinit;
+	EnumVarDecl prec;
+	
+	override void doSemEplg(){ }
+
+	override void semantic(Scope sc){
+		assert(enc.name&&sc is enc.msc||sc is enc.scope_);
+		mixin(SemPrlg);
+		if(!init){
+			if(!prec){
+				init = LiteralExp.factory(Variant(0, Type.get!int()));
+				init.loc=loc;
+			}else{
+				mixin(SemChld!q{prec});
+				assert(prec.rinit);
+				if(!rtype) type=prec.type;
+				auto previnit=prec.rinit.cloneConstant();
+				auto one=LiteralExp.factory(Variant(1,Type.get!int()));
+				// TODO: prettier error messages?
+				init=New!(BinaryExp!(Tok!"+"))(previnit,one);
+				init.loc=previnit.loc=one.loc=loc;				
+			}
+		}else if(enc.name&&prec||enc.rbase){
+			mixin(GetEnumBase!q{auto base;enc});
+			type=base;
+		}
+		needRetry=false;
+		if(!rinit) super.semantic(sc);
+		mixin(SemCheck);
+		if(!prec) enc.base=type;
+		if(!rinit) rinit=init;
+		if(enc.name){
+			auto ty=enc.getType();
+			assert(!!ty);
+			mixin(ConvertTo!q{init,ty});
+		}
+		mixin(SemEplg);
+	}
+}
+
+mixin CreateBinderForDependent!("GetEnumBase","getEnumBase");
+
+mixin template Semantic(T) if(is(T==EnumDecl)){
+	Type base;
+	EnumTy type;
+	final Type getType(){ return type; }
+	final Dependent!Type getEnumBase()in{assert(rbase||!!name);}body{
+		if(!base){
+			if(!rbase){
+				assert(!!msc);
+				members[0].semantic(msc);
+				mixin(Rewrite!q{members[0]});
+				if(members[0].sstate != SemState.completed)
+					return Dependee(members[0],msc).dependent!Type;
+			}else{
+				base=rbase.typeSemantic(msc);
+				if(rbase.needRetry||rbase.sstate==SemState.error)
+					return Dependee(members[0],msc).dependent!Type;
+			}
+			assert(!!base);				
+		}
+		return base.independent;
+	}
+
+	override void presemantic(Scope sc){
+		if(sstate != SemState.pre) return;
+		if(name){
+			super.presemantic(sc);
+			type = New!EnumTy(this);
+			msc = New!NestedScope(sc);
+		}else scope_ = sc;
+		foreach(m;members){
+			m.enc=this;
+			m.presemantic(msc?msc:sc);
+		}
+		sstate = SemState.begin;
+		if(!members.length){
+			sc.error("enumeration must have at least one member",loc);
+			mixin(ErrEplg);
+		}
+		foreach(i,x;members[1..$]) x.prec=members[i];
+		if(name||rbase){
+			foreach(x;members){
+				if(x.rtype){
+					sc.error("explicit type only allowed in anonymous enum declarations"~(rbase?" without base type":""),x.rtype.loc);
+					x.sstate=SemState.error;
+				}
+			}
+		}
+	}
+	NestedScope msc;
+	override void semantic(Scope sc){
+		if(sstate == SemState.pre) presemantic(sc);
+		mixin(SemPrlg);
+		if(rbase&&(!base||base.sstate!=SemState.completed)){
+			base=rbase.typeSemantic(sc);
+			mixin(SemProp!q{rbase});
+			if(!members[0].rtype) members[0].rtype=base;
+		}
+		mixin(SemChld!q{sc=msc?msc:sc;members[0]});
+		assert(members[0].init.isConstant());
+		if(name && !base) base=members[0].rinit.type;
+		foreach(i,ref m;members[1..$])
+			mixin(SemChldPar!q{sc=msc?msc:sc;m});
+		mixin(PropErr!q{members[1..$]});
+		mixin(SemEplg);
+	}
+}
+
 
 mixin template Semantic(T) if(is(T==GenerativeDecl)){
 
@@ -10405,7 +10600,7 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 					import std.stdio;
 					// if(!sc.handler.showsEffect) stderr.write("(gagged:) ");
 					foreach(x; a)
-						if(!x.isType() && !x.isExpTuple() && intprt)
+						if(x.type.getHeadUnqual().isSomeString())
 							sc.handler.message(x.interpretV().get!string());
 						else sc.handler.message(x.toString());
 					sc.handler.message("\n");

@@ -3535,7 +3535,8 @@ mixin template CTFEInterpret(T) if(is(T==GotoStm)){
 
 mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		auto tu = type.getHeadUnqual();
+		auto tu = value.getType().getHeadUnqual();
+		assert(!tu.isEnumTy());
 		if(auto bt = tu.isBasicType()){
 			if(bt.isIntegral()){
 				bld.emit(Instruction.push);
@@ -4309,6 +4310,10 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 		if(at.decl.isReferenceAggregateDecl()) return BCPointer.sizeof;
 		return getBCSizeof(at)*ulong.sizeof;
 	}
+	if(auto et = type.isEnumTy()){
+		assert(et.decl.base);
+		return getCTSizeof(et.decl.base);
+	}
 	return cast(size_t)type.getSizeof();
 }
 
@@ -4337,6 +4342,10 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 			assert(!!aggrty.decl.isReferenceAggregateDecl());
 			goto ptr;
 		}
+	}
+	if(auto et = type.isEnumTy()){
+		assert(et.decl.base);
+		return getBCSizeof(et.decl.base);
 	}
 	assert(0, "type "~type.toString~" not yet supported in CTFE");
 }
@@ -5322,6 +5331,20 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 		}
 		return Variant(res, type);
 	}	
+}
+
+mixin template CTFEInterpret(T) if(is(T==EnumTy)){
+	override void variantToMemory(Variant value, void[] mem){
+		auto tt=value.getType();
+		auto ty=decl.base.applySTC(tt.getHeadSTC());
+		ty.variantToMemory(value.convertTo(ty), mem);
+	}
+	override Variant variantFromMemory(void[] mem, Type type){
+		assert(type.getHeadUnqual() is this);
+		auto ty=decl.base.applySTC(type.getHeadSTC());
+		auto r=ty.variantFromMemory(mem, ty);
+		return r.convertTo(type);
+	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==DelegateTy)){

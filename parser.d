@@ -1356,17 +1356,22 @@ private struct Parser{
 		expect(Tok!"enum");
 		Identifier tag;
 		Expression base;
-		auto members=appender!(Expression[2][])();
+		auto members=appender!(EnumVarDecl[])();
 		if(ttype==Tok!"i") tag=New!Identifier(tok.name), tag.loc=tok.loc, nextToken();
 		if(ttype==Tok!":") nextToken(), base = parseType();
 		expect(Tok!"{");
-		for(;ttype!=Tok!"}" && ttype!=Tok!"EOF";){ // BUG: only uniform type allowed
-			Expression e,i;
-			if(ttype==Tok!"i") e=New!Identifier(tok.name), e.loc=tok.loc, nextToken();
-			else break;
+		for(;ttype!=Tok!"}" && ttype!=Tok!"EOF";){
+			Identifier e;
+			Expression type=null, i=null;
+			EnumVarDecl vd;
+			auto loc=tok.loc;
+			if(ttype!=Tok!"i"||!peek().type.among(Tok!"=",Tok!",",Tok!"}"))
+				type = parseType();
+			e=parseIdentifier();
 			if(ttype==Tok!"=") nextToken(), i=parseExpression(rbp!(Tok!","));
-			Expression[2] sarr; sarr[0]=e; sarr[1]=i;
-			members.put(sarr);
+			vd=New!EnumVarDecl(type, e, i);
+			vd.loc=loc.to(ptok.loc);
+			members.put(vd);
 			if(ttype!=Tok!"}") expect(Tok!",");
 		}
 		expect(Tok!"}");

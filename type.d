@@ -94,6 +94,7 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 		FunctionTy,
 		DelegateTy,
 		AggregateTy,
+		EnumTy,
 		MatcherTy,
 	);
 	
@@ -340,4 +341,15 @@ class AggregateTy: Type{
 
 	mixin DeepDup!AggregateTy; // workaround for DMD bug. Should actually be in visitors.d
 	mixin CTFEInterpret!AggregateTy; // ditto
+}
+
+class EnumTy: Type{
+	EnumDecl decl;
+	this(EnumDecl decl)in{assert(decl&&decl.name);}body{
+		this.decl = decl;
+		sstate = SemState.completed;
+	}
+	
+	mixin DownCastMethod;
+	mixin Visitors;
 }

@@ -177,6 +177,7 @@ class LiteralExp: Expression{
 	//override string toString(){return _brk(lit.toString());}
 	override string toString(){
 		//if(loc.rep.length) return loc.rep;
+		if(auto et=type.getHeadUnqual().isEnumTy()) return EnumTy.valueToString(type, value);
 		return _brk(value.toString());
 	}
 
@@ -195,7 +196,7 @@ class ArrayAssocExp: Expression{
 class ArrayLiteralExp: Expression{
 	Expression[] lit;
 	this(Expression[] literal){lit=literal;}
-	override string toString(){return _brk("["~join(map!(to!string)(lit),",")~"]");}
+	override string toString(){ return _brk("["~join(map!(to!string)(lit),",")~"]"); }
 
 	mixin DownCastMethod;
 	mixin Visitors;
