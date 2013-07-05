@@ -712,6 +712,11 @@ mixin template Semantic(T) if(is(T==Expression)){
 			void perform(Symbol sym){
 				if(sym.isFunctionLiteral)
 					result &= runAnalysis!FinishDeduction(sym.meaning,sc).result;
+				if(sym.meaning)
+				if(auto cso=sym.meaning.isCrossScopeOverloadSet()){
+					cso.reportConflict(sc,sym.loc);
+					mixin(SetErr!q{sym});
+				}
 			}
 
 			void perform(FunctionDef fd){
@@ -5528,7 +5533,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	override void noHope(Scope sc){
 		if(meaning) return;
 		auto unresolved=sc.getUnresolved(this, true).force;
-		if(!unresolved.inexistent(this))
+		assert(!!unresolved);
+		if(unresolved&&!unresolved.inexistent(this))
 			mixin(ErrEplg);
 	}
 
@@ -5851,6 +5857,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
 			auto unresolved = e1.getMemberScope().getUnresolved(i, true).force;
+			assert(!!unresolved);
 			if(!unresolved.inexistent(i))
 				mixin(ErrEplg);
 		}
@@ -9868,6 +9875,91 @@ class OverloadSet: Declaration{ // purely semantic node
 	TemplateDecl[] tdecls;
 }
 
+class CrossScopeOverloadSet : Declaration{
+	Declaration[] decls;
+	this(Declaration[] decls)in{
+		assert(decls.length>1);
+		foreach(x;decls[1..$]) assert(x.name.name == decls[0].name.name);
+	}body{
+		this.decls=decls;
+		super(STC.init, decls[0].name);
+	}
+
+	static class OverloadResolver(string op,TT...) : Declaration{
+		// TODO: report DMD bug. This does not work if TT is called T instead
+
+		TT args;
+		Declaration[] decls;
+		this(Scope sc, TT args, Declaration[] decls){
+			this.args=args;
+			this.decls=decls;
+			semantic(sc);
+			super(STC.init, decls[0].name);
+		}
+		void semantic(Scope sc){
+			mixin(SemPrlg);
+			foreach(ref decl;decls)
+				if(decl&&decl.sstate!=SemState.error){mixin(op);}
+			Declaration r=null;
+			foreach(decl;decls){
+				if(!decl) continue;
+				if(!r){ r=decl; continue; }
+				// TODO: report DMD bug, filter should obviously work
+				auto numMatches = 0;
+				for(size_t i=0;i<decls.length;i++){
+					if(decls[i]) swap(decls[numMatches++], decls[i]);
+				}
+				if(sc) reportConflict(sc, loc, decls[0..numMatches]);//filter!(function(a)=>!!a)(decls));
+				mixin(ErrEplg);
+			}
+			mixin(RewEplg!q{r});
+		}
+	}
+
+	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
+
+		// TODO: context?
+		enum op=q{ MatchContext dummy; mixin(MatchCall!q{decl;decl,null,loc,args, dummy}); };
+
+		auto r=New!(OverloadResolver!(op,Type,Expression,Expression[]))(sc, this_, func, args, decls.dup);
+		r.loc=loc;
+		return r.independent!Declaration;
+	}
+
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
+		enum op=q{ decl = decl.matchInstantiation(null, loc, args); if(decl) mixin(SemChld!q{decl}); };
+		auto r=New!(OverloadResolver!(op,Expression,TemplArgsWithTypes))(sc, owner, args, decls.dup);
+		r.loc=loc;
+		return r;
+	}
+	
+	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
+		enum op=q{ decl = decl.matchIFTI(null, loc, args); if(decl) mixin(SemChld!q{decl}); };
+		auto r=New!(OverloadResolver!(op,Type,Expression,TemplArgsWithTypes,Expression[]))(sc, this_, func, args, funargs, decls.dup);
+		r.loc=loc;
+		return r;
+	}
+	static void reportConflict(R)(Scope sc, const ref Location loc, R decls)in{
+		assert(!!sc&&!decls.empty);
+	}body{
+		// TODO: improve error messages
+		sc.error(format("conflicting declarations for a lookup of '%s'",decls.front.name),loc);
+		foreach(decl;decls) sc.note("part of conflict", decl.loc);
+	}
+	final void reportConflict()(Scope sc, Location loc){ // workaround for DMD bug
+		reportConflict(sc, loc, decls);
+	}
+
+	override @property string kind(){
+		return "cross-scope overload set";
+	}
+
+	override string toString(){ return join(map!(to!string)(decls)); }	
+
+	mixin DownCastMethod;
+}
+
+
 // TODO: should those be nested classes of OverloadSet? Silly indentation...
 abstract class SymbolMatcher: Declaration{
 	OverloadSet set;
@@ -10636,11 +10728,18 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	else static if(is(T==MixinStm)) alias Statement R;
 	else static if(is(T==MixinDecl)) alias Declaration R;
 	static if(is(T==MixinDecl)){
+		override void potentialInsert(Scope sc, Declaration decl){
+			sc.potentialInsertArbitrary(this, decl);
+		}
+		override void potentialRemove(Scope sc, Declaration decl){
+			sc.potentialRemoveArbitrary(this, decl);
+		}
+
 		override void presemantic(Scope sc){
 			if(sstate != SemState.pre) return;
 			scope_ = sc;
 			sstate = SemState.begin;
-			sc.insertMixin(this);
+			potentialInsert(sc, this);
 		}
 		Declaration mixedin;
 		override void buildInterface(){
@@ -10729,7 +10828,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	override void semantic(Scope sc){
 		auto r=evaluate(sc);
 		static if(is(T==MixinDecl)){
-			scope(success) if(rewrite||sstate==SemState.error) sc.removeMixin(this);
+			scope(success) if(rewrite||sstate==SemState.error) potentialRemove(sc, this);
 		}
 		mixin(SemCheck);
 		mixin(RewEplg!q{r});

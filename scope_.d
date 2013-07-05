@@ -102,6 +102,7 @@ abstract class Scope{ // SCOPE
 
 	// scope where the identifier will be resolved next
 	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+		if(mixins.length) return this.independent!Scope;
 		mixin(LookupHere!q{auto d; this, ident, null});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
 			return null.independent!Scope;
@@ -126,15 +127,19 @@ abstract class Scope{ // SCOPE
 		else if((*ptr).find(decl).empty) (*ptr)~=decl;
 	}
 
-	void insertMixin(MixinDecl decl){
-		mixins ~= decl;
+	void potentialInsertArbitrary(MixinDecl mxin, Declaration decl){
+		mixins ~= mxin;
+		mixindecls ~= decl;
 	}
-	void removeMixin(MixinDecl decl){
+	void potentialRemoveArbitrary(MixinDecl mxin, Declaration decl){
 		foreach(i,x; mixins){
-			if(x is decl){
+			if(x is mxin && mixindecls[i] is decl){
 				mixins[i]=move(mixins[$-1]);
 				mixins=mixins[0..$-1];
 				mixins.assumeSafeAppend();
+				mixindecls[i]=move(mixindecls[$-1]);
+				mixindecls=mixindecls[0..$-1];
+				mixindecls.assumeSafeAppend();
 				break;
 			}
 		}
@@ -153,9 +158,8 @@ abstract class Scope{ // SCOPE
 	}
 
 	Declaration/+final+/[] potentialLookup(Identifier ident){
-		return psymtab.get(ident.ptr,[])~cast(Declaration[])mixins;
+		return psymtab.get(ident.ptr,[])~mixindecls;
 		// TODO: this is probably slow
-		// TODO: DMD should allow this without a cast
 	}
 
 
@@ -201,6 +205,9 @@ private:
 	Declaration[const(char)*] symtab;
 	Declaration[][const(char)*] psymtab;
 	MixinDecl[] mixins;
+	Declaration[] mixindecls;
+	ImportDecl[] potentialImports;
+	Scope[] imports;
 }
 
 class ModuleScope: Scope{

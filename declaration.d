@@ -33,6 +33,7 @@ abstract class Declaration: Statement{
 		TemplateInstanceDecl,
 		OverloadableDecl,
 		OverloadSet,
+		CrossScopeOverloadSet,
 		SymbolMatcher,
 		GenerativeDecl,
 		AliasDecl,
