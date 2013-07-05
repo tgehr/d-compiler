@@ -80,7 +80,7 @@ template PropErr(string s) if(!s.canFind(",")){
 	enum PropErr=s.length?mixin(X!q{
 		static if(is(typeof(@(sp[1])): Node)){
 			if(@(sp[1]).sstate==SemState.error){
-				//auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
+				// auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
 				@(ErrEplg)
 			}
 		}else foreach(x;@(sp[1])) mixin(PropErr!q{x});
@@ -410,8 +410,8 @@ template RewEplg(string s) if(!s.canFind(",")){
 }
 
 enum ErrEplg=q{
+	// dw(this," ",__LINE__);
 	mixin(NoRetry);
-	//dw(this," ",__LINE__);
 	sstate=SemState.error;
 	mixin(SemRet);
 };
@@ -510,7 +510,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		static assert(!is(typeof(super.inContext)), "already context-sensitive");
 		auto inContext = InContext.none;
 		override void isInContext(InContext inContext){
-			assert(this.inContext.among(InContext.none, inContext), text(this.inContext," ",inContext));
+			assert(this.inContext.among(InContext.none, inContext), text(this," ",this.inContext," ",inContext));
 			this.inContext=inContext;
 		}
 		final void transferContext(Expression r)in{
@@ -536,6 +536,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 	void noHope(Scope sc){}
 
 	Type typeSemantic(Scope sc){
+		// dw(this," ",sstate," ",typeid(this));
 		Expression me=this;
 		if(sstate != SemState.completed){ // TODO: is this ok?
 			me.semantic(sc);
@@ -1746,6 +1747,9 @@ class TemplateInstanceDecl: Declaration{
 	BlockDecl bdy;
 
 	TemplateScope paramScope;
+	Scope parentScope;
+
+	bool isMixin = false;
 
 	final @property bool completedMatching(){ return matchState>=MatchState.completed; }
 	final @property bool completedParameterResolution(){
@@ -1755,17 +1759,17 @@ class TemplateInstanceDecl: Declaration{
 	private{
 
 		enum MatchState{
-			start,              // start matching
-			iftiStart,          // start matching in ifti mode
+			start,               // start matching
+			iftiStart,           // start matching in ifti mode
 			iftiPrepare,
-			iftiMatching,       // continue ifti matching
-			resolvedSemantic,   // apply default args
+			iftiMatching,        // continue ifti matching
+			resolvedSemantic,    // apply default args
 			iftiResolvedSemantic,// apply default args and return to iftiMatch if necessary
-			checkMatch,         // check if there is a match
-			checkConstraint,    // check the constraint
-			checkingConstraint, // checking in progress
-			completed,          // matching succeeded
-			analysis,           // analyzing template body
+			checkMatch,          // check if there is a match
+			checkConstraint,     // check the constraint
+			checkingConstraint,  // checking in progress
+			completed,           // matching succeeded
+			analysis,            // analyzing template body
 		}
 
 		MatchState matchState = MatchState.start;
@@ -1773,6 +1777,7 @@ class TemplateInstanceDecl: Declaration{
 
 	this(TemplateDecl parent, const ref Location loc, Expression expr, TemplArgsWithTypes args)in{
 		assert(expr.isSymbol() || expr.isTemplateInstanceExp());
+		assert(parent && parent.scope_);
 	}body{
 		super(parent.stc, parent.name);
 		this.parent=parent;
@@ -1786,7 +1791,7 @@ class TemplateInstanceDecl: Declaration{
 		if(!this.instantiation)
 			this.instantiation = expr; // TODO: need to handle FieldExp?
 
-		scope_ = parent.scope_;
+		scope_ = parentScope = parent.scope_;
 		sstate = SemState.begin;
 	}
 
@@ -1801,21 +1806,26 @@ class TemplateInstanceDecl: Declaration{
 	final void gag()in{
 		assert(!paramScope && !iftiScope);
 	}body{
-		scope_ = New!GaggingRecordingScope(parent.scope_);
+		scope_ = New!GaggingRecordingScope(parentScope);
 	}
 
 	final void ungag()in{
 		assert(isGagged,text("attempted to ungag ",this," which was not gagged"));
 	}body{
 		assert(!!cast(GaggingRecordingScope)scope_);
-		(cast(GaggingRecordingScope)cast(void*)scope_).replay(parent.scope_);
-		scope_ = parent.scope_;
-		paramScope.parent = parent.scope_;
+		(cast(GaggingRecordingScope)cast(void*)scope_).replay(parentScope);
+		scope_ = parentScope;
+		paramScope.parent = parentScope;
 
 		Scheduler().add(this, scope_);
 	}
 
-	final @property bool isGagged(){ return scope_ !is parent.scope_; }
+	void initializeMixin(Scope sc)in{assert(!isGagged);}body{
+		isMixin=true;
+		scope_ = parentScope = sc;
+	}
+
+	final @property bool isGagged(){ return scope_ !is parentScope; }
 
 	final FunctionDecl iftiDecl()in{
 		assert(finishedInstantiation());
@@ -1833,7 +1843,7 @@ class TemplateInstanceDecl: Declaration{
 	private void determineInstanceScope()in{
 		assert(paramScope && paramScope.parent is paramScope.iparent);
 	}body{
-		Scope instanceScope = parent.scope_;
+		Scope instanceScope = parentScope;
 		
 		if(!(parent.stc&STCstatic)) return; // TODO: fix!
 
@@ -1854,7 +1864,7 @@ class TemplateInstanceDecl: Declaration{
 			if(n>=maxn){
 				maxn=n;
 				if(!decl.scope_.isNestedIn(instanceScope)){
-					instanceScope = parent.scope_;
+					instanceScope = parentScope;
 					break; // TODO: fix!
 				}
 				instanceScope = decl.scope_;
@@ -2127,7 +2137,7 @@ class TemplateInstanceDecl: Declaration{
 		determineInstanceScope();
 		auto instanceScope = paramScope.iparent;
 		bdy.stc|=parent.stc;
-		if(instanceScope !is parent.scope_){
+		if(instanceScope !is parentScope){
 			bdy.stc&=~STCstatic;
 			foreach(decl;&bdy.traverseInOrder)
 				decl.stc&=~STCstatic;
@@ -2910,19 +2920,19 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 			}());
 	}
 +/
-	private Declaration matchHelper(bool fullySpecified, T...)(Scope sc, const ref Location loc, T ts){
-		alias ts[!fullySpecified+1] args; // respect this_
+	private Declaration matchHelper(bool isIFTI, T...)(Scope sc, const ref Location loc, bool gagged, bool isMixin, T ts){
+		static if(isIFTI) assert(!isMixin);
+		alias ts[isIFTI+1] args; // respect this_
 		assert(!!scope_);
 		assert(sstate == SemState.completed);
 
-		auto gagged = !sc||!sc.handler.showsEffect;
-
-		static if(fullySpecified) if(auto r=store.lookup(args.args)){
+		static if(!isIFTI) if(!isMixin) if(auto r=store.lookup(args.args)){
 			if(!gagged&&r.isGagged()) r.ungag();
 			return r;
 		}
 
-		auto inst = New!TemplateInstanceDecl(this,loc,ts[!fullySpecified..$]);
+		auto inst = New!TemplateInstanceDecl(this,loc,ts[isIFTI..$]);
+		if(isMixin) inst.initializeMixin(sc);
 		if(gagged) inst.gag();
 
 		if(!inst.completedMatching){
@@ -2935,24 +2945,27 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	}
 
 	TemplateInstanceDecl completeMatching(TemplateInstanceDecl inst, bool gagged){
-		if(auto exst = store.lookup(inst.resolved)) inst = exst;
-		else store.add(inst);
+		if(!inst.isMixin){
+			if(auto exst = store.lookup(inst.resolved)) inst = exst;
+			else store.add(inst);
+		}
 		// dw("built ", inst);
 		return inst;
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression expr, TemplArgsWithTypes args){
-		auto r=matchHelper!true(sc, loc, expr, args);
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression expr, TemplArgsWithTypes args){
+		auto r=matchHelper!false(sc, loc, !sc||!sc.handler.showsEffect||gagged, isMixin, expr, args);
 		// TODO: more explicit error message
-		if(!r && sc) sc.error("instantiation does not match template declaration",loc);
+		if(!r && !gagged) sc.error("instantiation does not match template declaration",loc);
 		return r;
 	}
 
 	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
-		if(!iftiDecl) return matchInstantiation(sc, loc, func, args);
-		auto r=matchHelper!false(sc, loc, this_, func, args, funargs);
+		if(!iftiDecl) return matchInstantiation(sc, loc, !sc||!sc.handler.showsEffect, false, func, args);
+		auto gagged=!sc||!sc.handler.showsEffect; // TODO: get rid of !sc
+		auto r=matchHelper!true(sc, loc, gagged, false, this_, func, args, funargs);
 		// TODO: more explicit error message
-		if(!r && sc) sc.error("could not match call to function template",loc);
+		if(!r && !gagged) sc.error("could not match call to function template",loc);
 		return r;
 	}
 
@@ -2998,6 +3011,38 @@ private:
 }
 
 
+mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
+	// TODO: peek into ongoing instantiation for more precision?
+	override void potentialInsert(Scope sc, Declaration decl){
+		sc.potentialInsertArbitrary(this, decl);
+	}
+	override void potentialRemove(Scope sc, Declaration decl){
+		sc.potentialRemoveArbitrary(this, decl);
+	}
+
+	override void presemantic(Scope sc){
+		if(sstate != SemState.pre) return;
+		if(auto tie=inst.isTemplateInstanceExp()) tie.isMixin = true;
+		else{
+			auto tie = New!TemplateInstanceExp(inst,(Expression[]).init);
+			tie.isMixin = true;
+			tie.loc = inst.loc;
+			inst = tie;
+		}
+		scope_ = sc;
+		sstate = SemState.begin;
+		potentialInsert(sc, this);
+	}
+
+	override void semantic(Scope sc){
+		if(sstate == SemState.pre) presemantic(sc);
+		mixin(SemPrlg);
+		scope(exit) if(!needRetry) potentialRemove(sc, this);
+		inst.willAlias();
+		mixin(SemChld!q{inst});
+		mixin(SemEplg);
+	}
+}
 
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
@@ -3007,6 +3052,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	@property bool analyzedArgsInitialized(){
 		return analyzedArgs.length||!args.length;
 	}
+	bool isMixin = false;
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -3120,7 +3166,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 
 	private void instantiateSemantic(Scope sc, Expression container, Symbol sym, AccessCheck accessCheck){
 		if(!inst){
-			inst = sym.meaning.matchInstantiation(sc, loc, this, TemplArgsWithTypes(analyzedArgs,argTypes));
+			inst = sym.meaning.matchInstantiation(sc, loc, false, isMixin, this, TemplArgsWithTypes(analyzedArgs,argTypes));
 			if(!inst||inst.sstate==SemState.error) mixin(ErrEplg);
 		}
 		assert(!!inst);
@@ -3137,6 +3183,12 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		assert(!!cast(TemplateInstanceDecl)inst, text(typeid(this.inst)));
 		auto inst = cast(TemplateInstanceDecl)cast(void*)inst; // update static type of inst
 		auto decl = inst.parent;
+
+		if(!isMixin && decl.isMixin){
+			sc.error("cannot instantiate a mixin template regularly", loc);
+			sc.note("declared here", decl.loc);
+			mixin(ErrEplg);
+		}
 
 		needRetry=false;
 
@@ -8218,7 +8270,7 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		sc.error(format("%s '%s' is not callable",kind,name.toString()),loc);
 	}
 
-	Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
+	Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression owner, TemplArgsWithTypes args){
 		if(sc) sc.error(format("can only instantiate templates, not %s%ss",kind,kind[$-1]=='s'?"e":""),loc);
 		return null;
 	}
@@ -8936,6 +8988,7 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 private:
 	bool addedToScheduler = false;
 }
+
 mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	Expression[] rparents = null; // the expressions that the current parents originated from
 
@@ -9392,7 +9445,6 @@ mixin template Semantic(T) if(is(T==ValueAggregateDecl)){}
 mixin template Semantic(T) if(is(T==StructDecl)){}
 mixin template Semantic(T) if(is(T==UnionDecl)){}
 
-
 mixin template Semantic(T) if(is(T==AggregateDecl)){
 	/* overridden in ReferenceAggregateDecl */
 	protected void findParents(){ }
@@ -9833,10 +9885,10 @@ class OverloadSet: Declaration{ // purely semantic node
 		}
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression owner, TemplArgsWithTypes args){
 		if(tdecls.length==0) return null; // TODO: error message
-		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, owner, args);
-		return New!TemplateOverloadMatcher(this, loc, owner, args);
+		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, gagged, isMixin, owner, args);
+		return New!TemplateOverloadMatcher(this, sc, loc, gagged, isMixin, owner, args);
 	}
 
 	final void instantiationError(Scope sc, const ref Location loc, TemplateInstanceDecl[] insts, TemplArgsWithTypes args){
@@ -9926,9 +9978,9 @@ class CrossScopeOverloadSet : Declaration{
 		return r.independent!Declaration;
 	}
 
-	override Declaration matchInstantiation(Scope sc, const ref Location loc, Expression owner, TemplArgsWithTypes args){
-		enum op=q{ decl = decl.matchInstantiation(null, loc, args); if(decl) mixin(SemChld!q{decl}); };
-		auto r=New!(OverloadResolver!(op,Expression,TemplArgsWithTypes))(sc, owner, args, decls.dup);
+	override Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression owner, TemplArgsWithTypes args){
+		enum op=q{ decl = decl.matchInstantiation(sc, loc, args); if(decl) mixin(SemChld!q{decl}); };
+		auto r=New!(OverloadResolver!(op,bool,bool,Expression,TemplArgsWithTypes))(sc, gagged, isMixin, owner, args, decls.dup);
 		r.loc=loc;
 		return r;
 	}
@@ -9979,12 +10031,12 @@ abstract class SymbolMatcher: Declaration{
 class TemplateOverloadMatcher: SymbolMatcher{
 	Declaration[] insts;
 	TemplArgsWithTypes args;
-	this(OverloadSet set, const ref Location loc, Expression func, TemplArgsWithTypes args){
+	this(OverloadSet set, Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression func, TemplArgsWithTypes args){
 		this.args=args;
 		super(set, loc, func);
 		// TODO: gc allocation
 		insts = new Declaration[](set.tdecls.length);
-		foreach(i, ref x; insts) x=set.tdecls[i].matchInstantiation(null, loc, func, args);
+		foreach(i, ref x; insts) x=set.tdecls[i].matchInstantiation(sc/+isMixin?sc:null+/, loc, true, isMixin, func, args);
 		enum SemRet = q{return;}; // TODO: remove
 		mixin(RetryEplg);
 	}

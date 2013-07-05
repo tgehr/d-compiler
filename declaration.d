@@ -224,12 +224,12 @@ final class TemplateParameter: Node{
 }
 
 class TemplateDecl: OverloadableDecl{
-	bool ismixin;
+	bool isMixin;
 	TemplateParameter[] params;
 	Expression constraint;
 	BlockDecl bdy;
 	this(bool m,STC stc,Identifier name, TemplateParameter[] prm, Expression c, BlockDecl b){
-		ismixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
+		isMixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
 	}
 	override string toString(){
 		return (stc?STCtoString(astStc)~" ":"")~"template "~name.toString()~"("~join(map!(to!string)(params),",")~")"~
@@ -254,6 +254,8 @@ class TemplateMixinDecl: Declaration{
 	Expression inst;
 	this(STC stc, Expression i, Identifier name)in{assert(i&&1);}body{inst=i; super(stc,name);}
 	override string toString(){return "mixin "~inst.toString()~(name?" "~name.toString():"")~";";}
+
+	mixin Visitors;
 }
 
 abstract class AggregateDecl: Declaration, NotifyOnLayoutChanged{

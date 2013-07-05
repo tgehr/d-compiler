@@ -102,7 +102,7 @@ abstract class Scope{ // SCOPE
 
 	// scope where the identifier will be resolved next
 	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
-		if(mixins.length) return this.independent!Scope;
+		if(arbitrary.length) return this.independent!Scope;
 		mixin(LookupHere!q{auto d; this, ident, null});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
 			return null.independent!Scope;
@@ -127,19 +127,19 @@ abstract class Scope{ // SCOPE
 		else if((*ptr).find(decl).empty) (*ptr)~=decl;
 	}
 
-	void potentialInsertArbitrary(MixinDecl mxin, Declaration decl){
-		mixins ~= mxin;
-		mixindecls ~= decl;
+	void potentialInsertArbitrary(Declaration mxin, Declaration decl){
+		arbitrary ~= mxin;
+		arbitrarydecls ~= decl;
 	}
-	void potentialRemoveArbitrary(MixinDecl mxin, Declaration decl){
-		foreach(i,x; mixins){
-			if(x is mxin && mixindecls[i] is decl){
-				mixins[i]=move(mixins[$-1]);
-				mixins=mixins[0..$-1];
-				mixins.assumeSafeAppend();
-				mixindecls[i]=move(mixindecls[$-1]);
-				mixindecls=mixindecls[0..$-1];
-				mixindecls.assumeSafeAppend();
+	void potentialRemoveArbitrary(Declaration mxin, Declaration decl){
+		foreach(i,x; arbitrary){
+			if(x is mxin && arbitrarydecls[i] is decl){
+				arbitrary[i]=move(arbitrary[$-1]);
+				arbitrary=arbitrary[0..$-1];
+				arbitrary.assumeSafeAppend();
+				arbitrarydecls[i]=move(arbitrarydecls[$-1]);
+				arbitrarydecls=arbitrarydecls[0..$-1];
+				arbitrarydecls.assumeSafeAppend();
 				break;
 			}
 		}
@@ -158,7 +158,7 @@ abstract class Scope{ // SCOPE
 	}
 
 	Declaration/+final+/[] potentialLookup(Identifier ident){
-		return psymtab.get(ident.ptr,[])~mixindecls;
+		return psymtab.get(ident.ptr,[])~arbitrarydecls;
 		// TODO: this is probably slow
 	}
 
@@ -204,9 +204,8 @@ protected:
 private:
 	Declaration[const(char)*] symtab;
 	Declaration[][const(char)*] psymtab;
-	MixinDecl[] mixins;
-	Declaration[] mixindecls;
-	ImportDecl[] potentialImports;
+	Declaration[] arbitrary;
+	Declaration[] arbitrarydecls;
 	Scope[] imports;
 }
 
