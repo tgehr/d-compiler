@@ -1,14 +1,16 @@
 mixin template Bar(int x){
-	int foo = y+2;
+	enum Bar = "Don't do eponymous lookup!";
+	enum foo = y+2;
 	pragma(msg, foo);
 }
 
 void fun(){
-	int y;
+	enum y=3;
 	mixin Bar!2;
+	static assert(foo==5); // TODO
 }
 
-/+
+
 mixin template Foo(int x){
 	enum bar = x;
 }
