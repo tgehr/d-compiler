@@ -246,6 +246,7 @@ mixin CreateBinderForDependent!("AtLeastAsSpecialized","atLeastAsSpecialized");
 mixin CreateBinderForDependent!("DetermineMostSpecialized","determineMostSpecialized");
 mixin CreateBinderForDependent!("Lookup","lookup");
 mixin CreateBinderForDependent!("LookupHere","lookupHere");
+mixin CreateBinderForDependent!("LookupExactlyHere","lookupExactlyHere");
 mixin CreateBinderForDependent!("GetUnresolved","getUnresolved");
 mixin CreateBinderForDependent!("IsDeclAccessible","isDeclAccessible");
 mixin CreateBinderForDependent!("DetermineOverride","determineOverride");
@@ -3040,6 +3041,11 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		scope(exit) if(!needRetry) potentialRemove(sc, this);
 		inst.willAlias();
 		mixin(SemChld!q{inst});
+		assert(cast(Symbol)inst);
+		auto sym=cast(Symbol)cast(void*)inst;
+		assert(cast(TemplateInstanceDecl)sym.meaning);
+		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
+		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
 		mixin(SemEplg);
 	}
 }
@@ -3209,23 +3215,26 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			this.res = res;
 		}else res = sym;
 
-		// for eponymous template trick: attempt lookup and don't perform trick if it fails
-		eponymous=New!Identifier(decl.name.name);
-		eponymous.loc=loc;
-		eponymous.accessCheck=accessCheck;
+		if(!isMixin){
+			// for eponymous template trick: attempt lookup and don't perform trick if it fails
+			eponymous=New!Identifier(decl.name.name);
+			eponymous.loc=loc;
+			eponymous.accessCheck=accessCheck;
+		}
 		semantic(sc); // no indefinite recursion because 'res' is now set
 	}
 
 	private void instantiateResSemantic(Scope sc){
-		if(!eponymous.meaning && eponymous.sstate != SemState.failed
-		&& eponymous.sstate != SemState.error){
-			eponymous.recursiveLookup = false;
-			mixin(Lookup!q{_; eponymous, res.getMemberScope()});
+		if(eponymous){
+			if(!eponymous.meaning && eponymous.sstate != SemState.failed
+			   && eponymous.sstate != SemState.error){
+				eponymous.recursiveLookup = false;
+				mixin(Lookup!q{_; eponymous, res.getMemberScope()});
+			}
+			if(auto nr=eponymous.needRetry) { needRetry = nr; return; }
+			mixin(PropErr!q{eponymous});
 		}
-		if(auto nr=eponymous.needRetry) { needRetry = nr; return; }
-		mixin(PropErr!q{eponymous});
-		Identifier.tryAgain = true;
-		if(eponymous.sstate == SemState.failed){
+		if(!eponymous||eponymous.sstate == SemState.failed){
 			needRetry=false;
 			auto r = res;
 			if(r.sstate!=SemState.completed&&r.sstate!=SemState.error)
@@ -4898,11 +4907,11 @@ class GaggingScope: NestedScope{
 	override void note(lazy string, Location){ /* do nothing */ }
 
 	// forward other members:
-	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
-		return parent.lookup(ident,alt);
+	override Dependent!Declaration lookup(Identifier ident){
+		return parent.lookup(ident);
 	}
-	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
-		return parent.lookupHere(ident, alt);
+	override Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
+		return parent.lookupHere(ident, ignoreImports);
 	}
 
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
@@ -5520,8 +5529,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			sstate=SemState.begin; // reset
 
 			//meaning=recursiveLookup?lkup.lookup(this, null):lkup.lookupHere(this, null);
-			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this, null});
-			else mixin(LookupHere!q{meaning; lkup, this, null});
+			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this});
+			else mixin(LookupHere!q{meaning; lkup, this, false});
 
 			if(!meaning){
 				if(unresolved){
@@ -9015,7 +9024,9 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		mixin(AggregateParentsInOrderTraversal!(q{			
 			foreach(decl; &parent.bdy.traverseInOrder){
 				if(decl.name && decl.name.ptr){
-					if(auto d=shortcutScope.lookupHere(decl.name, null).value){
+					// TODO: handle the case where the meaning of a symbol does not
+					// change due to inheritance, eg. due to imports or alias
+					if(auto d=shortcutScope.lookupHere(decl.name, false).value){
 						if(typeid(d) is typeid(DoesNotExistDecl))
 							shortcutScope.potentialAmbiguity(decl.name, d.name);
 					}
@@ -9114,7 +9125,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		mixin(InheritVtbl!q{ClassDecl parent; this});
 		OverloadSet set;
 		if(!parent) goto Lfresh;
-		auto ovscd = parent.asc.lookupHere(decl.name, null);
+		auto ovscd = parent.asc.lookupHere(decl.name, true);
 		assert(!ovscd.dependee);
 		auto ovsc = ovscd.value;
 		if(!ovsc||typeid(ovsc) is typeid(DoesNotExistDecl)) goto Lfresh;
@@ -9265,7 +9276,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 		foreach(x; vtbl.vtbl){
 			if(x.state == VtblState.needsOverride){
-				auto ovscd = asc.lookupHere(x.fun.name, null);
+				auto ovscd = asc.lookupHere(x.fun.name, true);
 				assert(!ovscd.dependee);
 				auto ovsc = ovscd.value;
 				assert(!!ovsc && typeid(ovsc) !is typeid(DoesNotExistDecl));
@@ -9940,18 +9951,17 @@ class CrossScopeOverloadSet : Declaration{
 	static class OverloadResolver(string op,TT...) : Declaration{
 		// TODO: report DMD bug. This does not work if TT is called T instead
 
-		TT args;
+		static if(TT.length) TT args;
 		Declaration[] decls;
 		this(Scope sc, TT args, Declaration[] decls){
-			this.args=args;
+			static if(TT.length) this.args=args;
 			this.decls=decls;
 			semantic(sc);
 			super(STC.init, decls[0].name);
 		}
 		void semantic(Scope sc){
 			mixin(SemPrlg);
-			foreach(ref decl;decls)
-				if(decl&&decl.sstate!=SemState.error){mixin(op);}
+			mixin(op);
 			Declaration r=null;
 			foreach(decl;decls){
 				if(!decl) continue;
@@ -9970,8 +9980,15 @@ class CrossScopeOverloadSet : Declaration{
 
 	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 
-		// TODO: context?
-		enum op=q{ MatchContext dummy; mixin(MatchCall!q{decl;decl,null,loc,args, dummy}); };
+		enum op=q{
+			foreach(ref decl;decls){
+				if(decl&&decl.sstate!=SemState.error){
+					MatchContext dummy;
+					auto foo=decl;
+					mixin(MatchCall!q{foo;foo,null,loc,args, dummy});
+				}
+			}
+		};
 
 		auto r=New!(OverloadResolver!(op,Type,Expression,Expression[]))(sc, this_, func, args, decls.dup);
 		r.loc=loc;
@@ -9979,15 +9996,23 @@ class CrossScopeOverloadSet : Declaration{
 	}
 
 	override Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression owner, TemplArgsWithTypes args){
-		enum op=q{ decl = decl.matchInstantiation(sc, loc, args); if(decl) mixin(SemChld!q{decl}); };
-		auto r=New!(OverloadResolver!(op,bool,bool,Expression,TemplArgsWithTypes))(sc, gagged, isMixin, owner, args, decls.dup);
+		auto insts=decls.dup;
+		foreach(ref ifti;insts) ifti = ifti.matchInstantiation(sc, loc, gagged, isMixin, owner, args); 
+		auto r=New!(OverloadResolver!(instOp))(sc,insts);
 		r.loc=loc;
 		return r;
 	}
+	enum instOp=q{
+		foreach(ref decl; decls){
+			mixin(SemChld!q{decl});
+			if(decl.sstate == SemState.error) decl = null;
+		}
+	};
 	
 	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
-		enum op=q{ decl = decl.matchIFTI(null, loc, args); if(decl) mixin(SemChld!q{decl}); };
-		auto r=New!(OverloadResolver!(op,Type,Expression,TemplArgsWithTypes,Expression[]))(sc, this_, func, args, funargs, decls.dup);
+		auto iftis=decls.dup;
+		foreach(ref ifti;iftis) ifti = ifti.matchIFTI(null, loc, this_, func, args, funargs);
+		auto r=New!(OverloadResolver!(instOp))(sc, iftis);
 		r.loc=loc;
 		return r;
 	}

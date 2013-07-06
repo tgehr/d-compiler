@@ -4142,7 +4142,7 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 			
 			if(!ident.meaning){
 				Dependent!FunctionDecl traverse(ReferenceAggregateDecl raggr){
-					auto own = raggr.asc.lookupHere(ident, null);
+					auto own = raggr.asc.lookupHere(ident, true);
 					own.dependentCTFE();
 					if(auto ovs = own.value.isOverloadSet()){
 						mixin(FindOverrider!q{auto fod;ovs,decl});

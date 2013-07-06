@@ -55,9 +55,8 @@ abstract class Scope{ // SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		auto dd=lookupExactlyHere(decl.name,null), d = dd.value, dep = dd.dependee;
-		assert(!dd.dependee||!dd.value);
-		if(!dep&&d){
+		auto d=lookupExactlyHere(decl.name);
+		if(d){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(decl.name, d.name);
 				mixin(SetErr!q{d.name});
@@ -88,9 +87,8 @@ abstract class Scope{ // SCOPE
 	}
 
 	bool inexistent(Identifier ident){
-		auto dd=lookupExactlyHere(ident,null), d = dd.value, dep = dd.dependee;
-		assert(!dd.dependee||!dd.value);
-		if(!dep&&d){
+		auto d=lookupExactlyHere(ident);
+		if(d){
 			if(typeid(d) !is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(d.name, ident);
 				mixin(SetErr!q{ident});
@@ -103,22 +101,23 @@ abstract class Scope{ // SCOPE
 	// scope where the identifier will be resolved next
 	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
 		if(arbitrary.length) return this.independent!Scope;
-		mixin(LookupHere!q{auto d; this, ident, null});
+		mixin(LookupHere!q{auto d; this, ident, true});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
-			return null.independent!Scope;
+			return null.independent!Scope; // TODO: IMPORTS
 		return this.independent!Scope;
 	}
 
-	Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
-		return lookupHere(ident, alt);
+	Dependent!Declaration lookup(Identifier ident){
+		return lookupHere(ident, false);
 	}
 
-	final Dependent!Declaration lookupExactlyHere(Identifier ident, lazy Declaration alt){
-		return symtab.get(ident.ptr, alt).independent;
+	final Declaration lookupExactlyHere(Identifier ident){
+		return symtab.get(ident.ptr, null);
 	}
 
-	Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
-		return lookupExactlyHere(ident, alt);
+	Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
+		return lookupExactlyHere(ident).independent;
+		// TODO: IMPORTS
 	}
 
 	void potentialInsert(Identifier ident, Declaration decl){
@@ -160,6 +159,20 @@ abstract class Scope{ // SCOPE
 	Declaration/+final+/[] potentialLookup(Identifier ident){
 		return psymtab.get(ident.ptr,[])~arbitrarydecls;
 		// TODO: this is probably slow
+	}
+
+	private Identifier[] notImported;
+	bool addImport(Scope sc,){
+		foreach(x;imports) if(x is sc) return true; // TODO: make more efficient?
+		imports ~= sc;
+		bool ret = true;
+		foreach(ident;notImported){
+			// TODO: this will not report ambiguities/contradictions introduced
+			// by modules that are not analyzed to sufficient depth
+			// (eg, because their import is the last thing that happens.)
+			ret&=sc.inexistent(ident);
+		}
+		return ret;
 	}
 
 
@@ -217,9 +230,9 @@ class ModuleScope: Scope{
 		this._handler=handler;
 		this.module_=module_;
 	}
-	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
+	override Dependent!Declaration lookup(Identifier ident){
 		if(!ident.name.length) return module_.independent!Declaration;
-		return super.lookup(ident, alt);
+		return super.lookup(ident);
 	}
 	override Module getModule(){return module_;}
 }
@@ -230,20 +243,21 @@ class NestedScope: Scope{
 	override @property ErrorHandler handler(){return parent.handler;}
 	this(Scope parent) in{assert(!!parent);}body{
 		this.parent=parent;
+		addImport(parent);
 	}
 
-	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
-		mixin(LookupHere!q{auto r; this, ident, null});
+	override Dependent!Declaration lookup(Identifier ident){
+		mixin(LookupHere!q{auto r; this, ident, false});
 		if(!r) return null.independent!Declaration;
-		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookup(ident, alt);
+		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookup(ident);
 		return r.independent;
 	}
 
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
-		mixin(LookupHere!q{auto d; this, ident, null});
+		mixin(LookupHere!q{auto d; this, ident, false});
 		if(d && typeid(d) is typeid(DoesNotExistDecl))
 			return parent.getUnresolved(ident, noHope);
-		return this.independent!Scope;
+		return this.independent!Scope; // TODO: IMPORTS
 	}
 
 	override bool isNestedIn(Scope rhs){ return this is rhs || parent.isNestedIn(rhs); }
@@ -335,44 +349,48 @@ template AggregateParentsInOrderTraversal(string bdy,string raggr="raggr", strin
 }
 
 class InheritScope: AggregateScope{
-	invariant(){ assert(!!cast(ReferenceAggregateDecl)aggr); }
+	invariant(){ assert(!aggr||!!cast(ReferenceAggregateDecl)aggr); } // aggr is null during initialization
 	@property ref ReferenceAggregateDecl raggr(){ return *cast(ReferenceAggregateDecl*)&aggr; }
-	this(ReferenceAggregateDecl decl) in{assert(!!decl.scope_);}body{ super(decl); }
+	this(ReferenceAggregateDecl decl) in{assert(decl&&decl.scope_);}body{ super(decl); }
 
 	// circular inheritance can lead to circular parent scopes
 	// therefore we need to detect circular lookups in InheritScopes
 	private bool onstack = false;
 
-	override Dependent!Declaration lookupHere(Identifier ident, lazy Declaration alt){
+	override Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
 		if(onstack) return New!DoesNotExistDecl(ident).independent!Declaration;
 		onstack = true; scope(exit) onstack = false;
 
 		// dw("looking up ",ident," in ", this);
 		if(raggr.shortcutScope){
-			auto dep = raggr.shortcutScope.lookupHere(ident, null);
-			auto val = dep.value;
-			if(!dep.dependee && val && typeid(val) is typeid(DoesNotExistDecl))
-				return raggr.shortcutScope.lookup(ident, alt);
+			// we may want to take a shortcut in order to lookup symbols
+			// outside the class declaration before the parent is resolved
+			// if the declaration would actually be inherited from the parent
+			// an error results.
+			auto d = raggr.shortcutScope.lookupExactlyHere(ident);
+			if(d && typeid(d) is typeid(DoesNotExistDecl))
+				if(auto t=raggr.shortcutScope.lookup(ident).prop) return t;
 		}
-		mixin(LookupHere!q{auto d; super, ident, alt});
+
+		mixin(LookupHere!q{auto d; super, ident, ignoreImports});
+
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
 		// if sstate is 'completed', DoesNotExistDecls do not need to be generated
 		if(!d && raggr.sstate == SemState.completed ||
 		   d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!(q{
-			auto lkup = parent.asc.lookupHere(ident, null);
+			auto lkup = parent.asc.lookupHere(ident, ignoreImports);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
 			if(parent.sstate != SemState.completed && !d ||
 			   d && typeid(d) !is typeid(DoesNotExistDecl)) break;
 		},"raggr","parent",true));
-		if(!d) d = alt;
 		return d.independent;
 	}
 
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){		
-		mixin(LookupHere!q{auto d; super, ident, null});
+		mixin(LookupHere!q{auto d; super, ident, false});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
 		Dependent!Scope traverse(){
 			if(onstack) return null.independent!Scope;
@@ -418,10 +436,11 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 	invariant(){ foreach(d; symtab) assert(d&&typeid(d) !is typeid(DoesNotExistDecl)); }
 
 	this(Scope parent){super(parent);}
-	override Dependent!Declaration lookup(Identifier ident, lazy Declaration alt){
-		// this is valid because OrderedScopes never contain any DoesNotExistDecl's
-		if(auto t=lookupHere(ident, null).prop) return t;
-		return parent.lookup(ident, alt);
+
+	override Dependent!Declaration lookup(Identifier ident){
+		mixin(LookupHere!q{auto decl;this, ident, false});
+		if(decl) return decl.independent; // (there are no DoesNotExistDecls in ordered scopes)
+		return parent.lookup(ident);
 	}
 	override bool inexistent(Identifier ident){
 		return parent.inexistent(ident);
@@ -480,8 +499,9 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 	}
 
 	override bool insert(Declaration decl){
+		// TODO: get rid of !is DoesNotExistDecl?
 		if(!parent.canDeclareNested(decl)){
-			auto confl=parent.lookup(decl.name, null).value;
+			auto confl=parent.lookup(decl.name).value;
 			assert(!!confl);
 			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);
