@@ -38,6 +38,8 @@ class MutableAliasRef: Declaration{ // used if a declaration references another 
 class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
 	Identifier originalReference;
+
+	override string toString(){ return "'"~originalReference.name~"' does not exist."; }
 }
 
 abstract class Scope{ // SCOPE
@@ -100,11 +102,10 @@ abstract class Scope{ // SCOPE
 
 	// scope where the identifier will be resolved next
 	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
-		if(arbitrary.length) return this.independent!Scope;
-		mixin(LookupHere!q{auto d; this, ident, true});
-		if(d && typeid(d) is typeid(DoesNotExistDecl))
-			return null.independent!Scope; // TODO: IMPORTS
-		return this.independent!Scope;
+		auto t=lookupExactlyHere(ident);
+		if(!t || typeid(t) !is typeid(DoesNotExistDecl))
+			return this.independent!Scope;
+		return getUnresolvedImport(ident, noHope);
 	}
 
 	Dependent!Declaration lookup(Identifier ident){
@@ -116,9 +117,36 @@ abstract class Scope{ // SCOPE
 	}
 
 	Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
-		return lookupExactlyHere(ident).independent;
-		// TODO: IMPORTS
+		auto t=lookupExactlyHere(ident);
+		if(/+ignoreImports ||+/ !t || typeid(t) !is typeid(DoesNotExistDecl))
+			return t.independent;
+		return lookupImports(ident, t);
 	}
+
+	private bool onImportStack = false;
+	final protected Dependent!Scope getUnresolvedImport(Identifier ident, bool noHope){
+		if(onImportStack) return null.independent!Scope;
+		onImportStack = true; scope(exit) onImportStack = false;
+		foreach(im;imports){
+			// TODO: private (imports)
+			// TODO: break public import cycles
+			// TODO: eliminate duplication?
+			mixin(GetUnresolved!q{auto d;im, ident, noHope});
+			if(d) return d.independent;
+		}
+		return null.independent!Scope;		
+	}
+
+	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
+		foreach(im;imports){
+			// TODO: private (imports)
+			// TODO: break public import cycles
+			mixin(LookupHere!q{auto d;im,ident,false});
+			if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return d.independent;
+		}
+		return alt.independent;
+	}
+
 
 	void potentialInsert(Identifier ident, Declaration decl){
 		auto ptr = ident.ptr in psymtab;
@@ -162,7 +190,7 @@ abstract class Scope{ // SCOPE
 	}
 
 	private Identifier[] notImported;
-	bool addImport(Scope sc,){
+	bool addImport(Scope sc){
 		foreach(x;imports) if(x is sc) return true; // TODO: make more efficient?
 		imports ~= sc;
 		bool ret = true;
@@ -243,7 +271,6 @@ class NestedScope: Scope{
 	override @property ErrorHandler handler(){return parent.handler;}
 	this(Scope parent) in{assert(!!parent);}body{
 		this.parent=parent;
-		addImport(parent);
 	}
 
 	override Dependent!Declaration lookup(Identifier ident){
@@ -254,10 +281,9 @@ class NestedScope: Scope{
 	}
 
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
-		mixin(LookupHere!q{auto d; this, ident, false});
-		if(d && typeid(d) is typeid(DoesNotExistDecl))
-			return parent.getUnresolved(ident, noHope);
-		return this.independent!Scope; // TODO: IMPORTS
+		mixin(GetUnresolved!q{auto d; super, ident, noHope});
+		if(d) return d.independent;
+		return parent.getUnresolved(ident, noHope);
 	}
 
 	override bool isNestedIn(Scope rhs){ return this is rhs || parent.isNestedIn(rhs); }
@@ -390,8 +416,12 @@ class InheritScope: AggregateScope{
 	}
 
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){		
-		mixin(LookupHere!q{auto d; super, ident, false});
-		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;
+		/+mixin(LookupHere!q{auto d; super, ident, false});
+		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;+/
+		// TODO: this treats the outer scope as shadowing the parent scope!
+		// why does it not always terminate?
+		mixin(GetUnresolved!q{auto d; Scope, ident, false});
+		if(d) return d.independent;
 		Dependent!Scope traverse(){
 			if(onstack) return null.independent!Scope;
 			onstack = true; scope(exit) onstack = false;
@@ -437,15 +467,25 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 
 	this(Scope parent){super(parent);}
 
+	// (there are no DoesNotExistDecls in ordered scopes,
+	// so methods relying on them need to be overridden)
 	override Dependent!Declaration lookup(Identifier ident){
 		mixin(LookupHere!q{auto decl;this, ident, false});
-		if(decl) return decl.independent; // (there are no DoesNotExistDecls in ordered scopes)
+		if(decl) return decl.independent;
 		return parent.lookup(ident);
 	}
+	Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
+		// TODO: ignoreImports?
+		if(auto t=lookupExactlyHere(ident)) return t.independent;
+		return lookupImports(ident, null);
+	}
+
 	override bool inexistent(Identifier ident){
-		return parent.inexistent(ident);
+		return true; //parent.inexistent(ident);
 	}
 	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+		//if(auto d=lookupExactlyHere(ident)) return this.independent!Scope;
+		if(auto i=getUnresolvedImport(ident, noHope).prop) return i;
 		return parent.getUnresolved(ident, noHope);
 	}
 }
@@ -485,7 +525,7 @@ final class FunctionScope: OrderedScope{
 	override FunctionDef getDeclaration(){return fun;}
 protected:
 	override bool canDeclareNested(Declaration decl){ // for BlockScope
-		return !(decl.name.ptr in symtab); // TODO: More complicated stuff.
+		return typeid(decl) is typeid(DoesNotExistDecl) || !(decl.name.ptr in symtab); // TODO: More complicated stuff.
 	}
 private:
 	FunctionDef fun;

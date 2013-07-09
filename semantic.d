@@ -2138,7 +2138,7 @@ class TemplateInstanceDecl: Declaration{
 		determineInstanceScope();
 		auto instanceScope = paramScope.iparent;
 		bdy.stc|=parent.stc;
-		if(instanceScope !is parentScope){
+		if(isMixin||instanceScope !is parentScope){
 			bdy.stc&=~STCstatic;
 			foreach(decl;&bdy.traverseInOrder)
 				decl.stc&=~STCstatic;
@@ -3048,6 +3048,15 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
 		mixin(SemEplg);
 	}
+
+	int traverseInOrder(scope int delegate(Declaration) dg){
+		if(auto r=dg(this)) return r;
+		if(auto sym=inst.isSymbol())
+		if(sym.meaning)
+		if(auto meaning=sym.meaning.isTemplateInstanceDecl())
+			return meaning.bdy.traverseInOrder(dg);
+		return 0;
+	}
 }
 
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
@@ -3291,7 +3300,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	override void noHope(Scope sc){
 		if(res){
 			auto unresolved = res.getMemberScope();
-			if(!unresolved.inexistent(eponymous))
+			if(unresolved&&!unresolved.inexistent(eponymous))
 				mixin(ErrEplg);
 		}else{
 			mixin(RevEpoNoHope!q{e});
@@ -5594,7 +5603,6 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	override void noHope(Scope sc){
 		if(meaning) return;
 		auto unresolved=sc.getUnresolved(this, true).force;
-		assert(!!unresolved);
 		if(unresolved&&!unresolved.inexistent(this))
 			mixin(ErrEplg);
 	}
@@ -5918,8 +5926,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
 			auto unresolved = e1.getMemberScope().getUnresolved(i, true).force;
-			assert(!!unresolved);
-			if(!unresolved.inexistent(i))
+			if(unresolved&&!unresolved.inexistent(i))
 				mixin(ErrEplg);
 		}
 	}
@@ -9120,19 +9127,29 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	}
 
 	private mixin CreateBinderForDependent!("InheritVtbl","inheritVtbl");
+
+	private Identifier[FunctionDecl] virtualLookups;
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
 		OverloadSet set;
 		if(!parent) goto Lfresh;
-		auto ovscd = parent.asc.lookupHere(decl.name, true);
-		assert(!ovscd.dependee);
-		auto ovsc = ovscd.value;
-		if(!ovsc||typeid(ovsc) is typeid(DoesNotExistDecl)) goto Lfresh;
+		mixin(LookupHere!q{auto ovsc; parent.asc, decl.name, true});
+		if(!ovsc){
+			auto ident = virtualLookups.get(decl, null);
+			if(!ident){
+				ident=New!Identifier(decl.name.name);
+				ident.recursiveLookup = false;
+				virtualLookups[decl]=ident;
+			}
+			mixin(Lookup!q{_; ident, parent.asc});
+			if(auto nr=ident.needRetry) { needRetry = nr; return indepvoid; }
+			ovsc = ident.meaning;
+		}
+		if(!ovsc) goto Lfresh;
 
 		set = ovsc.isOverloadSet();
 		if(!set) goto Lfresh;
-
 
 		// need to provide new/aliased versions for ALL overloads
 		if(!(decl.stc&STCnonvirtualprotection))
@@ -9264,7 +9281,6 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			}
 			{alias scope_ sc;mixin(SemChldPar!q{rparents[1+i]});}
 		}
-		bool[FunctionDecl] hiders;
 	Lvtbl:
 		enum SemRet = q{ return; };
 		foreach(decl; &bdy.traverseInOrder){
@@ -9274,6 +9290,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				mixin(AddToVtbl!(q{_;this,fd},false));
 			}
 		}
+		bool[FunctionDecl] hiders;
 		foreach(x; vtbl.vtbl){
 			if(x.state == VtblState.needsOverride){
 				auto ovscd = asc.lookupHere(x.fun.name, true);
@@ -9599,7 +9616,6 @@ class OverloadSet: Declaration{ // purely semantic node
 		alias util.all all;
 		import std.range;
 		if(fd.stc & STCnonvirtual) return false.independent;
-
 		// analyze function types
 		fun.analyzeType();
 		mixin(Rewrite!q{fun.type});
