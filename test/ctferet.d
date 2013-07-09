@@ -7,6 +7,10 @@ struct DisplayDelegates{
 }
 
 struct ClassDelegates{
+	class A{
+		immutable x=delegate()pure immutable{ return "int a;";};
+		auto y = x(); // TODO: error
+	}
 	class C{
 		int x = 3;
 		int delegate()const dg;
