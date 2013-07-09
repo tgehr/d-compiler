@@ -5307,8 +5307,8 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 			assert(mem.length==getCTSizeof(this));
 			auto ptr=*cast(BCPointer*)mem.ptr;
 			assert(ptr.ptr==ptr.container.ptr);
+			if(ptr.ptr is null) return Variant((Variant[VarDecl]).init, type);
 			mem=ptr.container;
-
 			decl=cast(ReferenceAggregateDecl)cast(void*)(cast(ulong[])mem)[ReferenceAggregateDecl.bcTypeidOffset];
 			type = decl.getType().applySTC(type.getHeadSTC());
 			auto tag=q(cast(Type)decl.getType(),mem.ptr);
