@@ -1,3 +1,44 @@
+
+mixin template Ambig(immutable(char)[] x){
+	mixin("enum "~x~"=1;"); // TODO: error
+}
+
+static if(!is(typeof(aax))) mixin Ambig!"bbx";
+static if(!is(typeof(bbx))) mixin Ambig!"aax";
+
+mixin template Confl(){
+	auto conflFoo(int x){ return x; }
+}
+
+mixin Confl;
+mixin Confl;
+
+pragma(msg, conflFoo(2)); // TODO: error
+
+mixin template FooZ(){
+	int foo(){ return 1; }
+}
+
+mixin template OFooZ(){
+	override int foo(){ return 2; }
+}
+
+class C{
+	mixin FooZ;
+}
+
+class D: C{
+	mixin OFooZ;
+}
+
+static assert({C c=new D(); return c;}().foo()==2);
+
+//pragma(msg, new C);
+
+pragma(msg, C.foof); // error
+
+mixin FooZ;
+
 mixin template Bar(int x){
 	enum Bar = "Don't do eponymous lookup!";
 	enum foo = y+2;
@@ -7,7 +48,14 @@ mixin template Bar(int x){
 void fun(){
 	enum y=3;
 	mixin Bar!2;
-	static assert(foo==5); // TODO
+	static assert(foo==5);
+}
+
+struct Fun{
+	enum y=3;
+	mixin Bar!2;
+	pragma(msg, Bar);
+	static assert(foo==5);
 }
 
 
@@ -17,7 +65,7 @@ mixin template Foo(int x){
 pragma(msg, Foo!2.bar); // error
 
 mixin Foo!2;
-static assert(bar == 2); // TODO
+static assert(bar == 2);
 
 mixin bar; // error
 
