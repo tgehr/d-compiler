@@ -1,19 +1,28 @@
 
+mixin template Confl(){
+	auto conflFoo(int x){ return x; }
+}
+
+mixin template NConfl(){
+	auto conflFoo(int[] x){ return x; }
+}
+mixin Confl;
+mixin Confl;
+	
+pragma(msg, conflFoo(2)); // error
+
+/+struct AConfl{
+	// TODO: fix lookups
+	mixin Confl;
+	mixin Confl;
+}+/
+
 mixin template Ambig(immutable(char)[] x){
 	mixin("enum "~x~"=1;"); // TODO: error
 }
 
 static if(!is(typeof(aax))) mixin Ambig!"bbx";
 static if(!is(typeof(bbx))) mixin Ambig!"aax";
-
-mixin template Confl(){
-	auto conflFoo(int x){ return x; }
-}
-
-mixin Confl;
-mixin Confl;
-
-pragma(msg, conflFoo(2)); // TODO: error
 
 mixin template FooZ(){
 	int foo(){ return 1; }
