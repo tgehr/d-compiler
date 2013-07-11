@@ -103,8 +103,7 @@ abstract class Scope{ // SCOPE
 	// scope where the identifier will be resolved next
 	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
 		auto t=lookupExactlyHere(ident);
-		if(!t || typeid(t) !is typeid(DoesNotExistDecl))
-			return this.independent!Scope;
+		if(!t) return this.independent!Scope;
 		return getUnresolvedImport(ident, noHope);
 	}
 
@@ -129,7 +128,6 @@ abstract class Scope{ // SCOPE
 		onImportStack = true; scope(exit) onImportStack = false;
 		foreach(im;imports){
 			// TODO: private (imports)
-			// TODO: break public import cycles
 			// TODO: eliminate duplication?
 			mixin(GetUnresolved!q{auto d;im, ident, noHope});
 			if(d) return d.independent;
@@ -138,11 +136,34 @@ abstract class Scope{ // SCOPE
 	}
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
+		if(onImportStack) return null.independent!Declaration;
+		onImportStack = true; scope(exit) onImportStack = false;
+		size_t count = 0;
 		foreach(im;imports){
 			// TODO: private (imports)
-			// TODO: break public import cycles
 			mixin(LookupHere!q{auto d;im,ident,false});
-			if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return d.independent;
+			if(!d) return d.independent;
+			else if(typeid(d) !is typeid(DoesNotExistDecl)) count++;
+		}
+		if(count == 1){
+			foreach(im;imports){
+				mixin(LookupHere!q{auto d;im,ident,false});
+				assert(!!d);
+				if(typeid(d) !is typeid(DoesNotExistDecl))
+					return d.independent;
+			}
+			assert(0);
+		}else if(count){
+			Declaration[] decls;
+			foreach(im;imports){
+				mixin(LookupHere!q{auto d;im,ident,false});
+				assert(!!d);
+				if(typeid(d) !is typeid(DoesNotExistDecl))
+					decls~=d;
+			}
+			auto res=New!CrossScopeOverloadSet(decls);
+			res.scope_=this;
+			return res.independent!Declaration;
 		}
 		return alt.independent;
 	}

@@ -80,7 +80,7 @@ template PropErr(string s) if(!s.canFind(",")){
 	enum PropErr=s.length?mixin(X!q{
 		static if(is(typeof(@(sp[1])): Node)){
 			if(@(sp[1]).sstate==SemState.error){
-				// auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
+				//auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
 				@(ErrEplg)
 			}
 		}else foreach(x;@(sp[1])) mixin(PropErr!q{x});
@@ -4561,6 +4561,7 @@ class Symbol: Expression{ // semantic node
 		assert(meaning && scope_);
 		mixin(MatchCall!q{auto m; meaning, sc, loc, this_, this, args, context});
 		if(m){
+			mixin(Rewrite!q{m});
 			// resolve the overload in place and then rely on
 			// semantic to catch eventual circular dependencies:
 			meaning = m;
@@ -5529,7 +5530,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		assert(!meaning && sstate != SemState.error && sstate != SemState.failed, text(meaning," ",sstate));
 	}out{
 		if(!needRetry && sstate != SemState.error && sstate != SemState.failed)
-			assert(meaning && meaning.scope_);
+			assert(meaning && meaning.scope_,text(this));
 	}body{
 		enum SemRet = q{ return indepvoid; };
 		//needRetry = false; // TODO: why was this here?
@@ -9575,6 +9576,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		assert(!tdecls.length||tdecls[0].name.name is decl.name.name);
 		debug assert(!_matchedOne, "TODO!"); // TODO:
 	}body{
+		if(!loc.line) loc=decl.loc;
 		if(auto td=decl.isTemplateDecl()) tdecls~=td;
 		else decls~=decl;
 		// TODO: check that all overloads are @property or non-property
@@ -9962,6 +9964,7 @@ class CrossScopeOverloadSet : Declaration{
 	}body{
 		this.decls=decls;
 		super(STC.init, decls[0].name);
+		sstate = SemState.completed;
 	}
 
 	static class OverloadResolver(string op,TT...) : Declaration{
@@ -9972,12 +9975,12 @@ class CrossScopeOverloadSet : Declaration{
 		this(Scope sc, TT args, Declaration[] decls){
 			static if(TT.length) this.args=args;
 			this.decls=decls;
-			semantic(sc);
 			super(STC.init, decls[0].name);
 		}
 		void semantic(Scope sc){
 			mixin(SemPrlg);
 			mixin(op);
+			if(sstate == SemState.pre){scope_=sc; sstate = SemState.begin; }
 			Declaration r=null;
 			foreach(decl;decls){
 				if(!decl) continue;
@@ -9992,6 +9995,9 @@ class CrossScopeOverloadSet : Declaration{
 			}
 			mixin(RewEplg!q{r});
 		}
+		final override void matchError(Scope sc, Location loc, Type this_, Expression[] args){
+			// TODO: get rid of this override.
+		}
 	}
 
 	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
@@ -10000,14 +10006,14 @@ class CrossScopeOverloadSet : Declaration{
 			foreach(ref decl;decls){
 				if(decl&&decl.sstate!=SemState.error){
 					MatchContext dummy;
-					auto foo=decl;
-					mixin(MatchCall!q{foo;foo,null,loc,args, dummy});
+					mixin(MatchCall!q{decl;decl,null,loc,args, dummy});
 				}
 			}
 		};
 
 		auto r=New!(OverloadResolver!(op,Type,Expression,Expression[]))(sc, this_, func, args, decls.dup);
 		r.loc=loc;
+		r.semantic(sc);
 		return r.independent!Declaration;
 	}
 
@@ -10016,6 +10022,7 @@ class CrossScopeOverloadSet : Declaration{
 		foreach(ref ifti;insts) ifti = ifti.matchInstantiation(sc, loc, gagged, isMixin, owner, args); 
 		auto r=New!(OverloadResolver!(instOp))(sc,insts);
 		r.loc=loc;
+		r.semantic(sc);
 		return r;
 	}
 	enum instOp=q{
@@ -10030,6 +10037,7 @@ class CrossScopeOverloadSet : Declaration{
 		foreach(ref ifti;iftis) ifti = ifti.matchIFTI(null, loc, this_, func, args, funargs);
 		auto r=New!(OverloadResolver!(instOp))(sc, iftis);
 		r.loc=loc;
+		r.semantic(sc);
 		return r;
 	}
 	static void reportConflict(R)(Scope sc, const ref Location loc, R decls)in{
@@ -10046,6 +10054,8 @@ class CrossScopeOverloadSet : Declaration{
 	override @property string kind(){
 		return "cross-scope overload set";
 	}
+
+	override bool needsAccessCheck(AccessCheck check){ return false; }
 
 	override string toString(){ return join(map!(to!string)(decls)); }	
 
