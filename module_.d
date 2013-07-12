@@ -7,18 +7,64 @@ import analyze;
 import core.memory;
 import std.stdio, std.algorithm, std.conv;
 
+import std.path;
+import file=std.file;
+
+string readCode(File f){
+	// TODO: use memory-mapped file with 4 padding zero bytes
+	auto app=mallocAppender!(char[])();
+	foreach(r;f.byChunk(1024)){app.put(cast(char[])r);}
+	app.put("\0\0\0\0"); // insert 4 padding zero bytes
+	return cast(string)app.data;	
+}
+string readCode(string path){ return readCode(File(path)); }
+
+class ModuleRepository{
+	private static string getActualPath(string path){
+		// TODO: search path
+		auto ext = path.extension;
+		if(ext=="") path = path.setExtension("d");
+		return path;
+	}
+
+	Module getModule(string path, out string err){
+		path = getActualPath(path);
+		auto ext = path.extension;
+		if(ext != ".d" && ext != ".di"){
+			err = path~": unrecognized extension: "~ext;
+			return null;
+		}
+		err = null;
+		string code;
+		if(path in modules) return modules[path];
+		try code=readCode(path);
+		catch(Exception){
+			if(!file.exists(path)) err = path ~ ": no such file";
+			else err = path ~ ": error reading file";
+			return modules[path]=null;
+		}
+		auto name=New!Identifier(path);
+		return modules[path]=new Module(name, path, code, this);
+	}
+
+	bool hasErrors(){
+		foreach(_,m;modules) if(m.sstate == SemState.error) return true;
+		return false;
+	}
+
+private:
+	Module[string] modules;
+}
+
 class Module: Declaration{
 	Declaration[] decls;
 	Scope sc;
-	this(string path){
-		super(STC.init,New!Identifier(path)); // TODO: fix name
+	ModuleRepository repository;
+
+	private this(Identifier name, string path, string code, ModuleRepository repository){
+		super(STC.init,name); // TODO: fix name
+		this.repository = repository;
 		GC.disable(); scope(exit) GC.enable();
-		//auto f=File(path); // TODO: handle exceptions
-		File f; if(path=="-") f=stdin; else f=File(path);
-		auto app=mallocAppender!(char[])();
-		foreach(r;f.byChunk(1024)){app.put(cast(char[])r);}
-		app.put("\0\0\0\0"); // insert 4 padding zero bytes
-		string code=cast(string)app.data;
 		sc=new ModuleScope(new FormattingErrorHandler(), this);
 		//sc=new Scope(new SimpleErrorHandler(path, code));;
 		auto src = new Source(path, code);
