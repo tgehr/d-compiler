@@ -1,4 +1,24 @@
 
+mixin template Attribs(){ int foo(int x){ return x+y; } }
+
+struct AttribS{
+	int y;
+	pure static mixin Attribs;
+	static assert(is(typeof(&foo)==int function(int)pure));
+	struct X{
+		mixin Attribs;
+		static assert(is(typeof(&foo)==int delegate(int)));
+	}
+}
+
+struct S{
+	mixin Confl;
+	mixin NConfl;
+
+	pragma(msg, "NConfl1: ",conflFoo(1));
+	pragma(msg, "NConfl2: ",conflFoo([1,2,3]));
+}
+
 mixin template Confl(){
 	static conflFoo(int x){ return x; }
 }
@@ -11,11 +31,12 @@ mixin Confl;
 	
 pragma(msg, conflFoo(2)); // error
 
-/+struct AConfl{
-	// TODO: fix lookups
+struct AConfl{
 	mixin Confl;
 	mixin Confl;
-}+/
+	mixin NConfl;
+	pragma(msg, conflFoo(2)); // error
+}
 
 mixin template Ambig(immutable(char)[] x){
 	mixin("enum "~x~"=1;"); // TODO: error
