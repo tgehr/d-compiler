@@ -1,3 +1,10 @@
+
+struct TestNestedInheritance{
+	class C: D.D{} // TODO: error
+	class D{ class D{} }
+	class E: E.E{ static class E{} } // ok
+}
+
 struct TestInvalidInheritance{
 	class A{ int string; } // error
 	template Mixin(string s){

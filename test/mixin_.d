@@ -1,10 +1,10 @@
 
 mixin template Confl(){
-	auto conflFoo(int x){ return x; }
+	static conflFoo(int x){ return x; }
 }
 
 mixin template NConfl(){
-	auto conflFoo(int[] x){ return x; }
+	static conflFoo(int[] x){ return x; }
 }
 mixin Confl;
 mixin Confl;
