@@ -75,8 +75,12 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return true;
 	}
 
-	// scope where the identifier will be resolved next
 	Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
+		return getUnresolvedHere(ident, noHope);
+	}
+
+	// scope where the identifier will be resolved next
+	Dependent!IncompleteScope getUnresolvedHere(Identifier ident, bool noHope=false){
 		auto t=lookupExactlyHere(ident);
 		if(!t) return this.independent!IncompleteScope;
 		return getUnresolvedImport(ident, noHope);
@@ -105,15 +109,18 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		foreach(im;imports){
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
-			mixin(GetUnresolved!q{auto d;im, ident, noHope});
+			mixin(GetUnresolvedHere!q{auto d;im, ident, noHope});
 			if(d) isUnresolved = true;
 		}
-		// notImported~=ident; // TODO
+		dontImport(ident);
 		if(!isUnresolved) return null.independent!IncompleteScope;
 		static class UnresolvedImports: IncompleteScope{
 			Scope outer;
 			bool noHope;
-			this(Scope outer, bool noHope){ this.outer = outer; this.noHope = noHope; }
+			this(Scope outer, bool noHope){
+				this.outer = outer;
+				this.noHope = noHope;
+			}
 
 			bool onstack = false;
 
@@ -122,11 +129,12 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				onstack=true; scope(exit) onstack=false;
 				bool success = true;
 				foreach(im;outer.imports){
-					auto dd=im.getUnresolved(ident, noHope);
+					auto dd=im.getUnresolvedHere(ident, noHope);
 					assert(!dd.dependee);
 					auto d=dd.value;
 					if(d) success &= d.inexistent(ident);
 				}
+				outer.dontImport(ident);
 				return success;
 			}
 
@@ -220,12 +228,23 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		// TODO: this is very wasteful
 	}
 
-	private Identifier[] notImported;
+	private Identifier[const(char)*] notImported;
+	protected void dontImport(Identifier ident){
+		notImported[ident.ptr]=ident;
+	}
+
 	bool addImport(Scope sc){
 		foreach(x;imports) if(x is sc) return true; // TODO: make more efficient?
 		imports ~= sc;
 		bool ret = true;
-		foreach(ident;notImported){
+		if(imports.length==1){
+			foreach(_,decl;symtab){
+				if(typeid(decl) !is typeid(DoesNotExistDecl)) continue;
+				auto dne=cast(DoesNotExistDecl)cast(void*)decl;
+				dontImport(dne.originalReference);
+			}
+		}
+		foreach(_,ident;notImported){
 			// TODO: this will not report ambiguities/contradictions introduced
 			// by modules that are not analyzed to sufficient depth
 			// (eg, because their import is the last thing that happens.)
@@ -514,6 +533,8 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 		if(auto i=getUnresolvedImport(ident, noHope).prop) return i;
 		return parent.getUnresolved(ident, noHope);
 	}
+
+	override protected void dontImport(Identifier ident){ }
 }
 
 final class FunctionScope: OrderedScope{
