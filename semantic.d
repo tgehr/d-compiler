@@ -248,6 +248,7 @@ mixin CreateBinderForDependent!("Lookup","lookup");
 mixin CreateBinderForDependent!("LookupHere","lookupHere");
 mixin CreateBinderForDependent!("LookupExactlyHere","lookupExactlyHere");
 mixin CreateBinderForDependent!("GetUnresolved","getUnresolved");
+mixin CreateBinderForDependent!("GetUnresolvedHere","getUnresolvedHere");
 mixin CreateBinderForDependent!("IsDeclAccessible","isDeclAccessible");
 mixin CreateBinderForDependent!("DetermineOverride","determineOverride");
 mixin CreateBinderForDependent!("FindOverrider","findOverrider");
@@ -2156,6 +2157,7 @@ class TemplateInstanceDecl: Declaration{
 	void startAnalysis()in{
 		assert(finishedInstantiation);
 	}body{
+		if(matchState==MatchState.analysis) return;
 		matchState = MatchState.analysis;
 		if(!isGagged) Scheduler().add(this, scope_);
 	}
@@ -3048,6 +3050,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		assert(cast(TemplateInstanceDecl)sym.meaning);
 		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
 		meaning.bdy.pickupSTC(stc);
+		meaning.startAnalysis();
 		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
 		sym.makeStrong();
 		mixin(SemChld!q{inst});
