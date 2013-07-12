@@ -160,15 +160,19 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			}
 
 			Declaration[] potentialLookup(Identifier ident){
-				// TODO: this is very wasteful!
+				// TODO: this is very wasteful
 				Declaration[] r;
 				foreach(im;outer.imports) r~=im.potentialLookup(ident);
 				return r;
 			}
 		}
 		// TODO: cache
-		return New!UnresolvedImports(this, noHope).independent!IncompleteScope;
+		return (unresolvedImportsCache?
+		        unresolvedImportsCache:
+		        (unresolvedImportsCache=New!UnresolvedImports(this, noHope)))
+			.independent!IncompleteScope;
 	}
+	IncompleteScope unresolvedImportsCache;
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
 		if(onImportStack) return null.independent!Declaration;
