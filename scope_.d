@@ -42,7 +42,13 @@ class DoesNotExistDecl: Declaration{
 	override string toString(){ return "'"~originalReference.name~"' does not exist."; }
 }
 
-abstract class Scope{ // SCOPE
+static interface IncompleteScope{
+	bool inexistent(Identifier ident);
+	Declaration[] potentialLookup(Identifier ident);
+}
+
+
+abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
 	protected void potentialAmbiguity(Identifier decl, Identifier lookup){
@@ -101,9 +107,9 @@ abstract class Scope{ // SCOPE
 	}
 
 	// scope where the identifier will be resolved next
-	Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+	Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
 		auto t=lookupExactlyHere(ident);
-		if(!t) return this.independent!Scope;
+		if(!t) return this.independent!IncompleteScope;
 		return getUnresolvedImport(ident, noHope);
 	}
 
@@ -123,16 +129,45 @@ abstract class Scope{ // SCOPE
 	}
 
 	private bool onImportStack = false;
-	final protected Dependent!Scope getUnresolvedImport(Identifier ident, bool noHope){
-		if(onImportStack) return null.independent!Scope;
+	final protected Dependent!IncompleteScope getUnresolvedImport(Identifier ident, bool noHope){
+		if(onImportStack) return null.independent!IncompleteScope;
 		onImportStack = true; scope(exit) onImportStack = false;
+		bool isUnresolved = false;
 		foreach(im;imports){
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
 			mixin(GetUnresolved!q{auto d;im, ident, noHope});
-			if(d) return d.independent;
+			if(d) isUnresolved = true;
 		}
-		return null.independent!Scope;		
+		// notImported~=ident; // TODO
+		if(!isUnresolved) return null.independent!IncompleteScope;
+		static class UnresolvedImports: IncompleteScope{
+			Scope outer;
+			bool noHope;
+			this(Scope outer, bool noHope){ this.outer = outer; this.noHope = noHope; }
+
+			bool inexistent(Identifier ident){
+				bool success = true;
+				foreach(im;outer.imports){
+					// TODO: private (imports)
+					// TODO: eliminate duplication?
+					auto dd=im.getUnresolved(ident, noHope);
+					assert(!dd.dependee);
+					auto d=dd.value;
+					if(d) success &= d.inexistent(ident);
+				}
+				return success;
+			}
+
+			Declaration[] potentialLookup(Identifier ident){
+				// TODO: this is very wasteful!
+				Declaration[] r;
+				foreach(im;outer.imports) r~=im.potentialLookup(ident);
+				return r;
+			}
+		}
+		// TODO: cache
+		return New!UnresolvedImports(this, noHope).independent!IncompleteScope;
 	}
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
@@ -207,7 +242,7 @@ abstract class Scope{ // SCOPE
 
 	Declaration/+final+/[] potentialLookup(Identifier ident){
 		return psymtab.get(ident.ptr,[])~arbitrarydecls;
-		// TODO: this is probably slow
+		// TODO: this is very wasteful
 	}
 
 	private Identifier[] notImported;
@@ -301,7 +336,7 @@ class NestedScope: Scope{
 		return r.independent;
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
 		mixin(GetUnresolved!q{auto d; super, ident, noHope});
 		if(d) return d.independent;
 		return parent.getUnresolved(ident, noHope);
@@ -436,21 +471,21 @@ class InheritScope: AggregateScope{
 		return d.independent;
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){		
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
 		/+mixin(LookupHere!q{auto d; super, ident, false});
 		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;+/
 		// TODO: this treats the outer scope as shadowing the parent scope!
 		// why does it not always terminate?
 		mixin(GetUnresolved!q{auto d; Scope, ident, false});
 		if(d) return d.independent;
-		Dependent!Scope traverse(){
-			if(onstack) return null.independent!Scope;
+		Dependent!IncompleteScope traverse(){
+			if(onstack) return null.independent!IncompleteScope;
 			onstack = true; scope(exit) onstack = false;
 
 			mixin(AggregateParentsInOrderTraversal!(q{
 				if(auto lkup = parent.asc.getUnresolved(ident, noHope).prop) return lkup;
 			},"raggr","parent",true));
-			return null.independent!Scope;
+			return null.independent!IncompleteScope;
 		}
 		if(noHope){
 			auto tr = traverse();
@@ -460,7 +495,7 @@ class InheritScope: AggregateScope{
 		}
 		// TODO: this is a hack
 		if(auto tr = traverse().prop) return tr;
-		return ident.recursiveLookup?parent.getUnresolved(ident, noHope):null.independent!Scope;
+		return ident.recursiveLookup?parent.getUnresolved(ident, noHope):null.independent!IncompleteScope;
 	}
 }
 
@@ -504,7 +539,7 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 	override bool inexistent(Identifier ident){
 		return true; //parent.inexistent(ident);
 	}
-	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
 		//if(auto d=lookupExactlyHere(ident)) return this.independent!Scope;
 		if(auto i=getUnresolvedImport(ident, noHope).prop) return i;
 		return parent.getUnresolved(ident, noHope);

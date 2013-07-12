@@ -4924,7 +4924,7 @@ class GaggingScope: NestedScope{
 		return parent.lookupHere(ident, ignoreImports);
 	}
 
-	override Dependent!Scope getUnresolved(Identifier ident, bool noHope=false){
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
 		return parent.getUnresolved(ident, noHope);
 	}
 
@@ -5618,7 +5618,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		_tryAgain=b;
 	}+/
 private:
-	Scope unresolved = null;
+	IncompleteScope unresolved = null;
 }
 
 class LookupIdentifier: Identifier{
