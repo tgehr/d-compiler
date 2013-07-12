@@ -2135,10 +2135,11 @@ class TemplateInstanceDecl: Declaration{
 		auto bdyscope=New!NestedScope(paramScope);
 		bdy = bdy.ddup();
 
-		determineInstanceScope();
+		if(!isMixin) determineInstanceScope();
 		auto instanceScope = paramScope.iparent;
 		bdy.stc|=parent.stc;
-		if(isMixin||instanceScope !is parentScope){
+		if(isMixin) bdy.stc&=~STCstatic;
+		if(instanceScope !is parentScope){
 			bdy.stc&=~STCstatic;
 			foreach(decl;&bdy.traverseInOrder)
 				decl.stc&=~STCstatic;
@@ -2884,7 +2885,6 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
-		bdy.pickupSTC(stc);
 		foreach(x; params) x.sstate = max(x.sstate,SemState.begin);
 		mixin(SemChld!q{params});
 
@@ -3023,13 +3023,16 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 
 	override void presemantic(Scope sc){
 		if(sstate != SemState.pre) return;
-		if(auto tie=inst.isTemplateInstanceExp()) tie.isMixin = true;
+		TemplateInstanceExp tie;
+		if(auto ti=inst.isTemplateInstanceExp()) tie = ti;
 		else{
-			auto tie = New!TemplateInstanceExp(inst,(Expression[]).init);
-			tie.isMixin = true;
+			tie = New!TemplateInstanceExp(inst,(Expression[]).init);
 			tie.loc = inst.loc;
 			inst = tie;
 		}
+		tie.isMixin = true;
+		tie.willAlias();
+		tie.matchingOnly();
 		scope_ = sc;
 		sstate = SemState.begin;
 		potentialInsert(sc, this);
@@ -3039,13 +3042,15 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
 		scope(exit) if(!needRetry) potentialRemove(sc, this);
-		inst.willAlias();
 		mixin(SemChld!q{inst});
 		assert(cast(Symbol)inst);
 		auto sym=cast(Symbol)cast(void*)inst;
 		assert(cast(TemplateInstanceDecl)sym.meaning);
 		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
+		meaning.bdy.pickupSTC(stc);
 		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
+		sym.makeStrong();
+		mixin(SemChld!q{inst});
 		mixin(SemEplg);
 	}
 
@@ -8958,6 +8963,11 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 	}
 	override void potentialRemove(Scope sc, Declaration decl){
 		foreach(x; decls) x.potentialRemove(sc, decl);
+	}
+
+	override void pickupSTC(STC stc){
+		super.pickupSTC(stc);
+		foreach(x;decls) x.pickupSTC(stc);
 	}
 
 	override void presemantic(Scope sc){

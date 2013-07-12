@@ -146,11 +146,13 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			bool noHope;
 			this(Scope outer, bool noHope){ this.outer = outer; this.noHope = noHope; }
 
+			bool onstack = false;
+
 			bool inexistent(Identifier ident){
+				if(onstack) return true;
+				onstack=true; scope(exit) onstack=false;
 				bool success = true;
 				foreach(im;outer.imports){
-					// TODO: private (imports)
-					// TODO: eliminate duplication?
 					auto dd=im.getUnresolved(ident, noHope);
 					assert(!dd.dependee);
 					auto d=dd.value;
@@ -167,12 +169,12 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			}
 		}
 		// TODO: cache
-		return (unresolvedImportsCache?
-		        unresolvedImportsCache:
+		return (unresolvedImportsCache ?
+		        unresolvedImportsCache :
 		        (unresolvedImportsCache=New!UnresolvedImports(this, noHope)))
 			.independent!IncompleteScope;
 	}
-	IncompleteScope unresolvedImportsCache;
+	IncompleteScope unresolvedImportsCache;	// TODO: embed?
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
 		if(onImportStack) return null.independent!Declaration;
