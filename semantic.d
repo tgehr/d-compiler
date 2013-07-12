@@ -3052,6 +3052,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		meaning.bdy.pickupSTC(stc);
 		meaning.startAnalysis();
 		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
+		potentialRemove(sc, this);
 		sym.makeStrong();
 		mixin(SemChld!q{inst});
 		mixin(SemEplg);
@@ -5546,7 +5547,6 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		if(allowDelay){
 			sstate=SemState.begin; // reset
 
-			//meaning=recursiveLookup?lkup.lookup(this, null):lkup.lookupHere(this, null);
 			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this});
 			else mixin(LookupHere!q{meaning; lkup, this, false});
 
@@ -8662,6 +8662,65 @@ mixin template Semantic(T) if(is(T==EmptyDecl)){
 		mixin(SemEplg);
 	}
 }
+
+mixin template Semantic(T) if(is(T==ImportDecl)){
+	override void potentialInsert(Scope sc, Declaration decl){
+		sc.potentialInsertArbitrary(this, decl);
+	}
+	override void potentialRemove(Scope sc, Declaration decl){
+		sc.potentialRemoveArbitrary(this, decl);
+	}
+	private string path;
+	override void presemantic(Scope sc){
+		assert(symbols.length);
+		if(symbols.length>1){
+			auto decls=new Declaration[symbols.length];
+			foreach(i,ref x;decls){
+				x = New!ImportDecl(stc, symbols[i..i+1]);
+				x.loc = loc;
+			}
+			auto r=New!BlockDecl(STC.init,decls);
+			r.loc=loc;
+			r.semantic(sc);
+			mixin(RewEplg!q{r});
+		}
+		if(sstate != SemState.pre) return;
+		sstate = SemState.begin;
+		scope_ = sc;
+		potentialInsert(sc, this);
+
+		static string computePath(Expression e){
+			if(auto fe=e.isFieldExp()){
+				assert(cast(Identifier)fe.e2);
+				auto id=cast(Identifier)cast(void*)fe.e2;
+				return computePath(fe.e1)~'/'~id.name;
+			}if(auto id=e.isIdentifier()) return id.name;
+			assert(0,"TODO");
+		}
+
+		path = computePath(symbols[0])~".d";
+	}
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		if(sstate == SemState.pre){
+			presemantic(sc);
+			if(rewrite) return;
+		}
+		scope(exit) if(!needRetry) potentialRemove(sc, this);
+		auto cm = sc.getModule();
+		assert(!!cm);
+		auto repo = cm.repository;
+		string err;
+		auto m = repo.getModule(path, err);
+		if(!m){
+			if(err) sc.error(err, symbols[0].loc);
+			mixin(ErrEplg);
+		}
+		sc.addImport(m.sc);
+		mixin(SemEplg);
+	}
+}
+
 
 mixin template Semantic(T) if(is(T==EnumVarDecl)){
 	EnumDecl enc;

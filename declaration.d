@@ -44,6 +44,7 @@ abstract class Declaration: Statement{
 		UnionDecl,
 		ValueAggregateDecl,
 		ReferenceAggregateDecl,
+		ImportDecl,
 		EnumDecl,
 		ErrorDecl,
 	);
@@ -85,6 +86,9 @@ class ImportDecl: Declaration{
 	Expression[] symbols;
 	this(STC stc, Expression[] sym){symbols=sym; super(stc,null);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"import "~join(map!(to!string)(symbols),", ")~";";}
+
+	mixin DownCastMethod;
+	mixin Visitors;
 }
 
 class EnumVarDecl: VarDecl{

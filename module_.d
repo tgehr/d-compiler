@@ -44,11 +44,13 @@ class ModuleRepository{
 			return modules[path]=null;
 		}
 		auto name=New!Identifier(path);
-		return modules[path]=new Module(name, path, code, this);
+		auto r=new Module(name, path, code, this);
+		r.presemantic(r.sc);
+		return modules[path]=r;
 	}
 
 	bool hasErrors(){
-		foreach(_,m;modules) if(m.sstate == SemState.error) return true;
+		foreach(_,m;modules) if(!m || m.sstate == SemState.error) return true;
 		return false;
 	}
 
@@ -78,7 +80,7 @@ class Module: Declaration{
 	override void presemantic(Scope=null){
 		if(sstate == SemState.pre){
 			foreach(ref x;decls){
-				x.stc|=STCstatic;
+				if(!x.isImportDecl()) x.stc|=STCstatic;
 				x.presemantic(sc); // add all to symbol table
 				Scheduler().add(x, sc);
 			}

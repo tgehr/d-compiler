@@ -145,7 +145,6 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				return r;
 			}
 		}
-		// TODO: cache
 		return (unresolvedImportsCache ?
 		        unresolvedImportsCache :
 		        (unresolvedImportsCache=New!UnresolvedImports(this, noHope)))
@@ -154,7 +153,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	IncompleteScope unresolvedImportsCache;	// TODO: embed?
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
-		if(onImportStack) return null.independent!Declaration;
+		if(onImportStack) return alt.independent!Declaration;
 		onImportStack = true; scope(exit) onImportStack = false;
 		size_t count = 0;
 		foreach(im;imports){
@@ -233,7 +232,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		notImported[ident.ptr]=ident;
 	}
 
-	bool addImport(Scope sc){
+	final bool addImport(Scope sc)in{assert(!!sc);}body{
 		foreach(x;imports) if(x is sc) return true; // TODO: make more efficient?
 		imports ~= sc;
 		bool ret = true;
