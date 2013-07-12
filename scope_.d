@@ -6,35 +6,6 @@ import module_;
 import lexer, parser, expression, declaration, semantic, util, error;
 
 
-
-/*class FwdRef: Declaration{ // Forward reference. Dummy node for identifier that has not yet been resolved
-	this(Identifier name){
-		sstate=SemState.fwdRefs;
-		super(STC.init, name);
-	}
-	Declaration resolved = null;
-	override Declaration semantic(Scope sc){
-		if(resolved) return resolved;
-		return sc.lookup(name, this);
-	}
-	override FwdRef isFwdRef(){return this;}
-}
-
-class MutableAliasRef: Declaration{ // used if a declaration references another declaration, eg mixin Template;
-	Declaration other;
-	bool canShadow = true;
-	this(Declaration other){this.other=other; super(other.stc, other.name);}
-	override Declaration semantic(Scope sc){
-		canShadow = false;
-		return other.semantic(sc);
-	}
-	void shadow(Scope sc, Declaration newDecl){
-		if(canShadow){ other = newDecl; canShadow = false; return; }
-		sc.error(format("cannot shadow declaration '%s' which has already been used", other.name), newDecl.loc);
-	}
-	override MutableAliasRef isMutableAliasRef(){return this;}
-}*/
-
 class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
 	Identifier originalReference;
@@ -52,8 +23,6 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
 	protected void potentialAmbiguity(Identifier decl, Identifier lookup){
-		//error(format("declaration of '%s' results in potential ambiguity", decl), decl.loc);
-		// note("offending symbol lookup", lookup.loc);
 		error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
 		note(format("this lookup should have %s if it was valid", lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
 	}
@@ -478,10 +447,6 @@ class InheritScope: AggregateScope{
 	}
 
 	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		/+mixin(LookupHere!q{auto d; super, ident, false});
-		if(!d || typeid(d) !is typeid(DoesNotExistDecl)) return this.independent!Scope;+/
-		// TODO: this treats the outer scope as shadowing the parent scope!
-		// why does it not always terminate?
 		mixin(GetUnresolved!q{auto d; Scope, ident, false});
 		if(d) return d.independent;
 		Dependent!IncompleteScope traverse(){
@@ -546,7 +511,6 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 		return true; //parent.inexistent(ident);
 	}
 	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		//if(auto d=lookupExactlyHere(ident)) return this.independent!Scope;
 		if(auto i=getUnresolvedImport(ident, noHope).prop) return i;
 		return parent.getUnresolved(ident, noHope);
 	}
