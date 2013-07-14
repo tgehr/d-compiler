@@ -5,6 +5,8 @@ import std.algorithm, std.array, std.string, std.conv;
 import module_;
 import lexer, parser, expression, declaration, semantic, util, error;
 
+import std.typecons : q = tuple, Q = Tuple;
+
 
 class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
@@ -18,6 +20,17 @@ static interface IncompleteScope{
 	Declaration[] potentialLookup(Identifier ident);
 }
 
+enum ImportKind : ubyte{
+	private_,
+	public_,
+	protected_,
+	mixin_,
+}
+auto importKindFromSTC(STC stc){
+	if(stc&STCpublic) return ImportKind.public_;
+	if(stc&STCprotected) return ImportKind.protected_;
+	return ImportKind.private_;
+}
 
 abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
@@ -65,13 +78,8 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 	bool inexistent(Identifier ident){
 		auto d=lookupExactlyHere(ident);
-		if(d){
-			if(typeid(d) !is typeid(DoesNotExistDecl)){
-				potentialAmbiguity(d.name, ident);
-				mixin(SetErr!q{ident});
-				return false;
-			}
-		}else insert(New!DoesNotExistDecl(ident));
+		if(!d) insert(New!DoesNotExistDecl(ident));
+		else assert(typeid(d) is typeid(DoesNotExistDecl));
 		return true;
 	}
 
@@ -90,15 +98,15 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return lookupHere(ident, false);
 	}
 
-	final Declaration lookupExactlyHere(Identifier ident){
-		return symtab.get(ident.ptr, null);
+	Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
+		auto t=lookupExactlyHere(ident);
+		if(!t || typeid(t) !is typeid(DoesNotExistDecl))
+			return t.independent;
+		return lookupImports(ident, onlyMixins, t);
 	}
 
-	Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
-		auto t=lookupExactlyHere(ident);
-		if(/+ignoreImports ||+/ !t || typeid(t) !is typeid(DoesNotExistDecl))
-			return t.independent;
-		return lookupImports(ident, t);
+	final Declaration lookupExactlyHere(Identifier ident){
+		return symtab.get(ident.ptr, null);
 	}
 
 	private bool onImportStack = false;
@@ -109,7 +117,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		foreach(im;imports){
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
-			mixin(GetUnresolvedHere!q{auto d;im, ident, noHope});
+			mixin(GetUnresolvedHere!q{auto d;im[0], ident, noHope});
 			if(d) isUnresolved = true;
 		}
 		dontImport(ident);
@@ -129,7 +137,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				onstack=true; scope(exit) onstack=false;
 				bool success = true;
 				foreach(im;outer.imports){
-					auto dd=im.getUnresolvedHere(ident, noHope);
+					auto dd=im[0].getUnresolvedHere(ident, noHope);
 					assert(!dd.dependee);
 					auto d=dd.value;
 					if(d) success &= d.inexistent(ident);
@@ -141,7 +149,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			Declaration[] potentialLookup(Identifier ident){
 				// TODO: this is very wasteful
 				Declaration[] r;
-				foreach(im;outer.imports) r~=im.potentialLookup(ident);
+				foreach(im;outer.imports) r~=im[0].potentialLookup(ident);
 				return r;
 			}
 		}
@@ -152,19 +160,20 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}
 	IncompleteScope unresolvedImportsCache;	// TODO: embed?
 
-	final protected Dependent!Declaration lookupImports(Identifier ident, Declaration alt){
+	final protected Dependent!Declaration lookupImports(Identifier ident, bool onlyMixins, Declaration alt){
 		if(onImportStack) return alt.independent!Declaration;
 		onImportStack = true; scope(exit) onImportStack = false;
 		size_t count = 0;
 		foreach(im;imports){
+			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
 			// TODO: private (imports)
-			mixin(LookupHere!q{auto d;im,ident,false});
+			mixin(LookupHere!q{auto d;im[0],ident,false});
 			if(!d) return d.independent;
 			else if(typeid(d) !is typeid(DoesNotExistDecl)) count++;
 		}
 		if(count == 1){
 			foreach(im;imports){
-				mixin(LookupHere!q{auto d;im,ident,false});
+				mixin(LookupHere!q{auto d;im[0],ident,false});
 				assert(!!d);
 				if(typeid(d) !is typeid(DoesNotExistDecl))
 					return d.independent;
@@ -173,7 +182,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		}else if(count){
 			Declaration[] decls;
 			foreach(im;imports){
-				mixin(LookupHere!q{auto d;im,ident,false});
+				mixin(LookupHere!q{auto d;im[0],ident,false});
 				assert(!!d);
 				if(typeid(d) !is typeid(DoesNotExistDecl))
 					decls~=d;
@@ -232,9 +241,11 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		notImported[ident.ptr]=ident;
 	}
 
-	final bool addImport(Scope sc)in{assert(!!sc);}body{
-		foreach(x;imports) if(x is sc) return true; // TODO: make more efficient?
-		imports ~= sc;
+	final bool addImport(Scope sc, ImportKind kind)in{
+		assert(!!sc);
+	}body{
+		foreach(im;imports) if(im[0] is sc) return true; // TODO: make more efficient?
+		imports ~= q(sc,kind);
 		bool ret = true;
 		if(imports.length==1){
 			foreach(_,decl;symtab){
@@ -261,6 +272,12 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	Declaration getDeclaration(){return null;}
 	TemplateInstanceDecl getTemplateInstance(){return null;}
 	Module getModule(){return null;}
+
+	final Declaration getParentDecl(){
+		if(auto decl=getDeclaration()) return decl;
+		return getModule();
+	}
+
 	// control flow structures:
 	BreakableStm getBreakableStm(){return null;}
 	LoopingStm getLoopingStm(){return null;}
@@ -296,7 +313,7 @@ private:
 	Declaration[][const(char)*] psymtab;
 	Declaration[] arbitrary;
 	Declaration[] arbitrarydecls;
-	Scope[] imports;
+	/+Q+/std.typecons.Tuple!(Scope,ImportKind)[] imports; // DMD bug
 }
 
 class ModuleScope: Scope{
@@ -432,7 +449,7 @@ class InheritScope: AggregateScope{
 	// therefore we need to detect circular lookups in InheritScopes
 	private bool onstack = false;
 
-	override Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
+	override Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
 		if(onstack) return New!DoesNotExistDecl(ident).independent!Declaration;
 		onstack = true; scope(exit) onstack = false;
 
@@ -447,7 +464,7 @@ class InheritScope: AggregateScope{
 				if(auto t=raggr.shortcutScope.lookup(ident).prop) return t;
 		}
 
-		mixin(LookupHere!q{auto d; super, ident, ignoreImports});
+		mixin(LookupHere!q{auto d; super, ident, onlyMixins});
 
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
@@ -455,7 +472,7 @@ class InheritScope: AggregateScope{
 		if(!d && raggr.sstate == SemState.completed ||
 		   d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!(q{
-			auto lkup = parent.asc.lookupHere(ident, ignoreImports);
+			auto lkup = parent.asc.lookupHere(ident, onlyMixins);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
 			if(parent.sstate != SemState.completed && !d ||
@@ -519,10 +536,9 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 		if(decl) return decl.independent;
 		return parent.lookup(ident);
 	}
-	Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
-		// TODO: ignoreImports?
+	Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
 		if(auto t=lookupExactlyHere(ident)) return t.independent;
-		return lookupImports(ident, null);
+		return lookupImports(ident, onlyMixins, null);
 	}
 
 	override bool inexistent(Identifier ident){

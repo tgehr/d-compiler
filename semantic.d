@@ -3051,7 +3051,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
 		meaning.bdy.pickupSTC(stc);
 		meaning.startAnalysis();
-		if(!sc.addImport(meaning.bdy.scope_)) mixin(ErrEplg);
+		if(!sc.addImport(meaning.bdy.scope_,ImportKind.mixin_)) mixin(ErrEplg);
 		potentialRemove(sc, this);
 		sym.makeStrong();
 		mixin(SemChld!q{inst});
@@ -5507,6 +5507,11 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	 */
 	bool recursiveLookup = true;
 
+	/* specifies whether this identifier should ignore imported scopes other
+	   than template mixins.
+	 */
+	bool onlyMixins = false; // TODO: merge those two bools into one bit field
+
 	override void semantic(Scope sc){
 		if(!meaning) lookupSemantic(sc, sc);
 		else super.semantic(sc);
@@ -5548,7 +5553,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			sstate=SemState.begin; // reset
 
 			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this});
-			else mixin(LookupHere!q{meaning; lkup, this, false});
+			else mixin(LookupHere!q{meaning; lkup, this, onlyMixins});
 
 			if(!meaning){
 				if(unresolved){
@@ -8685,6 +8690,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 			mixin(RewEplg!q{r});
 		}
 		if(sstate != SemState.pre) return;
+		if(!(stc&STCvisibility)) stc|=STCprivate;
 		sstate = SemState.begin;
 		scope_ = sc;
 		potentialInsert(sc, this);
@@ -8716,7 +8722,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 			if(err) sc.error(err, symbols[0].loc);
 			mixin(ErrEplg);
 		}
-		sc.addImport(m.sc);
+		if(!sc.addImport(m.sc,importKindFromSTC(stc))) mixin(ErrEplg);;
 		mixin(SemEplg);
 	}
 }
@@ -9213,6 +9219,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			if(!ident){
 				ident=New!Identifier(decl.name.name);
 				ident.recursiveLookup = false;
+				ident.onlyMixins = true;
 				virtualLookups[decl]=ident;
 			}
 			mixin(Lookup!q{_; ident, parent.asc});
@@ -9361,6 +9368,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				if(vtbl.has(fd)) continue;
 				mixin CreateBinderForDependent!("AddToVtbl","addToVtbl");
 				mixin(AddToVtbl!(q{_;this,fd},false));
+				mixin(SemCheck);
 			}
 		}
 		bool[FunctionDecl] hiders;
