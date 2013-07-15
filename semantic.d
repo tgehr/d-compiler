@@ -252,6 +252,8 @@ mixin CreateBinderForDependent!("GetUnresolvedHere","getUnresolvedHere");
 mixin CreateBinderForDependent!("IsDeclAccessible","isDeclAccessible");
 mixin CreateBinderForDependent!("DetermineOverride","determineOverride");
 mixin CreateBinderForDependent!("FindOverrider","findOverrider");
+mixin CreateBinderForDependent!("LookupSealedOverloadSet","lookupSealedOverloadSet");
+mixin CreateBinderForDependent!("LookupSealedOverloadSetWithRetry","lookupSealedOverloadSetWithRetry");
 
 template IntChld(string s) if(!s.canFind(",")){
 	enum IntChld=mixin(X!q{
@@ -4178,7 +4180,16 @@ class Symbol: Expression{ // semantic node
 					break;
 				}
 			}
-			errsc.error("circular dependencies are illegal",loc);
+			// make emmitted circular dependency errors deterministic
+			// (this is not strictly necessary, but it simplifies regression testing.)
+			if(errsc.handler){
+				auto priority(size_t a){ return q(clist[a].loc.source.name,clist[a].loc.line,clist[a].loc.getColumn(errsc.handler.getTabsize())); }
+				auto first = iota(0,clist.length).reduce!((a,b)=>priority(a)<priority(b)?a:b);
+				clist = chain(clist[first..$],clist[0..first]).array;
+			}
+			////
+
+			errsc.error("circular dependencies are illegal",clist[0].loc);
 			circ = null;
 			mixin(SetErr!q{});
 			foreach_reverse(x; clist[1..$]){
@@ -5792,7 +5803,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				//ident.lookup(msc);
 				if(ident.sstate != SemState.failed){
 					mixin(Lookup!q{_;ident,msc});
-					if(ident.needRetry) { needRetry=true; return; }
+					if(auto nr=ident.needRetry) { needRetry=nr; return; }
 					mixin(PropErr!q{ident});
 				}
 				if(ident.sstate == SemState.failed) goto Linexistent;
@@ -5928,7 +5939,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(auto symb=e1.isSymbol())
 		if(symb.meaning)if(auto t=symb.meaning.isTemplateInstanceDecl())
 			tmpl=t;
-
+		
 		if(tmpl)
 			sc.error(format("no member '%s' for %s '%s'",member.toString(),e1.kind,e1),loc);
 		else
@@ -9096,7 +9107,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			this.raggr=raggr;
 		}
 		public override void potentialAmbiguity(Identifier decl, Identifier lookup){
-			error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
+			error(format("declaration of '%s' "~suspiciousDeclDesc, decl), decl.loc);
 			note(format("this lookup on subclass '%s' should have %s if it was valid", raggr.name,lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
 		}
 	}
@@ -9207,28 +9218,54 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 
 	private mixin CreateBinderForDependent!("InheritVtbl","inheritVtbl");
 
-	private Identifier[FunctionDecl] virtualLookups;
+	private Identifier[const(char)*] sealedLookups;
+	Dependent!(std.typecons.Tuple!(OverloadSet,ubyte)) lookupSealedOverloadSetWithRetry(Identifier name){
+		mixin(LookupHere!q{auto ovsc; asc, name, true});
+		if(!ovsc){
+			auto ident = sealedLookups.get(name.ptr, null);
+			if(!ident){
+				ident=New!Identifier(name.name);
+				ident.recursiveLookup = false;
+				ident.onlyMixins = true;
+				ident.loc=name.loc;
+				sealedLookups[name.ptr]=ident;
+			}
+			mixin(Lookup!q{_; ident, asc});
+			if(auto nr=ident.needRetry) { return q(OverloadSet.init,nr).independent; }
+			ovsc = ident.meaning;
+		}
+
+		return q(ovsc?ovsc.isOverloadSet():null,ubyte.init).independent;
+	}
+
+	Dependent!OverloadSet lookupSealedOverloadSet(Identifier name){
+		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;this,name});
+		if(!setnr[1]) return setnr[0].independent;
+		static class OverloadSetSealer : Expression{
+			ReferenceAggregateDecl self;
+			Identifier name;
+			this(ReferenceAggregateDecl self, Identifier name, ubyte nr){
+				this.self=self;
+				this.name=name;
+				needRetry = nr;
+			}
+			void semantic(Scope sc){
+				mixin(SemPrlg);
+				mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;self,name});
+				if(setnr[1]) { needRetry=setnr[1]; return; }
+				mixin(SemEplg);
+			}
+		}
+		return Dependee(New!OverloadSetSealer(this,name,setnr[1]), null).dependent!OverloadSet;
+	}
+
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
-		OverloadSet set;
 		if(!parent) goto Lfresh;
-		mixin(LookupHere!q{auto ovsc; parent.asc, decl.name, true});
-		if(!ovsc){
-			auto ident = virtualLookups.get(decl, null);
-			if(!ident){
-				ident=New!Identifier(decl.name.name);
-				ident.recursiveLookup = false;
-				ident.onlyMixins = true;
-				virtualLookups[decl]=ident;
-			}
-			mixin(Lookup!q{_; ident, parent.asc});
-			if(auto nr=ident.needRetry) { needRetry = nr; return indepvoid; }
-			ovsc = ident.meaning;
-		}
-		if(!ovsc) goto Lfresh;
-
-		set = ovsc.isOverloadSet();
+		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, decl.name});
+		if(setnr[1]){ needRetry=setnr[1]; return indepvoid; }
+		auto set=setnr[0];
 		if(!set) goto Lfresh;
 
 		// need to provide new/aliased versions for ALL overloads
@@ -9373,36 +9410,35 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 		bool[FunctionDecl] hiders;
 		foreach(x; vtbl.vtbl){
-			if(x.state == VtblState.needsOverride){
-				auto ovscd = asc.lookupHere(x.fun.name, true);
-				assert(!ovscd.dependee);
-				auto ovsc = ovscd.value;
-				assert(!!ovsc && typeid(ovsc) !is typeid(DoesNotExistDecl));
-				auto ovs = ovsc.isOverloadSet();
-				assert(!!ovs);
-				FunctionDecl fun;
-				foreach(y; ovs.decls){
-					if(y.stc & (STCnonvirtualprotection|STCstatic))
-						continue;
-					if(auto fd=y.isFunctionDecl()){
-						// if(!vtbl.has(fd)) continue;
-						fun = fd;
-						break;
-					}
+			if(x.state != VtblState.needsOverride) continue;
+			// TODO: one could maybe optimize this:
+			mixin(LookupSealedOverloadSetWithRetry!q{auto ovsnr; this, x.fun.name});
+			if(ovsnr[1]){ needRetry=ovsnr[1]; return indepvoid; }
+			auto ovs=ovsnr[0];
+			assert(!!ovs);
+			FunctionDecl fun;
+			foreach(y; ovs.decls){
+				if(y.stc & (STCnonvirtualprotection|STCstatic))
+					continue;
+				if(auto fd=y.isFunctionDecl()){
+					// if(!vtbl.has(fd)) continue;
+					fun = fd;
+					break;
 				}
-				assert(!!fun);
-				if(fun in hiders) continue;
-				hiders[fun] = true;
-				// TODO: investigate the issue further and give more helpful error message
-				string hint = fun.stc & STCoverride ?
-					" (either override all overloads or alias missing ones into the child class scope)":
-					" (did you forget to specify 'override'?)";
-
-				string kind = fun.stc & STCoverride ?" override":"";
-
-				scope_.error(format("method%s '%s' illegally shadows a method in the parent class%s", kind, fun.name, hint),fun.loc);
-				mixin(SetErr!q{fun});
 			}
+			assert(!!fun);
+			if(fun in hiders) continue;
+			hiders[fun] = true;
+			// TODO: investigate the issue further and give more helpful error message
+			string hint = fun.stc & STCoverride ?
+				" (either override all overloads or alias missing ones into the child class scope)":
+				" (did you forget to specify 'override'?)";
+
+			string kind = fun.stc & STCoverride ?" override":"";
+
+			scope_.error(format("method%s '%s' illegally shadows a method in the parent class%s", kind, fun.name, hint),fun.loc);
+			mixin(SetErr!q{fun});
+			x.state = VtblState.inherited;
 		}
 		//if(auto parent = parentClass())
 		//mixin(PropRetry!q{parent});
@@ -9639,8 +9675,10 @@ abstract class OverloadableDecl: Declaration{ // semantic node
 }
 
 class OverloadSet: Declaration{ // purely semantic node
-
-	debug private bool _matchedOne = false; // TODO: remove
+	// A lookup that sealed this overloadset:
+	// TODO: less conservative strategy only forbidding inserting overloads
+	// that are superior matches to prior lookups / overrides?
+	Identifier sealingLookup = null;
 
 	this(OverloadableDecl[] args...)in{
 		assert(args.length);
@@ -9651,10 +9689,11 @@ class OverloadSet: Declaration{ // purely semantic node
 		sstate = SemState.begin; // do not insert into scope
 	}
 	this(Identifier name){super(STC.init,name);}
+
 	void add(OverloadableDecl decl)in{
+		assert(!sealingLookup);
 		assert(!decls.length||decls[0].name.name is decl.name.name);
 		assert(!tdecls.length||tdecls[0].name.name is decl.name.name);
-		debug assert(!_matchedOne, "TODO!"); // TODO:
 	}body{
 		if(!loc.line) loc=decl.loc;
 		if(auto td=decl.isTemplateDecl()) tdecls~=td;
@@ -9742,7 +9781,9 @@ class OverloadSet: Declaration{ // purely semantic node
 
 	/* find a function decl that may override fun, or return null
 	 */
-	Dependent!FunctionDecl findOverrider(FunctionDecl fun){
+	final Dependent!FunctionDecl findOverrider(FunctionDecl fun)in{
+		assert(fun.scope_.getDeclaration().maybe!(a=>a.isFunctionDef())||!!sealingLookup);
+	}body{
 		// TODO: multi-dep
 		foreach(ref decl; decls){
 			auto fd = decl.isFunctionDecl();
@@ -9755,7 +9796,9 @@ class OverloadSet: Declaration{ // purely semantic node
 
 	/* find the function decl that fun overrides, or display an error and return null
 	 */
-	Dependent!FunctionDecl determineOverride(FunctionDecl fun){
+	final Dependent!FunctionDecl determineOverride(FunctionDecl fun)in{
+		assert(fun.scope_.getDeclaration().maybe!(a=>a.isFunctionDef())||!!sealingLookup);
+	}body{
 		size_t num = 0;
 		foreach(ref decl; decls){
 			decl.semantic(decl.scope_);
@@ -9783,7 +9826,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		return null.independent!FunctionDecl;
 	}
 
-	private final void thisSTCIsBetter(alias str, R)(R stcr, STC stc, ref size_t num){
+	private static void thisSTCIsBetter(alias str, R)(R stcr, STC stc, ref size_t num){
 		auto s(ElementType!R a){ return mixin(str); }
 		alias util.any any;
 		bool found = false;
@@ -9797,7 +9840,6 @@ class OverloadSet: Declaration{ // purely semantic node
 	}
 
 	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
-		debug _matchedOne = true;
 
 		if(!tdecls.length){
 			if(decls.length == 1) return decls[0].matchCall(sc, loc, this_, func, args, context);
@@ -10338,7 +10380,6 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			}
 		}
 
-		debug set._matchedOne = true;
 		OverloadSet.Matched[] matches, tmatches;
 		if(!matchATemplate){
 			//matches = determineFunctionMatches(); // pointless GC allocation

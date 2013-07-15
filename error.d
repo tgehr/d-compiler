@@ -19,17 +19,10 @@ abstract class ErrorHandler{
 
 	bool showsEffect(){ return true; }
 
+	int getTabsize(){ return tabsize; }
+
 	this(){
 		tabsize=getTabSize();
-	}
-	protected int getColumn(Location loc){
-		int res=0;
-		auto l=loc.source.getLineOf(loc.rep);
-		for(;!l.empty&&l[0]&&l.ptr<loc.rep.ptr; l.popFront()){
-			if(l.front=='\t') res=res-res%tabsize+tabsize;
-			else res++;
-		}
-		return res+1;
 	}
 }
 class SimpleErrorHandler: ErrorHandler{
@@ -62,7 +55,7 @@ class VerboseErrorHandler: ErrorHandler{
 		auto source = src.name;
 		auto line = src.getLineOf(loc.rep);
 		if(loc.rep.ptr<line.ptr) loc.rep=loc.rep[line.ptr-loc.rep.ptr..$];
-		auto column=getColumn(loc);
+		auto column=getColumn(loc,tabsize);
 		write(source, loc.line, column, err, isNote);
 		if(line.length&&line[0]){
 			display(line);

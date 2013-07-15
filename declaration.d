@@ -31,6 +31,7 @@ abstract class Declaration: Statement{
 		FunctionDef,
 		TemplateDecl,
 		TemplateInstanceDecl,
+		TemplateMixinDecl,
 		OverloadableDecl,
 		OverloadSet,
 		CrossScopeOverloadSet,
@@ -259,6 +260,7 @@ class TemplateMixinDecl: Declaration{
 	this(STC stc, Expression i, Identifier name)in{assert(i&&1);}body{inst=i; super(stc,name);}
 	override string toString(){return "mixin "~inst.toString()~(name?" "~name.toString():"")~";";}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 

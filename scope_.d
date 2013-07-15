@@ -32,11 +32,13 @@ auto importKindFromSTC(STC stc){
 	return ImportKind.private_;
 }
 
+enum suspiciousDeclDesc = "smells suspicously fishy"; // or "stinks" ?
+
 abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
 	protected void potentialAmbiguity(Identifier decl, Identifier lookup){
-		error(format("declaration of '%s' smells suspiciously fishy", decl), decl.loc);
+		error(format("declaration of '%s' "~suspiciousDeclDesc, decl), decl.loc);
 		note(format("this lookup should have %s if it was valid", lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
 	}
 
@@ -45,7 +47,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		auto d=lookupExactlyHere(decl.name);
+		auto d=symtabLookup(decl.name);
 		if(d){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(decl.name, d.name);
@@ -54,6 +56,11 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					fd.scope_ = this;
+					if(os.sealingLookup){
+						error("introduction of new overload "~suspiciousDeclDesc, decl.loc);
+						note("overload set was sealed here", os.sealingLookup.loc);
+						return false;
+					}
 					os.add(fd);
 					return true;
 				}
@@ -77,9 +84,16 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}
 
 	bool inexistent(Identifier ident){
-		auto d=lookupExactlyHere(ident);
+		auto d=symtabLookup(ident);
 		if(!d) insert(New!DoesNotExistDecl(ident));
-		else assert(typeid(d) is typeid(DoesNotExistDecl));
+		else if(auto ov=d.isOverloadSet()){
+			assert(!ov.sealingLookup);
+			ov.sealingLookup = ident;
+		}else if(typeid(d) !is typeid(DoesNotExistDecl)){
+			potentialAmbiguity(d.name, ident);
+			mixin(SetErr!q{ident});
+			return false;
+		}
 		return true;
 	}
 
@@ -104,8 +118,14 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			return t.independent;
 		return lookupImports(ident, onlyMixins, t);
 	}
+	
+	Declaration lookupExactlyHere(Identifier ident){
+		auto r = symtabLookup(ident);
+		if(r) if(auto ov=r.isOverloadSet()) if(!ov.sealingLookup) return null;
+		return r;
+	}
 
-	final Declaration lookupExactlyHere(Identifier ident){
+	protected final Declaration symtabLookup(Identifier ident){
 		return symtab.get(ident.ptr, null);
 	}
 
@@ -232,8 +252,18 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}
 
 	Declaration/+final+/[] potentialLookup(Identifier ident){
-		return psymtab.get(ident.ptr,[])~arbitrarydecls;
 		// TODO: this is very wasteful
+		if(auto d=symtabLookup(ident)){
+			if(d.isOverloadSet()){
+				// do not look up overloads in imports/template mixins
+				import std.range : chain, zip;
+				auto psym=psymtab.get(ident.ptr,[]);
+				return zip(chain(psym,arbitrary),chain(psym,arbitrarydecls))
+					.filter!(a=>!a[0].isImportDecl()&&!a[0].isTemplateMixinDecl()
+				).map!(a=>a[1]).array;
+			}else return [];
+		}
+		return psymtab.get(ident.ptr,[])~arbitrarydecls;
 	}
 
 	private Identifier[const(char)*] notImported;
@@ -309,6 +339,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
 private:
+
 	Declaration[const(char)*] symtab;
 	Declaration[][const(char)*] psymtab;
 	Declaration[] arbitrary;
@@ -469,7 +500,7 @@ class InheritScope: AggregateScope{
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
 		// if sstate is 'completed', DoesNotExistDecls do not need to be generated
-		if(!d && raggr.sstate == SemState.completed ||
+		if(raggr.sstate == SemState.completed && !symtabLookup(ident) ||
 		   d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!(q{
 			auto lkup = parent.asc.lookupHere(ident, onlyMixins);
@@ -536,9 +567,12 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 		if(decl) return decl.independent;
 		return parent.lookup(ident);
 	}
-	Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
+	override Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
 		if(auto t=lookupExactlyHere(ident)) return t.independent;
 		return lookupImports(ident, onlyMixins, null);
+	}
+	override Declaration lookupExactlyHere(Identifier ident){
+		return symtabLookup(ident);
 	}
 
 	override bool inexistent(Identifier ident){

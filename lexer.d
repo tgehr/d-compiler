@@ -199,6 +199,16 @@ struct Location{
 		return Location(rep.ptr[0..end.rep.ptr-rep.ptr+end.rep.length],line);
 	}
 }
+import std.array;
+int getColumn(Location loc, size_t tabsize){
+	int res=0;
+	auto l=loc.source.getLineOf(loc.rep);
+	for(;!l.empty&&l[0]&&l.ptr<loc.rep.ptr; l.popFront()){
+		if(l.front=='\t') res=res-res%tabsize+tabsize;
+		else res++;
+	}
+	return res+1;
+}
 
 struct Token{
 	TokenType type;
