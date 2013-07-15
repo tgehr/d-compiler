@@ -27,9 +27,9 @@ int circdep5(bool b){auto y=circdep3(0); return y;} // error
 
 
 struct AA{
-	typeof(AAA.y) x;
+	typeof(AAA.y) x; // error
 	struct AAA{
-		static typeof(AA.x) y; // error
+		static typeof(AA.x) y;
 	}
 }
 
@@ -48,10 +48,10 @@ auto bar(){
 }
 
 template A(){
-	enum V=B!().V;
+	enum V=B!().V; // error
 }
 template B(){
-	enum V=A!().V; // error
+	enum V=A!().V;
 }
 enum x = A!();
 

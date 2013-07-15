@@ -12,8 +12,8 @@ static if(!is(typeof(ffff))) enum gggg = 2; // error
 static if(!is(typeof(gggg))) enum ffff = 2; // error
 
 
-// void bazz(){}
-// static if(!is(typeof(bazz(2)))) void bazz(int){} // TODO!
+void bazz(){}
+static if(!is(typeof(bazz(2)))) void bazz(int){} // error
 
 static if(!is(typeof(c))) enum a = 1;
 static if(is(typeof(b))) enum c = 1;
@@ -36,7 +36,7 @@ static if(!is(typeof(theOther))){
 	static if(!is(typeof(asdf))) enum theOther=2;
 }
 
-//static if(!is(typeof(theOne))) enum asdfg=2; // TODO: this should be OK
+static if(!is(typeof(theOne))) enum asdfg=2;
 
 static if((0&&foo)^1){pragma(msg, "Fofofo");}
 static if(!!(1||foo)){pragma(msg, "fdofo");}
