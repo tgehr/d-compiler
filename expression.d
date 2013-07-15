@@ -15,6 +15,7 @@ import rope_;
 abstract class Node{
 	// debug auto cccc=0;
 	Location loc;
+	final @property sourcePriority(){ return q(loc.source.name,loc.line,loc.getColumn(1)); }
 
 	abstract @property string kind();
 

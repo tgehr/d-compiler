@@ -80,7 +80,7 @@ template PropErr(string s) if(!s.canFind(",")){
 	enum PropErr=s.length?mixin(X!q{
 		static if(is(typeof(@(sp[1])): Node)){
 			if(@(sp[1]).sstate==SemState.error){
-				//auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
+				// auto xxx = @(sp[1]);dw("propagated error from ", typeid(xxx)," ",@(sp[1])," to ",this);
 				@(ErrEplg)
 			}
 		}else foreach(x;@(sp[1])) mixin(PropErr!q{x});
@@ -4183,8 +4183,7 @@ class Symbol: Expression{ // semantic node
 			// make emmitted circular dependency errors deterministic
 			// (this is not strictly necessary, but it simplifies regression testing.)
 			if(errsc.handler){
-				auto priority(size_t a){ return q(clist[a].loc.source.name,clist[a].loc.line,clist[a].loc.getColumn(errsc.handler.getTabsize())); }
-				auto first = iota(0,clist.length).reduce!((a,b)=>priority(a)<priority(b)?a:b);
+				auto first = iota(0,clist.length).reduce!((a,b)=>clist[a].sourcePriority<clist[b].sourcePriority?a:b);
 				clist = chain(clist[first..$],clist[0..first]).array;
 			}
 			////
@@ -4297,10 +4296,15 @@ class Symbol: Expression{ // semantic node
 		// those are not virtual functions because of centralized symbol dependency handling
 		// TODO: make specific parts virtual functions of the relevant classes instead
 		if(auto vd=meaning.isVarDecl()){
-			if(!vd.type || vd.stc & STCenum || (vd.init&&vd.stc&(STCimmutable|STCconst)&&vd.willInterpretInit())){
+			if(vd.stc & STCenum || (vd.init&&vd.stc&(STCimmutable|STCconst)&&vd.willInterpretInit())){
 				mixin(MeaningSemantic);
 				mixin(CircErrMsg);
 				mixin(SemProp!q{sc=meaning.scope_;meaning});
+			}else if(!vd.type){
+				mixin(MeaningSemantic);
+				mixin(CircErrMsg);
+				if(!vd.type) mixin(PropRetry!q{sc=meaning.scope_;meaning});
+				if(!vd.type) mixin(PropErr!q{sc=meaning.scope_;meaning});				
 			}
 			assert(!!vd.type);
 
@@ -9483,8 +9487,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			assert(!!rad);
 			auto t=rad.isSubtypeOfImpl(rhs,stack,failed).prop;
 			if(failed){
-				scope_.error("circular inheritance",rparents[i].loc);
-				stack.showCycle(rad, scope_);
+				stack.circularInheritanceError(scope_,rad);
 				mixin(SetErr!q{rparents[i]});
 				failed = false;
 				continue;
@@ -9519,9 +9522,7 @@ protected:
 			if(overrun !is null) return overrun.get(decl,-1)!=-1;
 			return false;
 		}
-		void showCycle(ReferenceAggregateDecl start, Scope sc)in{
-			assert(has(start));
-		}body {
+		void circularInheritanceError(Scope sc, ReferenceAggregateDecl start){
 			// TODO: uncontrolled allocations
 			auto arr = initial[0..min(num,$)].dup;
 			auto k = overrun.keys, v = overrun.values;
@@ -9529,14 +9530,25 @@ protected:
 			sort!"a[1]<b[1]"(zip(k,v));
 			arr~=k;
 			arr=arr.find(start);
-			foreach(x;retro(zip(arr,arr[0..$-1]))){
+/+			auto first=iota(0,arr.length).reduce!((a,b)=>arr[a].sourcePriority<arr[b].sourcePriority?a:b);
++/ // TODO: report DMD bug
+			auto j=0;
+			foreach(i;1..arr.length)
+				if(arr[i].sourcePriority<arr[j].sourcePriority)
+					j=i;
+			auto rdecls=chain(arr[j+1..$],arr[0..j+1]);
+
+			bool first = true;
+			foreach(x;zip(chain(rdecls[1..rdecls.length],rdecls[0..1]),rdecls).retro){ // TODO: dollar
 				alias util.all all;
 				assert(all!(a=>cast(AggregateTy)a)(x[1].parents));
 				auto rparent = zip(x[1].parents,x[1].rparents)
 					.find!((a,b)=>(cast(AggregateTy)cast(void*)a[0]).decl is b)(x[0])
 					.front[1];
 				mixin(SetErr!q{rparent});
-				sc.note("part of inheritance cycle",rparent.loc);
+				if(first) sc.error("circular inheritance",rparent.loc);
+				else sc.note("part of inheritance cycle",rparent.loc);
+				first = false;
 			}
 		}
 	private:
