@@ -464,11 +464,11 @@ class ConstOverride4: IHazFoo2{
 	override int foo()inout{ return x(); } // TODO: DMD says this is legal...
 }
 
-class CircOverride1: CircOverride2{
+class CircOverride1: CircOverride2{ // error
 	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
 	override int bar(int x){ return x; }// ok (hidden by circular inheritance)
 }
-class CircOverride2: CircOverride1{ // error
+class CircOverride2: CircOverride1{
 	override int foo(int x){ return x; }// ok (hidden by circular inheritance)
 }
 
@@ -664,6 +664,13 @@ static assert(!is(typeof({
 	}
 })));
 
+struct NonTrivalCircularInheritance{
+	class I4:G{}
+	class I3:I1{} // error
+	class I2:I3{}
+	class I1:I2{}
+	class G:I1{}
+}
 
 
 static assert(!is(typeof({

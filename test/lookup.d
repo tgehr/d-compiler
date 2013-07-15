@@ -90,8 +90,8 @@ struct TestIllegalInheritance{
 
 struct TestCircInheritLookup{
 	enum foo = 2;
-	class A : B{ int bar=foo; }
 	class B : A{ int x=y; } // error
+	class A : B{ int bar=foo; }
 }
 
 struct TestInheritLookup{

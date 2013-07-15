@@ -1,8 +1,8 @@
 interface I{ }
 
-class C: D{ }
+class C: D{ } // error
 
-class D: C{ } // error
+class D: C{ }
 
 
 immutable int u = v; // error
