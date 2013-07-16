@@ -1836,13 +1836,6 @@ class TemplateInstanceDecl: Declaration{
 		return parent.iftiDecl()?bdy.decls[0].isFunctionDecl():null;
 	}
 
-	override void buildInterface(){
-		if(sstate == SemState.completed || sstate == SemState.error || rewrite) return;
-		bdy.buildInterface();
-		mixin(SemProp!q{sc=bdy.scope_;bdy});
-	}
-
-
 	private void determineInstanceScope()in{
 		assert(paramScope && paramScope.parent is paramScope.iparent);
 	}body{
@@ -8294,8 +8287,6 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		if(!sc.insert(this)){mixin(ErrEplg);}
 	}
 
-	void buildInterface(){ }
-
 	override void semantic(Scope sc){
 		if(sstate==SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
@@ -8913,15 +8904,6 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		}
 	}
 
-	override void buildInterface(){
-		assert(!!scope_, text(this));
-		auto r = evaluate(scope_).isDeclaration();
-		mixin(SemCheck);
-		if(r is this) return;
-		assert(!!r);
-		mixin(RewEplg!q{r});
-	}
-
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic(sc);
@@ -9068,15 +9050,6 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 			x.presemantic(sc);
 		}
 		sstate = SemState.begin;
-	}
-
-	override void buildInterface(){
-		foreach(ref x; decls){
-			x.buildInterface();
-			mixin(Rewrite!q{x});
-			if(x.needRetry==2) mixin(PropRetry!q{sc=scope_;x});
-		}
-		foreach(x; decls) mixin(PropRetry!q{sc=scope_;x});
 	}
 
 	override void semantic(Scope sc){
@@ -9631,18 +9604,6 @@ mixin template Semantic(T) if(is(T==AggregateDecl)){
 			         New!AggregateScope(this);
 
 		if(bdy) bdy.presemantic(asc);
-	}
-
-	override void buildInterface(){
-		if(sstate == SemState.completed || sstate == SemState.error || rewrite) return;
-		if(bdy){
-			bdy.buildInterface();
-			mixin(PropRetry!q{sc=asc;bdy});
-		}
-		findParents();
-		if(auto exp=unresolvedParent()) mixin(PropRetry!q{sc=scope_;exp});
-		finishInheritance();
-		mixin(SemCheck);
 	}
 
 	override void semantic(Scope sc){
@@ -10985,14 +10946,6 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 			potentialInsert(sc, this);
 		}
 		Declaration mixedin;
-		override void buildInterface(){
-			mixedin=evaluate(scope_);
-			mixin(SemCheck);
-			auto r=mixedin;
-			r.presemantic(scope_);
-			r.buildInterface();
-			mixin(RewEplg!q{r});
-		}
 	}else static if(is(T==MixinExp)){
 		AccessCheck accessCheck = accessCheck.all;
 		mixin ContextSensitive;

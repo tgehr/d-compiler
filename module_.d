@@ -89,12 +89,6 @@ class Module: Declaration{
 		}
 	}
 
-	override void buildInterface(){
-		mixin(SemPrlg);
-		if(sstate == SemState.pre) presemantic();
-		foreach(ref x;decls){x.buildInterface();mixin(Rewrite!q{x});}
-	}
-
 	override void semantic(Scope=null){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic();
