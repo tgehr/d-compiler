@@ -7,6 +7,11 @@ import lexer, parser, expression, declaration, semantic, util, error;
 
 import std.typecons : q = tuple, Q = Tuple;
 
+mixin CreateBinderForDependent!("LookupImpl");
+mixin CreateBinderForDependent!("LookupHereImpl");
+mixin CreateBinderForDependent!("GetUnresolvedImpl");
+mixin CreateBinderForDependent!("GetUnresolvedHereImpl");
+
 
 class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
@@ -97,15 +102,15 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return true;
 	}
 
-	Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		return getUnresolvedHere(ident, noHope);
+	Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope){
+		return getUnresolvedHere(ident, onlyMixins, noHope);
 	}
 
 	// scope where the identifier will be resolved next
-	Dependent!IncompleteScope getUnresolvedHere(Identifier ident, bool noHope=false){
+	Dependent!IncompleteScope getUnresolvedHere(Identifier ident, bool onlyMixins, bool noHope){
 		auto t=lookupExactlyHere(ident);
 		if(!t) return this.independent!IncompleteScope;
-		return getUnresolvedImport(ident, noHope);
+		return getUnresolvedImport(ident, onlyMixins, noHope);
 	}
 
 	Dependent!Declaration lookup(Identifier ident){
@@ -130,23 +135,27 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}
 
 	private bool onImportStack = false;
-	final protected Dependent!IncompleteScope getUnresolvedImport(Identifier ident, bool noHope){
+	final protected Dependent!IncompleteScope getUnresolvedImport(Identifier ident, bool onlyMixins, bool noHope){
 		if(onImportStack) return null.independent!IncompleteScope;
 		onImportStack = true; scope(exit) onImportStack = false;
+		
 		bool isUnresolved = false;
 		foreach(im;imports){
+			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
-			mixin(GetUnresolvedHere!q{auto d;im[0], ident, noHope});
+			mixin(GetUnresolvedHere!q{auto d;im[0], ident, onlyMixins, noHope});
 			if(d) isUnresolved = true;
 		}
 		dontImport(ident);
 		if(!isUnresolved) return null.independent!IncompleteScope;
 		static class UnresolvedImports: IncompleteScope{
 			Scope outer;
+			bool onlyMixins;
 			bool noHope;
-			this(Scope outer, bool noHope){
+			this(Scope outer, bool onlyMixins, bool noHope){
 				this.outer = outer;
+				this.onlyMixins = onlyMixins;
 				this.noHope = noHope;
 			}
 
@@ -157,7 +166,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				onstack=true; scope(exit) onstack=false;
 				bool success = true;
 				foreach(im;outer.imports){
-					auto dd=im[0].getUnresolvedHere(ident, noHope);
+					auto dd=im[0].getUnresolvedHere(ident, onlyMixins, noHope);
 					assert(!dd.dependee);
 					auto d=dd.value;
 					if(d) success &= d.inexistent(ident);
@@ -173,12 +182,12 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				return r;
 			}
 		}
-		return (unresolvedImportsCache ?
-		        unresolvedImportsCache :
-		        (unresolvedImportsCache=New!UnresolvedImports(this, noHope)))
+		return (unresolvedImportsCache[noHope] ?
+		        unresolvedImportsCache[noHope] :
+		        (unresolvedImportsCache[noHope]=New!UnresolvedImports(this, onlyMixins, noHope)))
 			.independent!IncompleteScope;
 	}
-	IncompleteScope unresolvedImportsCache;	// TODO: embed?
+	IncompleteScope[2] unresolvedImportsCache;
 
 	final protected Dependent!Declaration lookupImports(Identifier ident, bool onlyMixins, Declaration alt){
 		if(onImportStack) return alt.independent!Declaration;
@@ -377,10 +386,10 @@ class NestedScope: Scope{
 		return r.independent;
 	}
 
-	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		mixin(GetUnresolved!q{auto d; super, ident, noHope});
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope){
+		mixin(GetUnresolved!q{auto d; super, ident, onlyMixins, noHope});
 		if(d) return d.independent;
-		return parent.getUnresolved(ident, noHope);
+		return parent.getUnresolved(ident, onlyMixins, noHope);
 	}
 
 	override bool isNestedIn(Scope rhs){ return this is rhs || parent.isNestedIn(rhs); }
@@ -512,15 +521,15 @@ class InheritScope: AggregateScope{
 		return d.independent;
 	}
 
-	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		mixin(GetUnresolved!q{auto d; Scope, ident, false});
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope){
+		mixin(GetUnresolved!q{auto d; Scope, ident, onlyMixins, noHope});
 		if(d) return d.independent;
 		Dependent!IncompleteScope traverse(){
 			if(onstack) return null.independent!IncompleteScope;
 			onstack = true; scope(exit) onstack = false;
 
 			mixin(AggregateParentsInOrderTraversal!(q{
-				if(auto lkup = parent.asc.getUnresolved(ident, noHope).prop) return lkup;
+				if(auto lkup = parent.asc.getUnresolved(ident, onlyMixins, noHope).prop) return lkup;
 			},"raggr","parent",true));
 			return null.independent!IncompleteScope;
 		}
@@ -528,11 +537,11 @@ class InheritScope: AggregateScope{
 			auto tr = traverse();
 			if(!tr.dependee && tr.value) return tr;
 			if(!raggr.shortcutScope) raggr.initShortcutScope(parent);
-			return raggr.shortcutScope.getUnresolved(ident, noHope);
+			return raggr.shortcutScope.getUnresolved(ident, onlyMixins, noHope);
 		}
 		// TODO: this is a hack
 		if(auto tr = traverse().prop) return tr;
-		return ident.recursiveLookup?parent.getUnresolved(ident, noHope):null.independent!IncompleteScope;
+		return ident.recursiveLookup?parent.getUnresolved(ident, onlyMixins, noHope):null.independent!IncompleteScope;
 	}
 }
 
@@ -578,9 +587,9 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 	override bool inexistent(Identifier ident){
 		return true; //parent.inexistent(ident);
 	}
-	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		if(auto i=getUnresolvedImport(ident, noHope).prop) return i;
-		return parent.getUnresolved(ident, noHope);
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope){
+		if(auto i=getUnresolvedImport(ident, onlyMixins, noHope).prop) return i;
+		return parent.getUnresolved(ident, onlyMixins, noHope);
 	}
 
 	override protected void dontImport(Identifier ident){ }

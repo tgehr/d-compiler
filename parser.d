@@ -1340,9 +1340,12 @@ private struct Parser{
 		auto bind=appender!(Expression[])();
 		bool isBindings=false;
 		for(;;){
-			Expression s=parseIdentifierList!false(); // only allow foo.bar.qux, and not foo.bar!qux.new C
-			if(ttype==Tok!"=") nextToken(), s=New!(BinaryExp!(Tok!"="))(s,parseIdentifierList());
-			else if(!isBindings&&ttype==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
+			Expression s;
+			if(peek().type==Tok!"="){
+				Expression s1=parseIdentifier(), s2=(nextToken(),parseIdentifierList());
+				s=New!(BinaryExp!(Tok!"="))(s1,s2), s.loc=s1.loc.to(ptok.loc);
+			}else s=parseIdentifierList!false(); // only allow foo.bar.qux, and not foo.bar!qux.new C
+			if(!isBindings&&ttype==Tok!":"){nextToken(); isBindings=true; symbols.put(s); continue;}
 			if(isBindings) bind.put(s); 			//(isBindings?bind:symbols).put(s); TODO: report bug!
 			else symbols.put(s);
 			if(ttype==Tok!",") nextToken();

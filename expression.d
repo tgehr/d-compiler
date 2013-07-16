@@ -117,6 +117,7 @@ abstract class Expression: Node{
 		Symbol,
 		Identifier,
 		LookupIdentifier,
+		AssignExp,
 		FieldExp,
 		LengthExp,
 		SuperExp,
@@ -137,6 +138,7 @@ abstract class Expression: Node{
 		Tuple,
 		ExpTuple,
 		TypeTuple,
+		ImportBindingsExp,
 	);
 
 	mixin DownCastMethod;
@@ -179,6 +181,7 @@ class LiteralExp: Expression{
 	override string toString(){
 		//if(loc.rep.length) return loc.rep;
 		if(type) if(auto et=type.getHeadUnqual().isEnumTy()) return EnumTy.valueToString(type, value);
+		if(loc.line) return _brk(loc.rep);
 		return _brk(value.toString());
 	}
 
@@ -419,7 +422,9 @@ abstract class ABinaryExp: Expression{
 	mixin Visitors;
 }
 
-abstract class AssignExp: ABinaryExp{}
+abstract class AssignExp: ABinaryExp{
+	mixin DownCastMethod;
+}
 
 abstract class FieldExp: Expression{
 	Expression e1;

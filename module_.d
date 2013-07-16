@@ -44,9 +44,9 @@ class ModuleRepository{
 			return modules[path]=null;
 		}
 		auto name=New!Identifier(path);
-		auto r=new Module(name, path, code, this);
+		auto r=modules[path]=new Module(name, path, code, this);
 		r.presemantic(r.sc);
-		return modules[path]=r;
+		return r;
 	}
 
 	bool hasErrors(){

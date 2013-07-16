@@ -82,6 +82,8 @@ final class ImportBindingsExp: Expression{
 	Expression[] bindings;
 	this(Expression sym, Expression[] bind){symbol=sym; bindings=bind;}
 	override string toString(){return symbol.toString()~": "~join(map!(to!string)(bindings),", ");}
+	
+	mixin DownCastMethod;
 }
 class ImportDecl: Declaration{
 	Expression[] symbols;

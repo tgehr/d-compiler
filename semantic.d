@@ -207,7 +207,7 @@ template ImplConvertToPar(string s) if(s.split(",").length==2){
 	});
 }
 
-template CreateBinderForDependent(string name, string fun){
+template CreateBinderForDependent(string name, string fun=lowerf(name)){
 	mixin(mixin(X!q{
 		template @(name)(string s, bool propErr = true) if(s.split(",")[0].split(";").length==2){
 			enum ss = s.split(";");
@@ -231,29 +231,28 @@ template CreateBinderForDependent(string name, string fun){
 	}));
 }
 mixin CreateBinderForDependent!("ImplConvertsTo","implicitlyConvertsTo");
-mixin CreateBinderForDependent!("RefConvertsTo","refConvertsTo");
-mixin CreateBinderForDependent!("ConstConvertsTo","constConvertsTo");
-mixin CreateBinderForDependent!("ConvertsTo","convertsTo");
-mixin CreateBinderForDependent!("TypeMostGeneral","typeMostGeneral");
-mixin CreateBinderForDependent!("TypeCombine","typeCombine");
-mixin CreateBinderForDependent!("Combine","combine");
-mixin CreateBinderForDependent!("Unify","unify");
-mixin CreateBinderForDependent!("TypeMatch","typeMatch");
-mixin CreateBinderForDependent!("RefCombine","refCombine");
-mixin CreateBinderForDependent!("MatchCall","matchCall");
-mixin CreateBinderForDependent!("MatchCallHelper","matchCallHelper");
-mixin CreateBinderForDependent!("AtLeastAsSpecialized","atLeastAsSpecialized");
-mixin CreateBinderForDependent!("DetermineMostSpecialized","determineMostSpecialized");
-mixin CreateBinderForDependent!("Lookup","lookup");
-mixin CreateBinderForDependent!("LookupHere","lookupHere");
-mixin CreateBinderForDependent!("LookupExactlyHere","lookupExactlyHere");
-mixin CreateBinderForDependent!("GetUnresolved","getUnresolved");
-mixin CreateBinderForDependent!("GetUnresolvedHere","getUnresolvedHere");
-mixin CreateBinderForDependent!("IsDeclAccessible","isDeclAccessible");
-mixin CreateBinderForDependent!("DetermineOverride","determineOverride");
-mixin CreateBinderForDependent!("FindOverrider","findOverrider");
-mixin CreateBinderForDependent!("LookupSealedOverloadSet","lookupSealedOverloadSet");
-mixin CreateBinderForDependent!("LookupSealedOverloadSetWithRetry","lookupSealedOverloadSetWithRetry");
+mixin CreateBinderForDependent!("RefConvertsTo");
+mixin CreateBinderForDependent!("ConstConvertsTo");
+mixin CreateBinderForDependent!("ConvertsTo");
+mixin CreateBinderForDependent!("TypeMostGeneral");
+mixin CreateBinderForDependent!("TypeCombine");
+mixin CreateBinderForDependent!("Combine");
+mixin CreateBinderForDependent!("Unify");
+mixin CreateBinderForDependent!("TypeMatch");
+mixin CreateBinderForDependent!("RefCombine");
+mixin CreateBinderForDependent!("MatchCall");
+mixin CreateBinderForDependent!("MatchCallHelper");
+mixin CreateBinderForDependent!("AtLeastAsSpecialized");
+mixin CreateBinderForDependent!("DetermineMostSpecialized");
+mixin CreateBinderForDependent!("Lookup");
+mixin CreateBinderForDependent!("LookupHere");
+mixin CreateBinderForDependent!("GetUnresolved");
+mixin CreateBinderForDependent!("GetUnresolvedHere");
+mixin CreateBinderForDependent!("IsDeclAccessible");
+mixin CreateBinderForDependent!("DetermineOverride");
+mixin CreateBinderForDependent!("FindOverrider");
+mixin CreateBinderForDependent!("LookupSealedOverloadSet");
+mixin CreateBinderForDependent!("LookupSealedOverloadSetWithRetry");
 
 template IntChld(string s) if(!s.canFind(",")){
 	enum IntChld=mixin(X!q{
@@ -3142,6 +3141,8 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			}));
 		}
 
+		mixin(SemProp!q{sym.meaning});
+
 		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);
 		instantiateSemantic(sc,container,sym,accessCheck);
 	}
@@ -4948,8 +4949,8 @@ class GaggingScope: NestedScope{
 		return parent.lookupHere(ident, ignoreImports);
 	}
 
-	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool noHope=false){
-		return parent.getUnresolved(ident, noHope);
+	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope=false){
+		return parent.getUnresolved(ident, onlyMixins, noHope);
 	}
 
 	override bool inexistent(Identifier ident){
@@ -5095,7 +5096,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 		}}}
 		mixin(SemChld!q{e});
 
-		mixin CreateBinderForDependent!("CheckConv","checkConv");
+		mixin CreateBinderForDependent!("CheckConv");
 		mixin(CheckConv!q{bool conversionLegal; this, sc});
 		if(!conversionLegal) mixin(ErrEplg);
 
@@ -5596,7 +5597,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			if(sstate == SemState.started){
 				needRetry = true;
 				tryAgain = true;
-				mixin(GetUnresolved!q{unresolved;lkup,this});
+				mixin(GetUnresolved!q{unresolved;lkup,this,onlyMixins,false});
 			}
 			sstate = SemState.begin;
 			mixin(RetryEplg);
@@ -5631,7 +5632,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 
 	override void noHope(Scope sc){
 		if(meaning) return;
-		auto unresolved=sc.getUnresolved(this, true).force;
+		auto unresolved=sc.getUnresolved(this, onlyMixins, true).force;
 		if(unresolved&&!unresolved.inexistent(this))
 			mixin(ErrEplg);
 	}
@@ -5715,7 +5716,7 @@ abstract class CurrentExp: Expression{
 			}
 		}
 
-		mixin CreateBinderForDependent!("DetermineType","determineType");
+		mixin CreateBinderForDependent!("DetermineType");
 		mixin(DetermineType!q{type; this, sc, aggr});
 		type = type.applyScopeSTC(sc);
 		mixin(SemEplg);
@@ -5954,7 +5955,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	override void noHope(Scope sc){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
-			auto unresolved = e1.getMemberScope().getUnresolved(i, true).force;
+			auto unresolved = e1.getMemberScope().getUnresolved(i, false, true).force;
 			if(unresolved&&!unresolved.inexistent(i))
 				mixin(ErrEplg);
 		}
@@ -8710,13 +8711,19 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 		scope_ = sc;
 		potentialInsert(sc, this);
 
-		static string computePath(Expression e){
+		string computePath(Expression e){
 			if(auto fe=e.isFieldExp()){
 				assert(cast(Identifier)fe.e2);
 				auto id=cast(Identifier)cast(void*)fe.e2;
 				return computePath(fe.e1)~'/'~id.name;
-			}if(auto id=e.isIdentifier()) return id.name;
-			assert(0,"TODO");
+			}else if(auto id=e.isIdentifier()) return id.name;
+			else if(auto ib=e.isImportBindingsExp()){
+				stc|=STCstatic;
+				return computePath(ib.symbol);
+			}else if(auto ass=e.isAssignExp()){
+				stc|=STCstatic;
+				return computePath(ass.e2);
+			}else assert(0,text("TODO: ",e,typeid(e)));
 		}
 
 		path = computePath(symbols[0])~".d";
@@ -8737,7 +8744,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 			if(err) sc.error(err, symbols[0].loc);
 			mixin(ErrEplg);
 		}
-		if(!sc.addImport(m.sc,importKindFromSTC(stc))) mixin(ErrEplg);;
+		if(!(stc&STCstatic)&&!sc.addImport(m.sc,importKindFromSTC(stc))) mixin(ErrEplg);;
 		mixin(SemEplg);
 	}
 }
@@ -8785,7 +8792,7 @@ mixin template Semantic(T) if(is(T==EnumVarDecl)){
 	}
 }
 
-mixin CreateBinderForDependent!("GetEnumBase","getEnumBase");
+mixin CreateBinderForDependent!("GetEnumBase");
 
 mixin template Semantic(T) if(is(T==EnumDecl)){
 	Type base;
@@ -9220,7 +9227,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		return (cast(AggregateTy)cast(void*)parents[0]).decl.isClassDecl();
 	}
 
-	private mixin CreateBinderForDependent!("InheritVtbl","inheritVtbl");
+	private mixin CreateBinderForDependent!("InheritVtbl");
 
 	private Identifier[const(char)*] sealedLookups;
 	Dependent!(std.typecons.Tuple!(OverloadSet,ubyte)) lookupSealedOverloadSetWithRetry(Identifier name){
@@ -9375,8 +9382,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	 */
 
 	final override void finishInheritance(){
-		mixin CreateBinderForDependent!("CheckCircularInheritance", "checkCircularInheritance");
-		mixin CreateBinderForDependent!("FillShortcutScope", "fillShortcutScope");
+		mixin CreateBinderForDependent!("CheckCircularInheritance",);
+		mixin CreateBinderForDependent!("FillShortcutScope",);
 
 		mixin(CheckCircularInheritance!q{_;this});
 		mixin(InheritVtbl!q{ClassDecl _; this});
@@ -9407,7 +9414,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		foreach(decl; &bdy.traverseInOrder){
 			if(auto fd = decl.isFunctionDecl()){
 				if(vtbl.has(fd)) continue;
-				mixin CreateBinderForDependent!("AddToVtbl","addToVtbl");
+				mixin CreateBinderForDependent!("AddToVtbl");
 				mixin(AddToVtbl!(q{_;this,fd},false));
 				mixin(SemCheck);
 			}
@@ -9743,7 +9750,7 @@ class OverloadSet: Declaration{ // purely semantic node
 		FunctionDecl decl;
 	}
 
-	private mixin CreateBinderForDependent!("CanOverride","canOverride");
+	private mixin CreateBinderForDependent!("CanOverride");
 	// TODO: make this a public member function of function decl instead
 	private static Dependent!bool canOverride(FunctionDecl fd, FunctionDecl fun){
 		alias util.all all;
@@ -10439,8 +10446,8 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		}
 	}
 private:
-	mixin CreateBinderForDependent!("DetermineFunctionMatches","determineFunctionMatches");
-	mixin CreateBinderForDependent!("DetermineTemplateMatches","determineTemplateMatches");
+	mixin CreateBinderForDependent!("DetermineFunctionMatches");
+	mixin CreateBinderForDependent!("DetermineTemplateMatches");
 	Dependent!(OverloadSet.Matched[]) determineFunctionMatches(){
 		enum SemRet = q{ return (OverloadSet.Matched[]).init.independent; };
 		auto matches = new set.Matched[set.decls.length];   // pointless GC allocations
