@@ -37,6 +37,7 @@ abstract class Declaration: Statement{
 		CrossScopeOverloadSet,
 		SymbolMatcher,
 		GenerativeDecl,
+		MixinDecl,
 		AliasDecl,
 		AggregateDecl,
 		ClassDecl,
@@ -172,6 +173,7 @@ class MixinDecl: GenerativeDecl{
 
 	override @property string kind(){return "string mixin declaration";}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class AliasDecl: Declaration{

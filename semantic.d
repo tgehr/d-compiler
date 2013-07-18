@@ -4935,19 +4935,19 @@ class GaggingScope: NestedScope{
 	override void note(lazy string, Location){ /* do nothing */ }
 
 	// forward other members:
-	override Dependent!Declaration lookup(Identifier ident){
-		return parent.lookup(ident);
+	protected override Dependent!Declaration lookupImpl(Identifier ident){
+		return parent.lookupImpl(ident);
 	}
-	override Dependent!Declaration lookupHere(Identifier ident, bool ignoreImports){
-		return parent.lookupHere(ident, ignoreImports);
-	}
-
-	override Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope=false){
-		return parent.getUnresolved(ident, onlyMixins, noHope);
+	protected override Dependent!Declaration lookupHereImpl(Identifier ident, bool ignoreImports){
+		return parent.lookupHereImpl(ident, ignoreImports);
 	}
 
-	override bool inexistent(Identifier ident){
-		return parent.inexistent(ident);
+	protected override Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope=false){
+		return parent.getUnresolvedImpl(ident, onlyMixins, noHope);
+	}
+
+	protected override bool inexistentImpl(Identifier ident){
+		return parent.inexistentImpl(ident);
 	}
 
 	override FunctionDef getFunction(){return parent.getFunction();}
