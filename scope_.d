@@ -169,6 +169,8 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			else if(typeid(d) !is typeid(DoesNotExistDecl)) decls~=d;
 		}
 
+		if(!decls.length) dontImport(ident);
+
 		return CrossScopeOverloadSet.buildDecl(this, decls, alt).independent;
 	}
 
@@ -219,7 +221,6 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			return inexistentImpl(view, ident);
 		}
 			
-		private bool onstack;
 		bool inexistentImpl(Scope view, Identifier ident){
 			if(this in visited) return true;
 			visited[this]=true;
