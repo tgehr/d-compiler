@@ -3039,8 +3039,8 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 	}
 
 	override void semantic(Scope sc){
-		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);
+		if(sstate == SemState.pre) presemantic(sc);
 		scope(exit) if(!needRetry) potentialRemove(sc, this);
 		mixin(SemChld!q{inst});
 		assert(cast(Symbol)inst);
