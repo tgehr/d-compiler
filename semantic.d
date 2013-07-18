@@ -10931,7 +10931,6 @@ mixin template Semantic(T) if(is(T==PragmaDecl)){
 						if(!x.isType() && !x.isExpTuple() && intprt){
 							mixin(IntChld!q{x});
 						}
-
 					// TODO: this should use the scope's error handler for output
 					import std.stdio;
 					// if(!sc.handler.showsEffect) stderr.write("(gagged:) ");

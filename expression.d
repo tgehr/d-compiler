@@ -181,7 +181,6 @@ class LiteralExp: Expression{
 	override string toString(){
 		//if(loc.rep.length) return loc.rep;
 		if(type) if(auto et=type.getHeadUnqual().isEnumTy()) return EnumTy.valueToString(type, value);
-		if(loc.line) return _brk(loc.rep);
 		return _brk(value.toString());
 	}
 
