@@ -550,9 +550,13 @@ mixin template Semantic(T) if(is(T==Expression)){
 		}
 		// the empty tuple is an expression except if a type is requested
 		if(auto et=me.isExpTuple()) if(!et.length) return et.type;
+		if(auto sym=me.isSymbol()) if(auto ov=sym.meaning.isCrossScopeOverloadSet()){
+			ov.reportConflict(sc,loc);
+			goto Lerr;
+		}
 		sc.error(format("%s '%s' is used as a type",me.kind,me.toString()),loc);
 		me.sstate = SemState.error;
-		mixin(ErrEplg);
+		Lerr:mixin(ErrEplg);
 	}
 
 	final void expSemantic(Scope sc){
@@ -10058,15 +10062,48 @@ class OverloadSet: Declaration{ // purely semantic node
 	TemplateDecl[] tdecls;
 }
 
+
 class CrossScopeOverloadSet : Declaration{
 	Declaration[] decls;
-	this(Declaration[] decls)in{
+
+	private static void removeDuplicates(ref Declaration[] decls){
+		// TODO: optimize
+		bool[Declaration] has;
+		foreach(ref d;decls){
+			if(d in has){
+				swap(d,decls[$-1]);
+				decls=decls[0..$-1];
+			}
+			has[d]=true;
+		}
+	}
+	
+	static Declaration buildDecl(Scope sc, Declaration[] decls, Declaration alt){
+		if(!decls.length) return alt;
+		removeDuplicates(decls);
+		if(decls.length==1) return decls[0];
+		alias util.all all;
+		if(all!(a=>!a.isCrossScopeOverloadSet())(decls)){
+			auto r=New!CrossScopeOverloadSet(decls);
+			r.scope_=sc;
+			return r;
+		}
+		Declaration[] ndecls;
+		foreach(d;decls){
+			if(auto ov=d.isCrossScopeOverloadSet())
+				ndecls~=ov.decls;
+			else ndecls~=d;
+		}
+		return buildDecl(sc, ndecls, alt);
+	}
+	/+private+/ this(Declaration[] decls)in{
 		assert(decls.length>1);
 		foreach(x;decls[1..$]) assert(x.name.name == decls[0].name.name);
 	}body{
 		this.decls=decls;
 		super(STC.init, decls[0].name);
 		sstate = SemState.completed;
+		loc=decls[0].loc;
 	}
 
 	static class OverloadResolver(string op,TT...) : Declaration{

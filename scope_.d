@@ -169,85 +169,71 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			else if(typeid(d) !is typeid(DoesNotExistDecl)) decls~=d;
 		}
 
-		switch(decls.length){
-			case 0: return alt.independent;
-			case 1: return decls[0].independent; // TODO: this case is wasteful
-			default:
-				auto res=New!CrossScopeOverloadSet(decls);
-				res.scope_=this;
-				return res.independent!Declaration;
-		}
+		return CrossScopeOverloadSet.buildDecl(this, decls, alt).independent;
 	}
 
 	final protected Dependent!IncompleteScope getUnresolvedImport(Identifier ident, bool onlyMixins, bool noHope){
 		if(this in visited) return null.independent!IncompleteScope;
 		visited[this]=true;
 
+		IncompleteScope[] unres;
 		bool isUnresolved = false;
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
 			mixin(GetUnresolvedHereImpl!q{auto d;im[0], ident, onlyMixins, noHope});
-			if(d) isUnresolved = true;
+			if(d) unres~=d;
 		}
-		if(!isUnresolved){
+		if(!unres.length){
 			dontImport(ident);
 			return null.independent!IncompleteScope;
 		}
-		static class UnresolvedImports: IncompleteScope{
-			Scope outer;
-			bool onlyMixins;
-			bool noHope;
 
-			override string toString(){
-				return "'UnresolvedImports of "~outer.getModule().name.name~"'";
-			}
+		if(!unresolvedImportsCache[noHope])
+			unresolvedImportsCache[noHope]=New!UnresolvedImports(this, onlyMixins, noHope);
+		unresolvedImportsCache[noHope].unres=unres;
+		return unresolvedImportsCache[noHope].independent!IncompleteScope;
+	}
+	private static class UnresolvedImports: IncompleteScope{
+		Scope outer;
+		IncompleteScope[] unres;
+		bool onlyMixins;
+		bool noHope;
 
-			this(Scope outer, bool onlyMixins, bool noHope){
-				this.outer = outer;
-				this.onlyMixins = onlyMixins;
-				this.noHope = noHope;
-			}
-
-			final bool inexistent(Identifier ident){
-				mixin(Setup);
-				return inexistentImpl(ident);
-			}
-			
-			private bool onstack;
-			bool inexistentImpl(Identifier ident){
-				if(this in visited) return true;
-				visited[this]=true;
-				visited[outer]=true;
-				bool success = true;
-				foreach(im;outer.imports){
-					auto tmp=visited;
-					visited=null; // TODO: memoize instead (?)
-					auto dd=im[0].getUnresolvedHereImpl(ident, onlyMixins, noHope);
-					visited=tmp;
-					assert(!dd.dependee);
-					auto d=dd.value;
-					if(d) success &= d.inexistentImpl(ident);
-				}
-				return success;
-			}
-
-			Declaration[] potentialLookup(Identifier ident){
-				// TODO: this is very wasteful
-				Declaration[] r;
-				foreach(im;outer.imports) r~=im[0].potentialLookup(ident);
-				// dw(this," ",r," ",ident," ",outer.imports.map!(a=>a[0].getModule().name));
-				return r;
-			}
+		override string toString(){
+			return "'UnresolvedImports of "~outer.getModule().name.name~"'";
 		}
 
-		return (unresolvedImportsCache[noHope] ?
-		        unresolvedImportsCache[noHope] :
-		        (unresolvedImportsCache[noHope]=New!UnresolvedImports(this, onlyMixins, noHope)))
-			.independent!IncompleteScope;
+		this(Scope outer, bool onlyMixins, bool noHope){
+			this.outer = outer;
+			this.onlyMixins = onlyMixins;
+			this.noHope = noHope;
+		}
+
+		final bool inexistent(Identifier ident){
+			mixin(Setup);
+			return inexistentImpl(ident);
+		}
+			
+		private bool onstack;
+		bool inexistentImpl(Identifier ident){
+			if(this in visited) return true;
+			visited[this]=true;
+			bool success = true;
+			foreach(d;unres) success &= d.inexistentImpl(ident);
+			return success;
+		}
+
+		Declaration[] potentialLookup(Identifier ident){
+			// TODO: this is very wasteful
+			Declaration[] r;
+			foreach(im;outer.imports) r~=im[0].potentialLookup(ident);
+			// dw(this," ",r," ",ident," ",outer.imports.map!(a=>a[0].getModule().name));
+			return r;
+		}
 	}
-	IncompleteScope[2] unresolvedImportsCache;
+	UnresolvedImports[2] unresolvedImportsCache;
 
 	/+protected+/ bool inexistentImpl(Identifier ident){
 		auto d=symtabLookup(ident);
