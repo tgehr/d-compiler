@@ -4141,8 +4141,8 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 			auto ident = lkupIdents[decl];
 			
 			if(!ident.meaning){
-				Dependent!FunctionDecl traverse(ReferenceAggregateDecl raggr){
-					auto own = raggr.lookupSealedOverloadSet(ident);
+				Dependent!FunctionDecl traverse(Scope view, ReferenceAggregateDecl raggr){
+					auto own = raggr.lookupSealedOverloadSet(view,ident);
 					own.dependentCTFE();
 					if(auto ovs = own.value){
 						mixin(FindOverrider!q{auto fod;ovs,decl});
@@ -4158,11 +4158,11 @@ mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 					if(auto ty=raggr.parents[0].isType())
 					if(auto at=ty.isAggregateTy()){
 						if(auto cd=at.decl.isClassDecl())
-							return traverse(cd);
+							return traverse(view,cd);
 					}
 					return null.independent!FunctionDecl;
 				}
-				auto x = traverse(this);
+				auto x = traverse(asc,this);
 				x.dependentCTFE();
 				if(!x.value){ throw new UnwindException; }
 				dynSymbols[decl]=createSymbol(x.value); // TODO!

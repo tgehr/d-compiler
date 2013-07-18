@@ -281,7 +281,7 @@ template RevEpoLkup(string e){
 			if(ident.recursiveLookup && !ident.isLookupIdentifier()){
 				if(!ident.meaning && ident.sstate != SemState.error){
 					//ident.lookup(sc);
-					mixin(Lookup!q{_; ident, sc});
+					mixin(Lookup!q{_; ident, sc, sc});
 					if(auto nr=ident.needRetry) { needRetry = nr; return; }
 				}
 				if(ident.sstate == SemState.failed){
@@ -3247,7 +3247,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			if(!eponymous.meaning && eponymous.sstate != SemState.failed
 			   && eponymous.sstate != SemState.error){
 				eponymous.recursiveLookup = false;
-				mixin(Lookup!q{_; eponymous, res.getMemberScope()});
+				mixin(Lookup!q{_; eponymous, sc, res.getMemberScope()});
 			}
 			if(auto nr=eponymous.needRetry) { needRetry = nr; return; }
 			mixin(PropErr!q{eponymous});
@@ -3309,7 +3309,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	override void noHope(Scope sc){
 		if(res){
 			auto unresolved = res.getMemberScope();
-			if(unresolved&&!unresolved.inexistent(eponymous))
+			if(unresolved&&!unresolved.inexistent(sc,eponymous))
 				mixin(ErrEplg);
 		}else{
 			mixin(RevEpoNoHope!q{e});
@@ -4939,19 +4939,19 @@ class GaggingScope: NestedScope{
 	override void note(lazy string, Location){ /* do nothing */ }
 
 	// forward other members:
-	protected override Dependent!Declaration lookupImpl(Identifier ident){
-		return parent.lookupImpl(ident);
+	protected override Dependent!Declaration lookupImpl(Scope view, Identifier ident){
+		return parent.lookupImpl(view, ident);
 	}
-	protected override Dependent!Declaration lookupHereImpl(Identifier ident, bool ignoreImports){
-		return parent.lookupHereImpl(ident, ignoreImports);
-	}
-
-	protected override Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope=false){
-		return parent.getUnresolvedImpl(ident, onlyMixins, noHope);
+	protected override Dependent!Declaration lookupHereImpl(Scope view, Identifier ident, bool ignoreImports){
+		return parent.lookupHereImpl(view, ident, ignoreImports);
 	}
 
-	protected override bool inexistentImpl(Identifier ident){
-		return parent.inexistentImpl(ident);
+	protected override Dependent!IncompleteScope getUnresolvedImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope=false){
+		return parent.getUnresolvedImpl(view, ident, onlyMixins, noHope);
+	}
+
+	protected override bool inexistentImpl(Scope view, Identifier ident){
+		return parent.inexistentImpl(view, ident);
 	}
 
 	override FunctionDef getFunction(){return parent.getFunction();}
@@ -5399,15 +5399,16 @@ enum ResolveConstructor = q{
 			constructor.willCall();
 		}
 		if(!constructor.meaning){
-			mixin(Lookup!q{_; constructor, caggr.asc});
+			mixin(Lookup!q{_; constructor, sc, caggr.asc});
 			if(auto nr=constructor.needRetry) { needRetry = nr; return; }
 		}
 	}
 	if(!constructor||constructor.sstate == SemState.failed){
 		// no constructor for type
 		// TODO: disabled default constructor
+		// TODO: default constructor. (remember to make sure that invisible constructors are respected for the decision whether to create default constructors for structs)
 		if(args.length){
-			sc.error("too many arguments to new expression (expected zero)",loc);
+			sc.error("too many arguments to "~kind~" (expected zero)",loc);
 			mixin(ErrEplg);
 		}
 	}else{
@@ -5505,7 +5506,7 @@ mixin template Semantic(T) if(is(T==NewExp)){
 	}
 
 	override void noHope(Scope sc){
-		if(constructor&&!type.isAggregateTy().decl.asc.inexistent(constructor))
+		if(constructor&&!type.isAggregateTy().decl.asc.inexistent(sc,constructor))
 			mixin(ErrEplg);
 	}
 	
@@ -5536,7 +5537,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		mixin(SemPrlg);
 		assert(sstate != SemState.failed);
 		///lookup(lkup);
-		mixin(Lookup!q{_;this,lkup});
+		mixin(Lookup!q{_;this,sc,lkup});
 		if(needRetry) return;
 		if(sstate == SemState.failed){
 			sc.error(format("undefined identifier '%s'",name), loc);
@@ -5552,7 +5553,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 	   + if the lookup succeeds, then 'meaning' will become initialized
 	 */
 
-	final Dependent!void lookup(Scope lkup)in{
+	final Dependent!void lookup(Scope sc, Scope lkup)in{
 		assert(!!lkup);
 		assert(!meaning && sstate != SemState.error && sstate != SemState.failed, text(meaning," ",sstate));
 	}out{
@@ -5565,18 +5566,18 @@ mixin template Semantic(T) if(is(T==Identifier)){
 		if(allowDelay){
 			sstate=SemState.begin; // reset
 
-			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, this});
-			else mixin(LookupHere!q{meaning; lkup, this, onlyMixins});
+			if(recursiveLookup) mixin(Lookup!q{meaning; lkup, sc, this});
+			else mixin(LookupHere!q{meaning; lkup, sc, this, onlyMixins});
 
 			if(!meaning){
 				if(unresolved){
-					auto l = unresolved.potentialLookup(this);
+					auto l = unresolved.potentialLookup(sc,this);
 					if(l.length){
 						needRetry = true;
 						unresolved = null;
 						return multidep(cast(Node[])l).dependent!void;
 					}
-					if(!unresolved.inexistent(this)) mixin(ErrEplg);
+					if(!unresolved.inexistent(sc,this)) mixin(ErrEplg);
 					unresolved = null;
 					tryAgain = true;
 				}
@@ -5594,7 +5595,7 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			if(sstate == SemState.started){
 				needRetry = true;
 				tryAgain = true;
-				mixin(GetUnresolved!q{unresolved;lkup,this,onlyMixins,false});
+				mixin(GetUnresolved!q{unresolved;lkup,sc,this,onlyMixins,false});
 			}
 			sstate = SemState.begin;
 			mixin(RetryEplg);
@@ -5629,8 +5630,8 @@ mixin template Semantic(T) if(is(T==Identifier)){
 
 	override void noHope(Scope sc){
 		if(meaning) return;
-		auto unresolved=sc.getUnresolved(this, onlyMixins, true).force;
-		if(unresolved&&!unresolved.inexistent(this))
+		auto unresolved=sc.getUnresolved(sc, this, onlyMixins, true).force;
+		if(unresolved&&!unresolved.inexistent(sc, this))
 			mixin(ErrEplg);
 	}
 
@@ -5679,7 +5680,7 @@ class SilentModuleIdentifier: ModuleIdentifier{
 		if(!meaning){
 			mixin(SemPrlg);
 			assert(sstate != SemState.failed);
-			mixin(Lookup!q{_;this,mscope});
+			mixin(Lookup!q{_;this,sc,mscope});
 			if(sstate == SemState.failed) mixin(ErrEplg);
 			if(needRetry) return;
 		}
@@ -5804,7 +5805,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				ident.recursiveLookup = false;
 				//ident.lookup(msc);
 				if(ident.sstate != SemState.failed){
-					mixin(Lookup!q{_;ident,msc});
+					mixin(Lookup!q{_;ident,sc,msc});
 					if(auto nr=ident.needRetry) { needRetry=nr; return; }
 					mixin(PropErr!q{ident});
 				}
@@ -5952,8 +5953,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	override void noHope(Scope sc){
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
-			auto unresolved = e1.getMemberScope().getUnresolved(i, false, true).force;
-			if(unresolved&&!unresolved.inexistent(i))
+			auto unresolved = e1.getMemberScope().getUnresolved(sc,i, false, true).force;
+			if(unresolved&&!unresolved.inexistent(sc,i))
 				mixin(ErrEplg);
 		}
 	}
@@ -9108,9 +9109,10 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		mixin(AggregateParentsInOrderTraversal!(q{			
 			foreach(decl; &parent.bdy.traverseInOrder){
 				if(decl.name && decl.name.ptr){
+					// TODO: check visibility!
 					// TODO: handle the case where the meaning of a symbol does not
 					// change due to inheritance, eg. due to imports or alias
-					if(auto d=shortcutScope.lookupHere(decl.name, false).value){
+					if(auto d=shortcutScope.lookupHere(shortcutScope, decl.name, false).value){
 						if(typeid(d) is typeid(DoesNotExistDecl))
 							shortcutScope.potentialAmbiguity(decl.name, d.name);
 					}
@@ -9206,8 +9208,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	private mixin CreateBinderForDependent!("InheritVtbl");
 
 	private Identifier[const(char)*] sealedLookups;
-	Dependent!(std.typecons.Tuple!(OverloadSet,ubyte)) lookupSealedOverloadSetWithRetry(Identifier name){
-		mixin(LookupHere!q{auto ovsc; asc, name, true});
+	Dependent!(std.typecons.Tuple!(OverloadSet,ubyte)) lookupSealedOverloadSetWithRetry(Scope view, Identifier name){
+		mixin(LookupHere!q{auto ovsc; asc, view, name, true});
 		if(!ovsc){
 			auto ident = sealedLookups.get(name.ptr, null);
 			if(!ident){
@@ -9217,7 +9219,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				ident.loc=name.loc;
 				sealedLookups[name.ptr]=ident;
 			}
-			mixin(Lookup!q{_; ident, asc});
+			mixin(Lookup!q{_; ident, view, asc});
 			if(auto nr=ident.needRetry) { return q(OverloadSet.init,nr).independent; }
 			ovsc = ident.meaning;
 		}
@@ -9225,32 +9227,34 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		return q(ovsc?ovsc.isOverloadSet():null,ubyte.init).independent;
 	}
 
-	Dependent!OverloadSet lookupSealedOverloadSet(Identifier name){
-		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;this,name});
+	Dependent!OverloadSet lookupSealedOverloadSet(Scope view, Identifier name){
+		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;this,view,name});
 		if(!setnr[1]) return setnr[0].independent;
 		static class OverloadSetSealer : Expression{
 			ReferenceAggregateDecl self;
+			Scope view;
 			Identifier name;
-			this(ReferenceAggregateDecl self, Identifier name, ubyte nr){
+			this(ReferenceAggregateDecl self, Scope view, Identifier name, ubyte nr){
 				this.self=self;
+				this.view=view;
 				this.name=name;
 				needRetry = nr;
 			}
 			void semantic(Scope sc){
 				mixin(SemPrlg);
-				mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;self,name});
+				mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;self,view,name});
 				if(setnr[1]) { needRetry=setnr[1]; return; }
 				mixin(SemEplg);
 			}
 		}
-		return Dependee(New!OverloadSetSealer(this,name,setnr[1]), null).dependent!OverloadSet;
+		return Dependee(New!OverloadSetSealer(this,view,name,setnr[1]), null).dependent!OverloadSet;
 	}
 
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
 		if(!parent) goto Lfresh;
-		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, decl.name});
+		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, asc, decl.name});
 		if(setnr[1]){ needRetry=setnr[1]; return indepvoid; }
 		auto set=setnr[0];
 		if(!set) goto Lfresh;
@@ -9399,7 +9403,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		foreach(x; vtbl.vtbl){
 			if(x.state != VtblState.needsOverride) continue;
 			// TODO: one could maybe optimize this:
-			mixin(LookupSealedOverloadSetWithRetry!q{auto ovsnr; this, x.fun.name});
+			mixin(LookupSealedOverloadSetWithRetry!q{auto ovsnr; this, asc, x.fun.name});
 			if(ovsnr[1]){ needRetry=ovsnr[1]; return indepvoid; }
 			auto ovs=ovsnr[0];
 			assert(!!ovs);

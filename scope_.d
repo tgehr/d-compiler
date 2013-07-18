@@ -21,9 +21,9 @@ final class DoesNotExistDecl: Declaration{
 }
 
 static interface IncompleteScope{
-	bool inexistent(Identifier ident);
-	bool inexistentImpl(Identifier ident); // only for use in this module...
-	Declaration[] potentialLookup(Identifier ident);
+	bool inexistent(Scope view, Identifier ident);
+	bool inexistentImpl(Scope view, Identifier ident); // only for use in this module...
+	Declaration[] potentialLookup(Scope view, Identifier ident);
 }
 
 enum ImportKind : ubyte{
@@ -53,7 +53,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}out(result){
 		assert(!result||decl.scope_ is this);
 	}body{
-		auto d=symtabLookup(decl.name);
+		auto d=symtabLookup(this, decl.name);
 		if(d){
 			 if(typeid(d) is typeid(DoesNotExistDecl)){
 				potentialAmbiguity(decl.name, d.name);
@@ -102,60 +102,60 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return inex?inex:(inex=New!DoesNotExistDecl(null));
 	}
 	
-	final Dependent!Declaration lookup(Identifier ident){
+	final Dependent!Declaration lookup(Scope view, Identifier ident){
 		mixin(Setup);
-		return lookupImpl(ident);
+		return lookupImpl(view,ident);
 	}
-	final Dependent!Declaration lookupHere(Identifier ident, bool onlyMixins){
+	final Dependent!Declaration lookupHere(Scope view, Identifier ident, bool onlyMixins){
 		mixin(Setup);
-		return lookupHereImpl(ident, onlyMixins);
+		return lookupHereImpl(view,ident, onlyMixins);
 	}
-	final Dependent!IncompleteScope getUnresolved(Identifier ident, bool onlyMixins, bool noHope){
+	final Dependent!IncompleteScope getUnresolved(Scope view, Identifier ident, bool onlyMixins, bool noHope){
 		mixin(Setup);
-		return getUnresolvedImpl(ident, onlyMixins, noHope);
+		return getUnresolvedImpl(view,ident, onlyMixins, noHope);
 	}
 
-	final bool inexistent(Identifier ident){
+	final bool inexistent(Scope view, Identifier ident){
 		mixin(Setup);
-		return inexistentImpl(ident);
+		return inexistentImpl(view, ident);
 	}
 
 	// lookup implementation
 
 	// TODO: report DMD bug regarding protected
-	/+protected+/ Dependent!Declaration lookupImpl(Identifier ident){
-		return lookupHereImpl(ident, false);
+	/+protected+/ Dependent!Declaration lookupImpl(Scope view, Identifier ident){
+		return lookupHereImpl(view, ident, false);
 	}
 
-	/+protected+/ Dependent!Declaration lookupHereImpl(Identifier ident, bool onlyMixins){
-		auto t=lookupExactlyHere(ident);
+	/+protected+/ Dependent!Declaration lookupHereImpl(Scope view, Identifier ident, bool onlyMixins){
+		auto t=lookupExactlyHere(view, ident);
 		if(!t || typeid(t) !is typeid(DoesNotExistDecl))
 			return t.independent;
-		return lookupImports(ident, onlyMixins, t);
+		return lookupImports(view, ident, onlyMixins, t);
 	}
 	
-	Declaration lookupExactlyHere(Identifier ident){
-		auto r = symtabLookup(ident);
+	Declaration lookupExactlyHere(Scope view, Identifier ident){
+		auto r = symtabLookup(view, ident);
 		if(r) if(auto ov=r.isOverloadSet()) if(!ov.sealingLookup) return null;
 		return r;
 	}
 
-	protected final Declaration symtabLookup(Identifier ident){
+	protected final Declaration symtabLookup(Scope view, Identifier ident){
 		return symtab.get(ident.ptr, null);
 	}
 
-	/+protected+/ Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope){
-		return getUnresolvedHereImpl(ident, onlyMixins, noHope);
+	/+protected+/ Dependent!IncompleteScope getUnresolvedImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		return getUnresolvedHereImpl(view, ident, onlyMixins, noHope);
 	}
 
 	// scope where the identifier will be resolved next
-	/+protected+/ Dependent!IncompleteScope getUnresolvedHereImpl(Identifier ident, bool onlyMixins, bool noHope){
-		auto t=lookupExactlyHere(ident);
+	/+protected+/ Dependent!IncompleteScope getUnresolvedHereImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		auto t=lookupExactlyHere(view, ident);
 		if(!t) return this.independent!IncompleteScope;
-		return getUnresolvedImport(ident, onlyMixins, noHope);
+		return getUnresolvedImport(view, ident, onlyMixins, noHope);
 	}
 
-	final protected Dependent!Declaration lookupImports(Identifier ident, bool onlyMixins, Declaration alt){
+	final protected Dependent!Declaration lookupImports(Scope view, Identifier ident, bool onlyMixins, Declaration alt){
 		if(this in visited) return (alt?alt:inex).independent!Declaration;
 		visited[this]=true;
 
@@ -164,7 +164,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
 			// TODO: private (imports)
-			mixin(LookupHereImpl!q{auto d;im[0],ident,onlyMixins});
+			mixin(LookupHereImpl!q{auto d;im[0],view,ident,onlyMixins});
 			if(!d) return d.independent;
 			else if(typeid(d) !is typeid(DoesNotExistDecl)) decls~=d;
 		}
@@ -172,7 +172,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return CrossScopeOverloadSet.buildDecl(this, decls, alt).independent;
 	}
 
-	final protected Dependent!IncompleteScope getUnresolvedImport(Identifier ident, bool onlyMixins, bool noHope){
+	final protected Dependent!IncompleteScope getUnresolvedImport(Scope view, Identifier ident, bool onlyMixins, bool noHope){
 		if(this in visited) return null.independent!IncompleteScope;
 		visited[this]=true;
 
@@ -182,7 +182,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
 			// TODO: private (imports)
 			// TODO: eliminate duplication?
-			mixin(GetUnresolvedHereImpl!q{auto d;im[0], ident, onlyMixins, noHope});
+			mixin(GetUnresolvedHereImpl!q{auto d;im[0], view, ident, onlyMixins, noHope});
 			if(d) unres~=d;
 		}
 		if(!unres.length){
@@ -190,13 +190,16 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			return null.independent!IncompleteScope;
 		}
 
-		if(!unresolvedImportsCache[noHope])
-			unresolvedImportsCache[noHope]=New!UnresolvedImports(this, onlyMixins, noHope);
-		unresolvedImportsCache[noHope].unres=unres;
-		return unresolvedImportsCache[noHope].independent!IncompleteScope;
+		size_t i=noHope<<1|onlyMixins;
+
+		if(!unresolvedImports[i])
+			unresolvedImports[i]=New!UnresolvedImports(this,onlyMixins,noHope);
+		unresolvedImports[i].unres=unres;
+		return unresolvedImports[i].independent!IncompleteScope;
 	}
 	private static class UnresolvedImports: IncompleteScope{
 		Scope outer;
+
 		IncompleteScope[] unres;
 		bool onlyMixins;
 		bool noHope;
@@ -211,32 +214,32 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			this.noHope = noHope;
 		}
 
-		final bool inexistent(Identifier ident){
+		final bool inexistent(Scope view, Identifier ident){
 			mixin(Setup);
-			return inexistentImpl(ident);
+			return inexistentImpl(view, ident);
 		}
 			
 		private bool onstack;
-		bool inexistentImpl(Identifier ident){
+		bool inexistentImpl(Scope view, Identifier ident){
 			if(this in visited) return true;
 			visited[this]=true;
 			bool success = true;
-			foreach(d;unres) success &= d.inexistentImpl(ident);
+			foreach(d;unres) success &= d.inexistentImpl(view, ident);
 			return success;
 		}
 
-		Declaration[] potentialLookup(Identifier ident){
+		Declaration[] potentialLookup(Scope view, Identifier ident){
 			// TODO: this is very wasteful
 			Declaration[] r;
-			foreach(im;outer.imports) r~=im[0].potentialLookup(ident);
+			foreach(im;outer.imports) r~=im[0].potentialLookup(view, ident);
 			// dw(this," ",r," ",ident," ",outer.imports.map!(a=>a[0].getModule().name));
 			return r;
 		}
 	}
-	UnresolvedImports[2] unresolvedImportsCache;
+	UnresolvedImports[4] unresolvedImports;
 
-	/+protected+/ bool inexistentImpl(Identifier ident){
-		auto d=symtabLookup(ident);
+	/+protected+/ bool inexistentImpl(Scope view, Identifier ident){
+		auto d=symtabLookup(view, ident);
 		if(!d) insert(New!DoesNotExistDecl(ident));
 		else if(auto ov=d.isOverloadSet()){
 			assert(!ov.sealingLookup);
@@ -285,9 +288,9 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			}
 	}
 
-	Declaration/+final+/[] potentialLookup(Identifier ident){
+	Declaration/+final+/[] potentialLookup(Scope view, Identifier ident){
 		// TODO: this is very wasteful
-		if(auto d=symtabLookup(ident)){
+		if(auto d=symtabLookup(view, ident)){
 			if(d.isOverloadSet()){
 				// do not look up overloads in imports/template mixins
 				import std.range : chain, zip;
@@ -321,7 +324,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			// TODO: this will not report ambiguities/contradictions introduced
 			// by modules that are not analyzed to sufficient depth
 			// (eg, because their import is the last thing that happens.)
-			ret&=sc.inexistentImpl(ident);
+			ret&=sc.inexistentImpl(this, ident);
 		}
 		return ret;
 	}
@@ -388,9 +391,9 @@ class ModuleScope: Scope{
 		this._handler=handler;
 		this.module_=module_;
 	}
-	protected override Dependent!Declaration lookupImpl(Identifier ident){
+	protected override Dependent!Declaration lookupImpl(Scope view, Identifier ident){
 		if(!ident.name.length) return module_.independent!Declaration;
-		return super.lookupImpl(ident);
+		return super.lookupImpl(view, ident);
 	}
 	override Module getModule(){return module_;}
 }
@@ -403,17 +406,17 @@ class NestedScope: Scope{
 		this.parent=parent;
 	}
 
-	protected override Dependent!Declaration lookupImpl(Identifier ident){
-		mixin(LookupHereImpl!q{auto r; this, ident, false});
+	protected override Dependent!Declaration lookupImpl(Scope view, Identifier ident){
+		mixin(LookupHereImpl!q{auto r; this, view, ident, false});
 		if(!r) return null.independent!Declaration;
-		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookupImpl(ident);
+		if(typeid(r) is typeid(DoesNotExistDecl)) return parent.lookupImpl(view, ident);
 		return r.independent;
 	}
 
-	protected override Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope){
-		mixin(GetUnresolvedImpl!q{auto d; super, ident, onlyMixins, noHope});
+	protected override Dependent!IncompleteScope getUnresolvedImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		mixin(GetUnresolvedImpl!q{auto d; super, view, ident, onlyMixins, noHope});
 		if(d) return d.independent;
-		return parent.getUnresolvedImpl(ident, onlyMixins, noHope);
+		return parent.getUnresolvedImpl(view, ident, onlyMixins, noHope);
 	}
 
 	override bool isNestedIn(Scope rhs){ return this is rhs || parent.isNestedIn(rhs); }
@@ -513,7 +516,7 @@ class InheritScope: AggregateScope{
 	// therefore we need to detect circular lookups in InheritScopes
 	private bool onstack = false;
 
-	protected override Dependent!Declaration lookupHereImpl(Identifier ident, bool onlyMixins){
+	protected override Dependent!Declaration lookupHereImpl(Scope view, Identifier ident, bool onlyMixins){
 		if(onstack) return New!DoesNotExistDecl(ident).independent!Declaration;
 		onstack = true; scope(exit) onstack = false;
 
@@ -523,20 +526,20 @@ class InheritScope: AggregateScope{
 			// outside the class declaration before the parent is resolved
 			// if the declaration would actually be inherited from the parent
 			// an error results.
-			auto d = raggr.shortcutScope.lookupExactlyHere(ident);
+			auto d = raggr.shortcutScope.lookupExactlyHere(view, ident);
 			if(d && typeid(d) is typeid(DoesNotExistDecl))
-				if(auto t=raggr.shortcutScope.lookupImpl(ident).prop) return t;
+				if(auto t=raggr.shortcutScope.lookupImpl(view, ident).prop) return t;
 		}
 
-		mixin(LookupHereImpl!q{auto d; super, ident, onlyMixins});
+		mixin(LookupHereImpl!q{auto d; super, view, ident, onlyMixins});
 
 		// TODO: make more efficient than string comparison
 		if(ident.name !="this" && ident.name!="~this" && ident.name!="invariant") // do not inherit constructors and destructors and invariants
 		// if sstate is 'completed', DoesNotExistDecls do not need to be generated
-		if(raggr.sstate == SemState.completed && !symtabLookup(ident) ||
+		if(raggr.sstate == SemState.completed && !symtabLookup(view, ident) ||
 		   d && typeid(d) is typeid(DoesNotExistDecl))
 		mixin(AggregateParentsInOrderTraversal!(q{
-			auto lkup = parent.asc.lookupHereImpl(ident, onlyMixins);
+			auto lkup = parent.asc.lookupHereImpl(view, ident, onlyMixins);
 			if(lkup.dependee) return lkup.dependee.dependent!Declaration;
 			d = lkup.value;
 			if(parent.sstate != SemState.completed && !d ||
@@ -545,15 +548,15 @@ class InheritScope: AggregateScope{
 		return d.independent;
 	}
 
-	protected override Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope){
-		mixin(GetUnresolvedImpl!q{auto d; Scope, ident, onlyMixins, noHope});
+	protected override Dependent!IncompleteScope getUnresolvedImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		mixin(GetUnresolvedImpl!q{auto d; Scope, view, ident, onlyMixins, noHope});
 		if(d) return d.independent;
 		Dependent!IncompleteScope traverse(){
 			if(onstack) return null.independent!IncompleteScope;
 			onstack = true; scope(exit) onstack = false;
 
 			mixin(AggregateParentsInOrderTraversal!(q{
-				if(auto lkup = parent.asc.getUnresolvedImpl(ident, onlyMixins, noHope).prop) return lkup;
+				if(auto lkup = parent.asc.getUnresolvedImpl(view, ident, onlyMixins, noHope).prop) return lkup;
 			},"raggr","parent",true));
 			return null.independent!IncompleteScope;
 		}
@@ -561,11 +564,11 @@ class InheritScope: AggregateScope{
 			auto tr = traverse();
 			if(!tr.dependee && tr.value) return tr;
 			if(!raggr.shortcutScope) raggr.initShortcutScope(parent);
-			return raggr.shortcutScope.getUnresolvedImpl(ident, onlyMixins, noHope);
+			return raggr.shortcutScope.getUnresolvedImpl(view, ident, onlyMixins, noHope);
 		}
 		// TODO: this is a hack
 		if(auto tr = traverse().prop) return tr;
-		return ident.recursiveLookup?parent.getUnresolvedImpl(ident, onlyMixins, noHope):null.independent!IncompleteScope;
+		return ident.recursiveLookup?parent.getUnresolvedImpl(view, ident, onlyMixins, noHope):null.independent!IncompleteScope;
 	}
 }
 
@@ -595,25 +598,25 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 
 	// (there are no DoesNotExistDecls in ordered scopes,
 	// so methods relying on them need to be overridden)
-	protected override Dependent!Declaration lookupImpl(Identifier ident){
-		mixin(LookupHereImpl!q{auto decl;this, ident, false});
+	protected override Dependent!Declaration lookupImpl(Scope view, Identifier ident){
+		mixin(LookupHereImpl!q{auto decl;this, view, ident, false});
 		if(decl) return decl.independent;
-		return parent.lookupImpl(ident);
+		return parent.lookupImpl(view, ident);
 	}
-	protected override Dependent!Declaration lookupHereImpl(Identifier ident, bool onlyMixins){
-		if(auto t=lookupExactlyHere(ident)) return t.independent;
-		return lookupImports(ident, onlyMixins, null);
+	protected override Dependent!Declaration lookupHereImpl(Scope view, Identifier ident, bool onlyMixins){
+		if(auto t=lookupExactlyHere(view, ident)) return t.independent;
+		return lookupImports(view, ident, onlyMixins, null);
 	}
-	override Declaration lookupExactlyHere(Identifier ident){
-		return symtabLookup(ident);
+	override Declaration lookupExactlyHere(Scope view, Identifier ident){
+		return symtabLookup(view, ident);
 	}
 
-	protected override bool inexistentImpl(Identifier ident){
+	protected override bool inexistentImpl(Scope view, Identifier ident){
 		return true;
 	}
-	protected override Dependent!IncompleteScope getUnresolvedImpl(Identifier ident, bool onlyMixins, bool noHope){
-		if(auto i=getUnresolvedImport(ident, onlyMixins, noHope).prop) return i;
-		return parent.getUnresolvedImpl(ident, onlyMixins, noHope);
+	protected override Dependent!IncompleteScope getUnresolvedImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		if(auto i=getUnresolvedImport(view, ident, onlyMixins, noHope).prop) return i;
+		return parent.getUnresolvedImpl(view, ident, onlyMixins, noHope);
 	}
 
 	override protected void dontImport(Identifier ident){ }
@@ -670,7 +673,7 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 	override bool insert(Declaration decl){
 		// TODO: get rid of !is DoesNotExistDecl?
 		if(!parent.canDeclareNested(decl)){
-			auto confl=parent.lookupImpl(decl.name).value;
+			auto confl=parent.lookupImpl(this, decl.name).value;
 			assert(!!confl);
 			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);
