@@ -9404,7 +9404,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			if(x.state != VtblState.needsOverride) continue;
 			// TODO: one could maybe optimize this:
 			mixin(LookupSealedOverloadSetWithRetry!q{auto ovsnr; this, asc, x.fun.name});
-			if(ovsnr[1]){ needRetry=ovsnr[1]; return indepvoid; }
+			if(ovsnr[1]){ needRetry=ovsnr[1]; return; }
 			auto ovs=ovsnr[0];
 			assert(!!ovs);
 			FunctionDecl fun;
@@ -9519,7 +9519,7 @@ protected:
 			arr=arr.find(start);
 /+			auto first=iota(0,arr.length).reduce!((a,b)=>arr[a].sourcePriority<arr[b].sourcePriority?a:b);
 +/ // TODO: report DMD bug
-			auto j=0;
+			size_t j=0;
 			foreach(i;1..arr.length)
 				if(arr[i].sourcePriority<arr[j].sourcePriority)
 					j=i;

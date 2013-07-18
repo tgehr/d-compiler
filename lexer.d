@@ -200,7 +200,7 @@ struct Location{
 	}
 }
 import std.array;
-int getColumn(Location loc, size_t tabsize){
+int getColumn(Location loc, int tabsize){
 	int res=0;
 	auto l=loc.source.getLineOf(loc.rep);
 	for(;!l.empty&&l[0]&&l.ptr<loc.rep.ptr; l.popFront()){
