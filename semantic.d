@@ -8051,11 +8051,10 @@ mixin template Semantic(T) if(is(T==DoStm)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
-		auto bl = Type.get!bool();
-
 		mixin(SemChldPar!q{sc=lsc;s});
 		mixin(SemChldPar!q{e});// TODO: propose SemChld!q{sc=lsc;e}
 		mixin(FinishDeduction!q{e});
+		auto bl = Type.get!bool();
 		if(e.sstate == SemState.completed){e=e.convertTo(bl);e.semantic(lsc);} // TODO: get rid of direct call
 		if(e.sstate == SemState.completed) mixin(ConstFold!q{sc=lsc;e});
 		mixin(SemProp!q{sc=lsc;s});
