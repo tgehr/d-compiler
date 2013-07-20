@@ -5570,6 +5570,10 @@ mixin template Semantic(T) if(is(T==Identifier)){
 			else mixin(LookupHere!q{meaning; lkup, sc, this, onlyMixins});
 
 			if(!meaning){
+				// TODO: get rid of this. (It is required because of memory re-use.)
+				// This can be removed when unresolved scopes will no longer be their own
+				// abstraction.
+				if(unresolved) unresolved = lkup.getUnresolved(sc, this, onlyMixins, false).force;
 				if(unresolved){
 					auto l = unresolved.potentialLookup(sc,this);
 					if(l.length){

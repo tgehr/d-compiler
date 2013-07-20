@@ -22,8 +22,10 @@ final class DoesNotExistDecl: Declaration{
 
 static interface IncompleteScope{
 	bool inexistent(Scope view, Identifier ident);
-	bool inexistentImpl(Scope view, Identifier ident); // only for use in this module...
 	Declaration[] potentialLookup(Scope view, Identifier ident);
+	// only for use in this module:
+	bool inexistentImpl(Scope view, Identifier ident);
+	Declaration lookupExactlyHere(Scope view, Identifier ident);
 }
 
 enum ImportKind : ubyte{
@@ -194,6 +196,8 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 		size_t i=noHope<<1|onlyMixins;
 
+		//(this is a memory optimization that slightly complicates the interface to Identifier)
+		// TODO: change the design such that IncompleteScope is not required any more.
 		if(!unresolvedImports[i])
 			unresolvedImports[i]=New!UnresolvedImports(this,onlyMixins,noHope);
 		unresolvedImports[i].unres=unres;
@@ -225,7 +229,10 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			if(this in visited) return true;
 			visited[this]=true;
 			bool success = true;
-			foreach(d;unres) success &= d.inexistentImpl(view, ident);
+			foreach(d;unres){
+				if(auto x=d.lookupExactlyHere(view, ident)) continue;
+				success &= d.inexistentImpl(view, ident);
+			}
 			return success;
 		}
 
@@ -236,6 +243,8 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			// dw(this," ",r," ",ident," ",outer.imports.map!(a=>a[0].getModule().name));
 			return r;
 		}
+
+		Declaration lookupExactlyHere(Scope view, Identifier ident){ return null; }
 	}
 	UnresolvedImports[4] unresolvedImports;
 
