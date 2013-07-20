@@ -77,7 +77,7 @@ class MultiDep: Node{
 	Scope sc;
 	this(Node/+final+/[] dep, Scope sc = null)in{
 		alias util.all all;
-		assert(sc||all!(a=>a.isDeclaration()&&a.isDeclaration().scope_)(dep));
+		assert(sc||all!(a=>a.isDeclaration().maybe!(a=>a.scope_))(dep));
 	}body{
 		deps = dep;
 		Scheduler().add(this, null);
