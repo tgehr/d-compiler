@@ -81,10 +81,13 @@ class MultiDep: Node{
 	}body{
 		deps = dep;
 		Scheduler().add(this, null);
-		if(sc) foreach(d; deps){
+		if(sc) foreach(ref d; deps){
+			mixin(Rewrite!q{d});
 			Scheduler().await(this, d, sc);
-		}else foreach(d; deps){
-			Scheduler().await(this, d, d.isDeclaration().scope_);
+		}else foreach(ref d; deps){
+			mixin(Rewrite!q{d});
+			assert(cast(Declaration)d);
+			Scheduler().await(this, d, (cast(Declaration)cast(void*)d).scope_);
 		}
 		needRetry = true;
 	}
@@ -92,6 +95,14 @@ class MultiDep: Node{
 	override void _doAnalyze(scope void delegate(Node) dg){ assert(0); }
 	override inout(Node) ddup()inout{ assert(0); }
 	override string kind(){ return "multi dependency";}
+
+	override void noHope(Scope sc){
+		if(sc)foreach(d;deps) d.noHope(sc);
+	}
+
+	override string toString(){
+		return text(typeid(this),deps);
+	}
 }
 
 // TODO: this allocation can probably be avoided in many cases
@@ -495,8 +506,11 @@ class IsExp: Expression{
 
 class TypeidExp: Expression{
 	Expression e;
-	this(Expression exp)in{assert(exp&&1);}body{e=exp;}
+	invariant(){assert(e !is null,text(loc));}
+	this(Expression exp)in{assert(!!exp);}body{e=exp;}
 	override string toString(){return "typeid("~e.toString()~")";}
+
+	mixin Visitors;
 }
 
 class TraitsExp: Expression{
@@ -529,6 +543,8 @@ class ArrayInitAssocExp: Expression{
 	Expression value;
 	this(Expression k, Expression v){key=k; value=v;}
 	override string toString(){return key.toString()~":"~value.toString();}
+
+	mixin Visitors;
 }
 class StructLiteralExp: InitializerExp{
 	Expression[] args;

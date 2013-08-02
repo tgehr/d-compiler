@@ -120,27 +120,37 @@ class ForeachRangeStm: Statement{
 	bool isReverse;
 	this(Parameter v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~var.toString()~";"~left.toString()~".."~right.toString()~") "~bdy.toString();}
+
+	mixin Visitors;
 }
 class SwitchStm: BreakableStm{
 	bool f; Expression e; Statement s;
 	this(bool isfinal, Expression exp, Statement statement){f=isfinal; e=exp; s=statement;}
 	this(Expression exp, Statement statement){f=false; e=exp; s=statement;}
 	override string toString(){return (f?"final ":"")~"switch("~e.toString()~") "~s.toString();}
+
+	mixin Visitors;
 }
 class CaseStm: Statement{
 	Expression[] e; Statement[] s;
 	this(Expression[] es, Statement[] ss){e=es; s=ss;}
 	override string toString(){return "case "~join(map!(to!string)(e),",")~":"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
+
+	mixin Visitors;
 }
 class CaseRangeStm: Statement{
 	Expression e1,e2; Statement[] s;
 	this(Expression first, Expression last, Statement[] ss){e1=first; e2=last; s=ss;}
 	override string toString(){return "case "~e1.toString()~": .. case "~e2.toString()~":"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
+
+	mixin Visitors;
 }
 class DefaultStm: Statement{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "default:"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
+
+	mixin Visitors;
 }
 class ContinueStm: Statement{
 	Identifier e;
@@ -187,6 +197,8 @@ class WithStm: Statement{
 	Expression e; Statement s;
 	this(Expression exp, Statement statement){e=exp; s=statement;}
 	override string toString(){return "with("~e.toString()~") "~s.toString();}
+
+	mixin Visitors;
 }
 class SynchronizedStm: Statement{
 	Expression e; Statement s;
@@ -199,6 +211,8 @@ class CatchStm: Statement{
 	Statement statement;
 	this(Expression t, Identifier i, Statement s)in{assert(s);}body{type=t; ident=i; statement=s;}
 	override string toString(){return "catch"~(type?"("~type.toString()~(ident?" "~ident.toString():"")~")":" ")~statement.toString();}
+
+	mixin Visitors;
 }
 class TryStm: Statement{
 	Statement statement;
@@ -210,6 +224,8 @@ class TryStm: Statement{
 		finally_=f;
 	}
 	override string toString(){return "try "~statement.toString()~join(map!(to!string)(catches),"\n")~(finally_?"\nfinally "~finally_.toString():"");}
+
+	mixin Visitors;
 }
 class ThrowStm: Statement{
 	Expression e;

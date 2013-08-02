@@ -152,7 +152,7 @@ class Scheduler{
 			update();
 			//dw("no hope!");
 			//foreach(nd,sc;payload) dw(nd);
-			foreach(nd,sc; payload) if(auto n=nd.isExpression()) n.noHope(sc);
+			foreach(nd,sc; payload) nd.noHope(sc);
 			update();
 		}
 		

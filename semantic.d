@@ -472,6 +472,9 @@ template Semantic(T) if(is(T==Node)){
 		s.error("feature not implemented",loc);
 		mixin(ErrEplg);
 	}
+
+	// analysis is trapped because of circular await-relationship involving this node
+	void noHope(Scope sc){}
 }
 
 // error nodes (TODO: file bug against covariance error)
@@ -534,9 +537,6 @@ mixin template Semantic(T) if(is(T==Expression)){
 	void initOfVar(VarDecl decl){}
 
 	override void semantic(Scope sc){ sc.error("feature "~to!string(typeid(this))~" not implemented",loc); mixin(ErrEplg); }
-
-	// analysis is trapped because of circular await-relationship involving this node
-	void noHope(Scope sc){}
 
 	Type typeSemantic(Scope sc){
 		// dw(this," ",sstate," ",typeid(this));
@@ -3056,7 +3056,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		mixin(SemEplg);
 	}
 
-	int traverseInOrder(scope int delegate(Declaration) dg){
+	override int traverseInOrder(scope int delegate(Declaration) dg){
 		if(auto r=dg(this)) return r;
 		if(auto sym=inst.isSymbol())
 		if(sym.meaning)
@@ -4101,6 +4101,16 @@ private:
 	GaggingScope gscope;
 }
 
+mixin template Semantic(T) if(is(T==TypeidExp)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		mixin(SemChld!q{e});
+		sc.error("feature TypeidExp not implemented",loc);
+		mixin(ErrEplg);
+		//mixin(SemEplg);
+	}
+}
+
 mixin template Semantic(T) if(is(T==VoidInitializerExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -4109,6 +4119,13 @@ mixin template Semantic(T) if(is(T==VoidInitializerExp)){
 	}
 }
 
+mixin template Semantic(T) if(is(T==ArrayInitAssocExp)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature ArrayInitAssocExp",loc);
+		mixin(ErrEplg);
+	}
+}
 
 // abstracts a symbol. almost all circular dependency diagnostics are located here.
 // CallExp is aware of the possibility of circular dependencies too, because it plays an
@@ -4483,6 +4500,7 @@ class Symbol: Expression{ // semantic node
 		}
 	}
 
+	invariant(){ assert(!meaning||meaning.name !is this, text(typeid(this.meaning)," ",meaning.loc)); }
 	override string toString(){
 		auto tmpl=meaning.isTemplateInstanceDecl();
 		if(!tmpl){
@@ -5955,6 +5973,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	}
 
 	override void noHope(Scope sc){
+		if(e1.sstate!=SemState.completed) return;
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
 			auto unresolved = e1.getMemberScope().getUnresolved(sc,i, false, true).force;
@@ -6257,15 +6276,8 @@ mixin template Semantic(T) if(is(T==ConditionDeclExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!decl) decl=New!VarDecl(stc,ty,name,init);
-		mixin(SemChldPar!q{decl});
-		if(!sym) sym = name;
-		sym.semantic(sc);
-		auto nsym = sym;
-		mixin(Rewrite!q{nsym});
-		assert(!!cast(Symbol)nsym);
-		sym = cast(Symbol)cast(void*)nsym;
-		mixin(SemProp!q{sym});
-		type = sym.type;
+		mixin(SemChld!q{decl});
+		type = decl.type;
 		mixin(SemEplg);
 	}
 private:
@@ -7945,8 +7957,9 @@ mixin template Semantic(T) if(is(T==EnumTy)){
 
 mixin template Semantic(T) if(is(T==Statement)){
 	override void semantic(Scope sc){
+		mixin(SemPrlg);
 		sc.error("feature not implemented",loc);
-		sstate = SemState.error;
+		mixin(ErrEplg);
 	}
 }
 
@@ -8167,6 +8180,49 @@ private:
 	size_t curparam=0;
 }
 
+
+mixin template Semantic(T) if(is(T==ForeachRangeStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature ForeachRangeStm",loc);
+		mixin(ErrEplg);
+		//mixin(SemEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==SwitchStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature SwitchStm",loc);
+		mixin(ErrEplg);
+		//mixin(SemEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==CaseStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature CaseStm",loc);
+		mixin(ErrEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==CaseRangeStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature CaseRangeStm",loc);
+		mixin(ErrEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==DefaultStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature DefaultStm",loc);
+		mixin(ErrEplg);
+	}
+}
+
 mixin template Semantic(T) if(is(T==ReturnStm)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -8266,6 +8322,29 @@ private:
 	LabeledStm target;
 }
 
+mixin template Semantic(T) if(is(T==WithStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature WithStm",loc);
+		mixin(ErrEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==CatchStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature CatchStm",loc);
+		mixin(ErrEplg);
+	}
+}
+
+mixin template Semantic(T) if(is(T==TryStm)){
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("unimplemented feature TryStm",loc);
+		mixin(ErrEplg);
+	}
+}
 
 // declarations
 mixin template Semantic(T) if(is(T==Declaration)){
