@@ -1,3 +1,11 @@
+struct TestConstructorNonShadowing{
+	class C{
+		this(){}
+	}
+	class D: C{
+		this(){} // TODO
+	}
+}
 
 struct TestNestedInheritance{
 	class C: D.D{} // TODO: error

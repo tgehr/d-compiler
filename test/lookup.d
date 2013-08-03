@@ -1,3 +1,18 @@
+struct InaccessibleMemberAlias{
+	static bool compare(A,B)(A a,B b){
+		return a.opCmp(b)<0; // error
+	}
+	
+	static bool main(){
+		int x;
+		int o(T)(T r){ return x; }
+		static struct S{
+			alias o opCmp;
+		}
+		return compare(S(),S());
+	}
+	pragma(msg, main());
+}
 
 struct StructLevelDelegateAccessCheck{
 	int y;
