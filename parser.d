@@ -1353,7 +1353,11 @@ private struct Parser{
 		}
 		expect(Tok!";");
 		auto sym=symbols.data;
-		if(isBindings) sym[$-1]=New!ImportBindingsExp(sym[$-1],bind.data);
+		if(isBindings){
+			auto r=New!ImportBindingsExp(sym[$-1],bind.data);
+			r.loc=sym[$-1].loc;
+			sym[$-1]=r;
+		}
 		return New!ImportDecl(stc, sym);
 	}
 	EnumDecl parseEnumDecl(STC stc=STC.init){
