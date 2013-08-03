@@ -49,8 +49,8 @@ template Rewrite(string s) if(!s.canFind(",")){
 	enum Rewrite=mixin(X!q{
 		while(@(s).rewrite){
 			assert(!!cast(typeof(@(s)))@(s).rewrite, "rewrite");
-			assert(@(s)!is @(s).rewrite, "non-terminating rewrite! "~to!string(@(s)));
-			//assert(!!cast(typeof(@(s)))@(s).rewrite,"cannot store "~to!string(typeid(@(s).rewrite))~" into reference of type "~to!string(typeid(typeof(@(s)))));
+			assert(@(s)!is @(s).rewrite, "non-terminating rewrite! "~.to!string(@(s)));
+			//assert(!!cast(typeof(@(s)))@(s).rewrite,"cannot store "~.to!string(typeid(@(s).rewrite))~" into reference of type "~.to!string(typeid(typeof(@(s)))));
 			@(s)=cast(typeof(@(s)))cast(void*)@(s).rewrite;
 		}
 	});
@@ -223,7 +223,7 @@ template CreateBinderForDependent(string name, string fun=lowerf(name)){
 					static if(is(typeof(return) A: Dependent!T,T)) return d.dependent!T;
 					else mixin(`~(propErr?q{SemProp}:q{PropRetry})~`!q{sc=d.scope_;d.node});
 				}
-				`~(propErr?`assert(!_@(name)_`~varn~`.dependee,"illegal dependee "~_@(name)_`~varn~`.dependee.node.toString());`:``)~`
+				`~(propErr?`assert(!_@(name)_`~varn~`.dependee,text("illegal dependee ",_@(name)_`~varn~`.dependee.node," ",_@(name)_`~varn~`.dependee.node.sstate));`:``)~`
 				static if(!is(typeof(_@(name)_`~varn~`)==Dependent!void))`~var~`=_@(name)_`~varn~`.value;
 			`;
 		}
@@ -468,8 +468,9 @@ template Semantic(T) if(is(T==Node)){
 		//assert(sstate!=SemState.error||needRetry!=1, "needRetry and error "~to!string(loc)~" "~to!string(typeid(this))~(cast(Identifier)this?" "~(cast(Identifier)this).name:"")~" Identifier.tryAgain: "~to!string(Identifier.tryAgain)~" needRetry: "~to!string(needRetry)); // !!!!?
 	}
 
-	void semantic(Scope s)in{assert(sstate>=SemState.begin);}body{
-		s.error("feature not implemented",loc);
+	void semantic(Scope sc)in{assert(sstate>=SemState.begin);}body{
+		mixin(SemPrlg);
+		sc.error("feature not implemented",loc);
 		mixin(ErrEplg);
 	}
 
@@ -536,7 +537,11 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 	void initOfVar(VarDecl decl){}
 
-	override void semantic(Scope sc){ sc.error("feature "~to!string(typeid(this))~" not implemented",loc); mixin(ErrEplg); }
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		sc.error("feature "~to!string(typeid(this))~" not implemented",loc);
+		mixin(ErrEplg);
+	}
 
 	Type typeSemantic(Scope sc){
 		// dw(this," ",sstate," ",typeid(this));
@@ -5430,15 +5435,12 @@ enum ResolveConstructor = q{
 			mixin(ErrEplg);
 		}
 	}else{
-		assert(constructor.meaning.isOverloadSet()&&
-		       constructor.meaning.isOverloadSet().isConstructor() ||
-		       constructor.meaning.isFunctionDecl()&&
-		       constructor.meaning.isFunctionDecl().isConstructor());
 		// nested classes cannot be built like this
 		//if(caggr.isReferenceAggregateDecl())
 		MatchContext context;
 		mixin(SemChld!q{constructor});
 		mixin(MatchCallHelper!q{auto r; constructor, sc, loc, type, args, context});
+		// TODO: assert that we have actually found a constructor
 		if(!r){
 			//sc.error("no matching constructor found", loc);
 			constructor.matchError(sc,loc,type,args);
@@ -5879,6 +5881,10 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 					mixin(SemCheck);
 					goto Lok;
 				}
+			}else if(sym.meaning.needsAccessCheck(accessCheck)){
+				sym.accessCheck=accessCheck;
+				sym.performAccessCheck();
+				mixin(SemProp!q{sym});
 			}
 		}else if(this_){
 			// TODO: integrate tuples with the rest of the code base
@@ -8408,6 +8414,8 @@ mixin template Semantic(T) if(is(T==Declaration)){
 	static Dependent!bool isDeclAccessible(Declaration from, Declaration decl, Declaration mfun=null)in{
 		assert(decl.sstate != SemState.pre);
 	}body{
+		bool show = from&&decl&&from.name&&decl.name&&from.name.name=="compare"&&decl.name.name=="o";
+
 		// TODO: this check might be redundant
 		if(decl.stc&STCstatic
 		|| decl.stc&STCenum && decl.isVarDecl())
@@ -8960,6 +8968,7 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		if(sstate != SemState.pre) return;
 		scope_=sc;
 		sstate = SemState.begin;
+		needRetry = true;
 		potentialInsert(sc, this);
 	}
 
@@ -8994,10 +9003,8 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic(sc);
-		needRetry = false;
 		auto res = evaluate(sc);
-		mixin(SemCheck);
-		if(res is this) return;
+		if(!res||res is this) return;
 		assert(!!res);
 		auto r=res;
 		r.semantic(sc);
