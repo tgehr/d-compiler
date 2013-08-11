@@ -294,22 +294,22 @@ class Infty{
 		static assert(is(typeof(this.buz())==inout(Infty)));
 	}
 
-	auto bzz(inout(int[]) x)inout{ return this; }
-	auto bbz(int[] x){
+	auto bzz(inout(int[])[] x)inout{ return this; }
+	auto bbz(int[][] x){
 		static assert(is(typeof(bzz(x))==Infty));
 		static assert(is(typeof(this.bzz(x))==Infty));
 	}
-	auto bbz(inout(int[])x)immutable{
+	auto bbz(inout(int[])[] x)immutable{
 		static assert(is(typeof(bzz(x))==inout(const(Infty))));
 		static assert(is(typeof(this.bzz(x))==inout(const(Infty))));
 		static assert(is(typeof(bzz(x))==const(inout(Infty))));
 		static assert(is(typeof(this.bzz(x))==const(inout(Infty))));
 	}
-	auto bbz(inout(int[])x)inout{
+	auto bbz(inout(int[])[] x)inout{
 		static assert(is(typeof(bzz(x))==inout(Infty)));
 		static assert(is(typeof(this.bzz(x))==inout(Infty)));
 	}
-	auto bbz(immutable(int[]) x)immutable{
+	auto bbz(immutable(int[])[] x)immutable{
 		static assert(is(typeof(bzz(x))==immutable(Infty)));
 		static assert(is(typeof(this.bzz(x))==immutable(Infty)));
 	}

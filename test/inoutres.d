@@ -1,3 +1,42 @@
+struct HeadUnqualMatching{
+	inout(int*) foo(inout int* a){ return a; }
+	inout(int*) bar(inout(int*) a){ return a; }
+	
+	void main(){
+		immutable int a;
+		static assert(is(typeof(foo(&a))==immutable(int*)));
+		static assert(is(typeof(bar(&a))==immutable(int*)));
+	}
+}
+
+struct InoutScopes{
+	int* coerce(inout(int)*x){
+		inout(int)* screwUp(inout(int)*){ return x; }; // TODO: error
+		int* y;
+		return coerce(y)
+	}
+	inout(int)* bar(inout(int)* a, inout(int)* delegate(inout(int)*) dg){
+		auto x = dg(a); // ok
+		int* y;
+		dg(y); // TODO: error
+		return x;
+	}
+}
+
+struct DelegateInout{
+	// // TODO: the spec does not actually indicate how this should work!
+	inout(int)* foo(inout(int)* a, inout(int)* delegate(inout(int)*) dg){
+		return dg(a);
+	}
+	
+	void main(){
+		immutable int a;
+		assert(foo(&a,x=>x) is &a);
+		static assert(is(typeof(foo(&a,x=>x))==immutable(int)*));
+		assert(foo(&a,(immutable(int)* x)=>x) is &a);
+		static assert(is(typeof(foo(&a,(immutable(int)* x)=>x))==immutable(int)*));
+	}
+}
 
 auto civc(const(inout(int[])) x){ return x; }
 auto civc(const(int[]) x){ return x; }
