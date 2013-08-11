@@ -6409,7 +6409,16 @@ mixin template Semantic(T) if(is(T==Type)){
 	/* used for matching inout. the formal parameter type is adapted
 	   to match the actual argument as good as possible.
 	 */
-	Type adaptTo(Type from, ref InoutRes inoutRes){
+	final Type adaptTo(Type from, ref InoutRes inoutRes){
+		auto t1=this, t2=from;
+		auto tu1=t1.getHeadUnqual(), tu2=t2.getHeadUnqual();
+		if(tu1.isPointerTy() && tu2.isPointerTy()
+		   || tu1.isDynArrTy() && tu2.isDynArrTy())
+			t1=tu1, t2=tu2;
+		return t1.adaptToImpl(t2, inoutRes);
+	}
+
+	Type adaptToImpl(Type from, ref InoutRes inoutRes){
 		return this;
 	}
 
@@ -7320,7 +7329,7 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	};
 
 	static if(is(T==InoutTy)){
-		override Type adaptTo(Type from, ref InoutRes res){
+		override Type adaptToImpl(Type from, ref InoutRes res){
 			if(auto imm = from.isImmutableTy()){
 				res = mergeIR(res, InoutRes.immutable_);
 			}else if(auto con = from.isConstTy()){
@@ -7328,35 +7337,38 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 				res = mergeIR(res, InoutRes.const_);
 			}else if(auto sha = from.isSharedTy()){
 				// information could be burried, eg shared(const(int))
-				return adaptTo(sha.ty, res);
+				return adaptToImpl(sha.ty, res);
 			}else if(auto ino = from.isInoutTy()){
 				res = mergeIR(res, ino.ty.isConstTy() ?
 				                   InoutRes.inoutConst :
 				                   InoutRes.inout_);
 			}else res = mergeIR(res, InoutRes.mutable);
 
-			return ty.getTailInout().adaptTo(from.getHeadUnqual(), res).getInout();
+			return ty.getTailInout().adaptToImpl(from.getHeadUnqual(), res).getInout();
 		}
 		override Type resolveInout(InoutRes res){
-			assert(ty.resolveInout(res) is ty);
+			// Spec is ambiguous here. this assertion is not valid for
+			// the implementation chosen:
+			// assert(ty.resolveInout(res).equals(ty));
+			auto rty=ty.resolveInout(res);
 			final switch(res){
 				case InoutRes.none, InoutRes.inout_:
 					return this;
 				case InoutRes.mutable:
-					return ty;
+					return rty;
 				case InoutRes.immutable_:
-					return ty.getImmutable();
+					return rty.getImmutable();
 				case InoutRes.const_:
-					return ty.getConst();
+					return rty.getConst();
 				case InoutRes.inoutConst:
-					return ty.getConst().getInout();
+					return rty.getConst().getInout();
 			}
 		}
 	}else{
 		/* hand through adaptTo and resolveInout calls
 		 */
-		override Type adaptTo(Type from, ref InoutRes res){
-			return mixin(`ty.getTail`~qual~`().adaptTo(from, res).get`~qual)();
+		override Type adaptToImpl(Type from, ref InoutRes res){
+			return mixin(`ty.getTail`~qual~`().adaptToImpl(from, res).get`~qual)();
 		}
 		override Type resolveInout(InoutRes res){
 			return mixin(`ty.resolveInout(res).get`~qual)();
@@ -7623,9 +7635,9 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 		mixin(RewEplg!q{r});
 	}
 
-	override Type adaptTo(Type from, ref InoutRes res){
+	override Type adaptToImpl(Type from, ref InoutRes res){
 		if(auto tt = mixin(`from.getHeadUnqual().is`~T.stringof)()){
-			return mixin(`ty.adaptTo(tt.ty,res).`~puthead);
+			return mixin(`ty.adaptToImpl(tt.ty,res).`~puthead);
 		}else return this;
 	}
 	override Type resolveInout(InoutRes res){
