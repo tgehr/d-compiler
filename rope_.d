@@ -15,7 +15,7 @@ auto captureTemplArgs(T)(T[] arg){ return Rope!(T,TemplArgInfo)(arg); } // trans
 
 private size_t roundToPwrTwo(size_t v){ for(size_t t=1;t;t<<=1) v|=v>>t; return v+1; }
 
-template Rope(T,S=void)if(is(S==void) || is(typeof(S.init.combine(S.init)))){
+template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 	enum segtree=!is(S==void);
 	static if(segtree){
 		struct SegTree{
