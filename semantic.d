@@ -818,15 +818,15 @@ mixin template Semantic(T) if(is(T==Expression)){
 			if(sc && finishDeduction(sc)) matchError(sc, loc, null, args);
 			return null.independent!Expression;
 		}
-		if(r.sstate == SemState.completed) r=r.resolveInout(context.inoutRes);
+		if(r.sstate == SemState.completed) r=r.resolveInout(context.inoutRes,false);
 		else assert(r.needRetry||r.sstate==SemState.error||cast(TemplateInstanceExp)r, text(r," ",r.sstate," ",r.needRetry));//||r.isSymbol()&&(r.isSymbol().isSymbolMatcher||r.isSymbol().isFunctionLiteral)||cast(TemplateInstanceExp)r,text(r," ",typeid(r),r.isSymbol()?" "~r.isSymbol().meaning.toString():""," ",args," ",r.sstate," ",r.needRetry));
 		return r.independent;
 	}
 
-	Expression resolveInout(InoutRes res)in{
+	Expression resolveInout(InoutRes res, bool scoped)in{
 		assert(sstate == SemState.completed);
 	}body{
-		type = type.resolveInout(res);
+		type = type.resolveInout(res, scoped);
 		return this;
 	}
 
@@ -1543,7 +1543,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 										this_.type,
 										this_.type.getHeadUnqual()
 										.applySTC(fd.stc&STCtypeconstructor)
-										.resolveInout(inoutRes),
+											.resolveInout(inoutRes,true),
 										0
 									});
 									if(!compat){
@@ -1555,7 +1555,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 							s.type=fd.type;
 							s.meaning=fd;
-							auto res=fd.type.resolveInout(inoutRes);
+							auto res=fd.type.resolveInout(inoutRes,false);
 							if(fd.stc&STCstatic) type=res.getPointer();
 							else type=res.getDelegate();
 						}
@@ -4435,7 +4435,7 @@ class Symbol: Expression{ // semantic node
 		performAccessCheck();
 		mixin(SemCheck);
 
-		if(inoutRes!=InoutRes.none){sstate=SemState.completed;resolveInout(inoutRes);}
+		if(inoutRes!=InoutRes.none){sstate=SemState.completed;resolveInout(inoutRes,false);}
 
 		if(isImplicitlyCalled()&&inContext!=InContext.fieldExp){
 			auto s = New!Symbol(meaning);
@@ -6427,7 +6427,7 @@ mixin template Semantic(T) if(is(T==Type)){
 	Dependent!void typeMatch(Type from){ return indepvoid; }
 	bool hasPseudoTypes(){ return false; }
 
-	override Type resolveInout(InoutRes inoutRes){
+	override Type resolveInout(InoutRes inoutRes, bool scoped){
 		return this;
 	}
 
@@ -6613,8 +6613,8 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 		return null.independent!Type;
 	}
 
-	override DelegateTy resolveInout(InoutRes res){
-		return ft.resolveInout(res).getDelegate();
+	override DelegateTy resolveInout(InoutRes res, bool scoped){
+		return ft.resolveInout(res, scoped).getDelegate();
 	}
 
 	override Dependent!void typeMatch(Type from){
@@ -6727,7 +6727,8 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		return r;
 	}
 
-	override FunctionTy resolveInout(InoutRes res){
+	override FunctionTy resolveInout(InoutRes res, bool scoped){
+		if(scoped) return this;
 		alias util.TypeTuple!(__traits(allMembers,InoutRes)) M;
 		static assert(M[0]=="none");
 
@@ -6740,12 +6741,12 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 					r.params = r.params.dup;
 					foreach(ref p;r.params){
 						p=p.ddup();
-						p.type = p.type.resolveInout(res);
+						p.type = p.type.resolveInout(res,true);
 						p.rtype=null;
 						p.stc = STC.init;
 					}
 					foreach(xx;M[1..$]) mixin("r.cache_inoutres_"~xx)=r;
-					r.ret = r.ret.resolveInout(res);
+					r.ret = r.ret.resolveInout(res,true);
 					static if(e!=InoutRes.inout_)if(r.stc&STCinout){
 						static if(e!=InoutRes.inoutConst)
 							r=r.removeQualifiers(STCinout);
@@ -6861,13 +6862,13 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 				this_,
 				this_.getHeadUnqual()
 				.applySTC(stc&STCtypeconstructor)
-				.resolveInout(context.inoutRes),
+				.resolveInout(context.inoutRes,true),
 				0
 			});
 			if(!compat) return null.independent!Expression;
 		}
 
-		foreach(i,ref x;at) x = x.resolveInout(context.inoutRes);
+		foreach(i,ref x;at) x = x.resolveInout(context.inoutRes,true);
 		// the code that follows assumes the four matching level semantics
 		static assert(Match.min == 0 && Match.max == Match.exact && Match.exact == 3);
 
@@ -7346,11 +7347,11 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 
 			return ty.getTailInout().adaptToImpl(from.getHeadUnqual(), res).getInout();
 		}
-		override Type resolveInout(InoutRes res){
+		override Type resolveInout(InoutRes res,bool scoped){
 			// Spec is ambiguous here. this assertion is not valid for
 			// the implementation chosen:
-			// assert(ty.resolveInout(res).equals(ty));
-			auto rty=ty.resolveInout(res);
+			// assert(ty.resolveInout(res,scoped).equals(ty));
+			auto rty=ty.resolveInout(res,scoped);
 			final switch(res){
 				case InoutRes.none, InoutRes.inout_:
 					return this;
@@ -7370,8 +7371,8 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		override Type adaptToImpl(Type from, ref InoutRes res){
 			return mixin(`ty.getTail`~qual~`().adaptToImpl(from, res).get`~qual)();
 		}
-		override Type resolveInout(InoutRes res){
-			return mixin(`ty.resolveInout(res).get`~qual)();
+		override Type resolveInout(InoutRes res, bool scoped){
+			return mixin(`ty.resolveInout(res,scoped).get`~qual)();
 		}
 	}
 
@@ -7640,8 +7641,9 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 			return mixin(`ty.adaptToImpl(tt.ty,res).`~puthead);
 		}else return this;
 	}
-	override Type resolveInout(InoutRes res){
-		return mixin(`ty.resolveInout(res).`~puthead);
+
+	override Type resolveInout(InoutRes res, bool scoped){
+		return mixin(`ty.resolveInout(res,scoped).`~puthead);
 	}
 
 	override Dependent!void typeMatch(Type from){
@@ -10766,13 +10768,13 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		foreach(i,p; type.params){
 			at[i] = p.type.adaptTo(args[i].type, inoutRes);
 		}
-		foreach(ref x;at) x = x.resolveInout(inoutRes);
+		foreach(ref x;at) x = x.resolveInout(inoutRes,true);
 		
 		auto compatd=!this_?true.independent:
 			this_.refConvertsTo(
 			    this_.getHeadUnqual()
 			    .applySTC(type.stc&STCtypeconstructor)
-			    .resolveInout(inoutRes),
+			    .resolveInout(inoutRes,true),
 			    0
 			);
 		if(!compatd.dependee&&!compatd.value) num++;
