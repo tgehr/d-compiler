@@ -4097,6 +4097,7 @@ mixin template Semantic(T) if(is(T==IsExp)){
 		tok = token!"false";
 		goto ret;
 	ret:
+		if(rewrite) return;
 		auto r = New!LiteralExp(tok);
 		r.loc = loc;
 		r.semantic(sc);
@@ -9291,6 +9292,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				auto parentc = cast(ReferenceAggregateDecl)cast(void*)(cast(AggregateTy)cast(void*)parents[0]).decl;
 				if(auto cdecl=parentc.isClassDecl()){
 					parent = cdecl;
+					assert(!!parent.scope_);
+					parent.semantic(parent.scope_);
 					if(parent.needRetry||parent.sstate==SemState.error)
 						return Dependee(parent, parent.scope_).dependent!ClassDecl;
 					if(!vtbl.length){
