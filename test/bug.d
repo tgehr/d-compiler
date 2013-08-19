@@ -1,4 +1,23 @@
 
+/+
+immutable int x=2;
+immutable int* p = &x + 1; // TODO: error
+
+int y=2;
+int* q=&y; // TODO: ok.
++/
+
+/+struct ByteCodeBuilder{
+	class Node{}
+	private ulong[] byteCode;
+	private Node[] errtbl;
+	auto getByteCode(){
+		enum Instruction{errtbl}
+		alias immutable(ulong)[] ByteCode;
+		return cast(ByteCode)((byteCode~=Instruction.errtbl)~=cast(ByteCode)errtbl); // BUG (also: bad error message)
+	}
+}+/
+
 /+@property int bar()=>2;
 
 struct PoorErrorMessage{
