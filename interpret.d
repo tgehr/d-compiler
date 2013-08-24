@@ -5352,6 +5352,7 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		assert(value.getType().getHeadUnqual() is this);
 		assert(mem.length==(bcPointerBCSize+1)*ulong.sizeof);
 		auto fun = value.getDelegateFunctionPointer();
+		if(!fun){ (cast(byte[])mem)[]=0; return; }
 		assert(cast(FunctionDef)fun.meaning);
 		auto fd = cast(FunctionDef)cast(void*)fun.meaning;
 		auto ctx = buildContext(value.getDelegateContext(), fd);
@@ -5462,7 +5463,8 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		assert(mem.length==(bcPointerBCSize+1)*ulong.sizeof);
 		auto ul=cast(ulong[])mem;
 		auto fun=cast(Symbol)cast(void*)ul[$-1];
-		assert(!!cast(FunctionDef)fun.meaning);
+		if(!fun) return Variant(fun, (Variant[VarDecl]).init, type);
+		assert(cast(FunctionDef)fun.meaning);
 		auto fd=cast(FunctionDef)cast(void*)fun.meaning;
 		auto vars = parseContext(mem[0..bcPointerBCSize*ulong.sizeof], fd, false);
 		return Variant(fun, vars, type);
