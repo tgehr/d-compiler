@@ -4444,7 +4444,8 @@ class Symbol: Expression{ // semantic node
 			s.loc = loc;
 			s.accessCheck = accessCheck;
 			s.ignoreProperty = true;
-			auto r = New!CallExp(s,(Expression[]).init);
+			auto args = Seq!(s,(Expression[]).init);
+			auto r = meaning.stc&STCproperty?New!PropertyCallExp(args):New!CallExp(args);
 			r.loc = loc;
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
@@ -4460,6 +4461,7 @@ class Symbol: Expression{ // semantic node
 			auto s = New!Symbol(meaning);
 			s.loc = loc;
 			s.accessCheck = accessCheck;
+			s.ignoreProperty = ignoreProperty;
 			auto r = New!(BinaryExp!(Tok!"."))(t,s);
 			r.loc = loc;
 			transferContext(r);
@@ -4927,11 +4929,18 @@ mixin template Semantic(T) if(is(T==CallExp)){
 	}
 
 	override bool isLvalue(){ return !!(e.type.getHeadUnqual().getFunctionTy().stc & STCref); }
+	
+	override @property string kind(){ return "function call result"; }
 
 	Expression fun;
 	Expression[] adapted;
 }
 
+class PropertyCallExp: CallExp{
+	this(Expression exp, Expression[] args){ super(exp,args); }
+	override string toString(){ return _brk(!args.length?e.toString():e.toString()~(args.length==1?args[0].toString():"Seq!("~join(map!(to!string)(args),",")~")")); }
+	override @property string kind(){ return "@property call"; }
+}
 
 // everything concerning error gagging is centralized here
 import error;
@@ -5929,7 +5938,9 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			auto b = New!(BinaryExp!(Tok!"."))(e1,e2);
 			b.loc = loc;
 			e2.ignoreProperty=true;
-			auto r = New!CallExp(b, (Expression[]).init);
+			auto args = Seq!(b,(Expression[]).init);
+			auto r = e2.meaning.stc&STCproperty?New!PropertyCallExp(args):New!CallExp(args);
+			dw(e2);
 			r.loc = loc;
 			r.semantic(sc);
 			mixin(RewEplg!q{r});

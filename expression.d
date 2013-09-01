@@ -389,8 +389,6 @@ class CallExp: TemporaryExp{
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
 	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
 
-	override @property string kind(){return "function call result";} // TODO: 'struct literal', 'property'
-
 	mixin DownCastMethod;
 	mixin Visitors;
 }
