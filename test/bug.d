@@ -1,4 +1,3 @@
-
 /+
 immutable int x=2;
 immutable int* p = &x + 1; // TODO: error

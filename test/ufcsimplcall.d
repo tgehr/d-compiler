@@ -1,3 +1,12 @@
+struct MemberPropertyCall{
+	@property bool empty(){ return true; }
+	void foo(){
+		auto x = empty;
+		assert(is(typeof(x)==bool));
+		assert(!is(typeof(empty())));
+	}
+}
+
 template forward(args...){
 	@property forward()(){ return args[0]; }
 }
