@@ -112,5 +112,5 @@ class Module: Declaration{
 	mixin DeepDup!Module;
 
 	override @property string kind(){return "module";}
-	override string toString(){return "some module";} // TODO
+	override string toString(){return "module "~name.name~";";}
 }

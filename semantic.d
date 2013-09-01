@@ -3049,7 +3049,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		if(sstate == SemState.pre) presemantic(sc);
 		scope(exit) if(!needRetry) potentialRemove(sc, this);
 		mixin(SemChld!q{inst});
-		assert(cast(Symbol)inst);
+		assert(cast(Symbol)inst,text(inst," ",inst.sstate," ",typeid(this.inst)));
 		auto sym=cast(Symbol)cast(void*)inst;
 		assert(cast(TemplateInstanceDecl)sym.meaning);
 		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
@@ -3233,7 +3233,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(inst.instantiation is this)
 			inst.instantiation = sym; // transfer ownership
 
-		if(container){
+		if(container && !isMixin){
 			auto res = New!(BinaryExp!(Tok!"."))(container, sym);
 			res.loc = loc;
 			this.res = res;
@@ -8988,6 +8988,7 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 
 	private Statement evaluate(Scope sc){
 		mixin(SemPrlg);
+		scope(exit) if(sstate==SemState.error) potentialRemove(sc, this);
 		cond.prepareInterpret();
 		cond.prepareLazyConditionalSemantic();
 		mixin(SemChld!q{cond});
@@ -8997,13 +8998,14 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		//cond = evaluateCondition(sc, cond);
 		mixin(IntChld!q{cond});
 		needRetry = false;
+		potentialRemove(sc, this);
 		if(cond.interpretV()){
-			if(lazyDup) { lazyDup = false; potentialRemove(sc, this); bdy = bdy.ddup(); }
+			if(lazyDup) { lazyDup = false; bdy = bdy.ddup(); }
 			if(auto d=bdy.isDeclaration()) d.pickupSTC(stc);
 			if(auto decl = bdy.isDeclaration()) decl.presemantic(sc);
 			return bdy;
 		}else if(els){
-			if(lazyDup) { lazyDup = false; potentialRemove(sc, this); els = els.ddup(); }
+			if(lazyDup) { lazyDup = false; els = els.ddup(); }
 			if(auto d=els.isDeclaration()) d.pickupSTC(stc);
 			if(auto decl = els.isDeclaration()) decl.presemantic(sc);
 			return els;
