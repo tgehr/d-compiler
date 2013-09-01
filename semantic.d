@@ -219,6 +219,7 @@ template CreateBinderForDependent(string name, string fun=lowerf(name)){
 			enum er = sss[1..$].join(" , ");
 			enum @(name)=`
 				auto _@(name)_`~varn~`=`~e1~`.@(fun)(`~er~`);
+
 				if(auto d=_@(name)_`~varn~`.dependee){
 					static if(is(typeof(return) A: Dependent!T,T)) return d.dependent!T;
 					else mixin(`~(propErr?q{SemProp}:q{PropRetry})~`!q{sc=d.scope_;d.node});
@@ -8987,7 +8988,6 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 
 	private Statement evaluate(Scope sc){
 		mixin(SemPrlg);
-		scope(exit) if(!needRetry) potentialRemove(sc, this);
 		cond.prepareInterpret();
 		cond.prepareLazyConditionalSemantic();
 		mixin(SemChld!q{cond});
@@ -8998,12 +8998,12 @@ mixin template Semantic(T) if(is(T==StaticIfDecl)){
 		mixin(IntChld!q{cond});
 		needRetry = false;
 		if(cond.interpretV()){
-			if(lazyDup) { lazyDup = false; bdy = bdy.ddup(); }
+			if(lazyDup) { lazyDup = false; potentialRemove(sc, this); bdy = bdy.ddup(); }
 			if(auto d=bdy.isDeclaration()) d.pickupSTC(stc);
 			if(auto decl = bdy.isDeclaration()) decl.presemantic(sc);
 			return bdy;
 		}else if(els){
-			if(lazyDup) { lazyDup = false; els = els.ddup(); }
+			if(lazyDup) { lazyDup = false; potentialRemove(sc, this); els = els.ddup(); }
 			if(auto d=els.isDeclaration()) d.pickupSTC(stc);
 			if(auto decl = els.isDeclaration()) decl.presemantic(sc);
 			return els;
