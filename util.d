@@ -263,7 +263,6 @@ struct AAbyIdentity(K,V){
 }
 auto byid(K,V)(V[K] x){ return AAbyIdentity!(K,V)(x); }
 
-
 // compile time file facilites:
 template FileExists(string name){enum FileExists = is(typeof(import(name)));}
 

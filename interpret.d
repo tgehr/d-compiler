@@ -1256,11 +1256,19 @@ abstract class LValueStrategy{
 	abstract void emitStoreKV(ref ByteCodeBuilder);// keep value on stack
 
 	abstract void emitLoad(ref ByteCodeBuilder); // load value at address
-	abstract void emitLoadKR(ref ByteCodeBuilder); // load value at address, keep address
+	void emitLoadKR(ref ByteCodeBuilder bld){ // load value at address, keep address
+		dupR(bld);
+		emitLoad(bld);
+	}
+	final void dupR(ref ByteCodeBuilder bld){
+		bld.emitDup(lvBCSize);
+	}
+	abstract @property size_t lvBCSize();
+
 
 	abstract void emitPointer(ref ByteCodeBuilder);
 
-	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info){
+	LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info, VarDecl vd){
 		emitPointer(bld);
 		auto r = LVfield(off, len, ctlen, info);
 		return r;
@@ -1277,6 +1285,9 @@ static class LVfield: LValueStrategy{
 		this.len=len;
 		this.ctlen=ctlen;
 		this.info=info;
+	}
+	override @property size_t lvBCSize(){
+		return bcPointerBCSize;
 	}
 	override void emitStore(ref ByteCodeBuilder bld){
 		bld.emitUnsafe(Instruction.storef, info);
@@ -1322,13 +1333,13 @@ class LVpopc: LValueStrategy{
 	static opCall(Type elty, ErrorInfo info){
 		return new LVpopc(getBCSizeof(elty), getCTSizeof(elty), info, false);
 	}
-
 	private this(ulong nn,size_t ct, ErrorInfo inf, bool iscc){
 		n = nn;
 		ctsiz=ct;
 		info = inf;
 		this.iscc=iscc;
 	}
+	@property size_t lvBCSize(){ return 1+iscc; }
 
 	override void emitStore(ref ByteCodeBuilder bld){
 		bld.emitUnsafe(iscc?Instruction.popccn:Instruction.popcn, info);
@@ -1344,11 +1355,6 @@ class LVpopc: LValueStrategy{
 	}
 
 	override void emitLoad(ref ByteCodeBuilder bld){
-		bld.emitUnsafe(iscc?Instruction.pushccn:Instruction.pushcn, info);
-		bld.emitConstant(n);
-	}
-	override void emitLoadKR(ref ByteCodeBuilder bld){
-		bld.emitDup(iscc?2:1); // duplicate address
 		bld.emitUnsafe(iscc?Instruction.pushccn:Instruction.pushcn, info);
 		bld.emitConstant(n);
 	}
@@ -1369,6 +1375,7 @@ class LVpopr: LValueStrategy{
 	private this(ulong nn){
 		n = nn;
 	}
+	override @property size_t lvBCSize(){ return 1; }
 
 	override void emitStore(ref ByteCodeBuilder bld){
 		if(n==1) bld.emit(Instruction.popr);
@@ -1417,7 +1424,7 @@ class LVpopr: LValueStrategy{
 		assert(0, "cannot create stack references");
 	}
 
-	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo){
+	override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo, VarDecl){
 		assert(off+len<=n);
 		// TODO: byte code support for offsetted poprs
 		static class FieldLV: LVpopr{
@@ -1462,6 +1469,9 @@ class LVpopr: LValueStrategy{
 				bld.emit(Instruction.subi);
 				bld.emitTmppop(len);
 			}
+			override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo, VarDecl vd){
+				return new FieldLV(this.off+off, len);
+			}
 		}
 		return new FieldLV(off, len);
 	}
@@ -1485,6 +1495,11 @@ class LVstorea: LValueStrategy{
 		bcsiz = getBCSizeof(elty);
 		info = inf;
 		isptr=ptr;
+	}
+	override @property size_t lvBCSize(){
+		// an index and a pointer or slice
+		assert(getBCSizeof(Type.get!ulong())==1);
+		return 1+(isptr?bcPointerBCSize:bcSliceBCSize);
 	}
 	private void ptrPrlg(ref ByteCodeBuilder bld, bool isstore){
 		if(isptr){
@@ -1549,6 +1564,10 @@ class LVconditional: LValueStrategy{
 		strat1 = s1;
 		strat2 = s2;
 	}
+	override @property size_t lvBCSize(){
+		assert(strat1.lvBCSize==strat2.lvBCSize);
+		return strat1.lvBCSize;
+	}
 	private static _emitAll(){
 		string r;
 		foreach(s;["emitStore", "emitStoreKR", "emitStoreKV",
@@ -1583,6 +1602,7 @@ class LVlength: LValueStrategy{
 		array = s;
 		els = el;
 	}
+	override @property size_t lvBCSize(){ return array.lvBCSize; }
 	private static _emitAll(){
 		string r;
 		foreach(s;["emitStore", "emitStoreKR"]){
@@ -2663,7 +2683,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)&&!is(T:Type)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)&&!is(T:Type)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -3857,7 +3877,7 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 			size_t len, off = aggrt.getBCLocOf(vd, len);
 			if(aggrt.decl.isValueAggregateDecl()){
 				auto lv=this_.byteCompileLV(bld);
-				lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), this).emitLoad(bld);
+				emitCheckedFieldLoad(bld, lv, aggrt, vd).emitLoad(bld);
 			}else{
 				this_.byteCompile(bld);
 				LVfield(off, len, getCTSizeof(vd.type), this).emitLoad(bld);
@@ -3932,14 +3952,24 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 
 		auto vd=e2.meaning.isVarDecl();
 		assert(!!vd);
-		size_t len, off = aggrt.getBCLocOf(vd, len);
+		LValueStrategy r;
 		if(aggrt.decl.isValueAggregateDecl()){
 			auto lv=this_.byteCompileLV(bld);
-			return lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), this);
+			return emitCheckedFieldLoad(bld, lv, aggrt, vd);
 		}else{
 			this_.byteCompile(bld);
+			size_t len, off = aggrt.getBCLocOf(vd, len);
 			return LVfield(off, len, getCTSizeof(vd.type), this);
 		}
+	}
+
+	final private LValueStrategy emitCheckedFieldLoad(ref ByteCodeBuilder bld, LValueStrategy lv, AggregateTy aggrt, VarDecl vd){
+		assert(aggrt.decl);
+		auto ud=aggrt.decl.isUnionDecl();
+		assert(~vd.stc&STCstatic);
+		if(ud) return ud.emitCheckedFieldLoad(lv, vd, this);
+		size_t len, off = aggrt.getBCLocOf(vd, len);
+		return lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), this, vd);
 	}
 }
 
@@ -4027,10 +4057,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		return traverseDeclaredFields(dg);
 	}
 
-	void updateLayout()in{assert(!isLayoutKnown());}body{
-		size_t off=initialOffset();
-		// TODO: unions, anonymous structs/unions etc.
-		// TODO: the traversal of vardecls is repeated below, factor out into range
+	final int updateLayoutTraversal(scope int delegate(VarDecl) dg){
 		foreach(vd;&traverseDeclaredFields){
 			if(auto aggrty=vd.type.isAggregateTy()){
 				if(auto decl=aggrty.decl.isValueAggregateDecl()){
@@ -4038,12 +4065,21 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 				}
 			}
 			assert(!!vd.type, vd.to!string);
+			if(auto r=dg(vd)) return r;
+		}
+		return 0;
+	}
+
+	void updateLayout()in{assert(!isLayoutKnown());}body{
+		size_t off=initialOffset();
+		// TODO: anonymous structs/unions etc.
+		foreach(vd;&updateLayoutTraversal){
 			auto len = getBCSizeof(vd.type);
 			vd.setBCLoc(off, len);
 			off+=len;
 		}
 		bcSize = off;
-		layoutKnown = true;
+		layoutKnown = true;	
 	}
 	final size_t getBCSize(){
 		if(!isLayoutKnown()) updateLayout();
@@ -4103,6 +4139,169 @@ private:
 	static ulong vers;
 	bool layoutKnown = false;
 }
+
+mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
+	enum bcTagOffset=0, bcTagLength=1;
+	protected override size_t initialOffset(){
+		assert(stc&STCstatic);
+		assert(getBCSizeof(Type.get!ulong())==bcTagLength);
+		return bcTagLength;
+	}
+	private int[Type] indices;
+	public final int getIndex(VarDecl vd)in{assert(isLayoutKnown()&&vd&&vd.type&&vd.scope_&&vd.isField&&vd.scope_&&vd.scope_.getDeclaration() is this);}body{
+		return indices[vd.type];
+	}
+	void updateLayout()in{assert(!isLayoutKnown());}body{
+		size_t maxl=0, index=0, init=initialOffset();
+		// TODO: anonymous structs/unions etc.
+		indices = null;
+		foreach(vd;&updateLayoutTraversal){
+			if(vd.type !in indices) indices[vd.type]=index++;
+			auto len = getBCSizeof(vd.type);
+			vd.setBCLoc(init, len);
+			if(maxl<len) maxl=len;
+		}
+		bcSize = init+maxl;
+		layoutKnown = true;
+	}
+
+	LValueStrategy emitCheckedFieldLoad(LValueStrategy lv, VarDecl vd, ErrorInfo loader)in{
+		assert(!!lv);
+	}body{
+		static class UnionFieldLV: LValueStrategy{
+			LValueStrategy lv; ErrorInfo loader; size_t index; VarDecl vd;
+			size_t size;
+			this(LValueStrategy lv, ErrorInfo loader, size_t index, VarDecl vd){
+				this.lv=lv; this.loader=loader; this.index=index; this.vd = vd;
+				size=getBCSizeof(vd.type);
+			}
+			override @property size_t lvBCSize(){
+				return lv.lvBCSize;
+			}
+			final LValueStrategy emitTagLV(ref ByteCodeBuilder bld){
+				lv.dupR(bld);
+				return lv.emitFieldLV(bld, bcTagOffset, bcTagLength, getCTSizeof(Type.get!ulong()), loader, null);
+			}
+			final LValueStrategy emitTheField(ref ByteCodeBuilder bld){
+				size_t len, off = vd.getBCLoc(len);
+				return lv.emitFieldLV(bld, off, len, getCTSizeof(vd.type), loader, vd);
+			}
+
+			void emitIndex(ref ByteCodeBuilder bld){
+				bld.emit(Instruction.push);
+				bld.emitConstant(index);
+			}
+			
+			enum lderr = "cannot reinterpret union fields at compile time";
+			final void loadCheck(ref ByteCodeBuilder bld, string error=lderr, Location loc=Location()){
+				if(!loc.line) loc=loader.loc;
+				emitTagLV(bld).emitLoad(bld);
+				emitIndex(bld);
+				bld.emit(Instruction.cmpei);
+				bld.emit(Instruction.jnz);
+				auto l = bld.emitLabel();
+				bld.error(error, loc);
+				l.here();
+			}
+
+			void storeUpdate(ref ByteCodeBuilder bld){
+				auto tlv=emitTagLV(bld);
+				emitIndex(bld);
+				tlv.emitStore(bld);
+			}
+			private static _emitAll(){
+				string r;
+				foreach(s;["emitLoad", "emitLoadKR"]){
+					r~=mixin(X!q{
+						override void @(s)(ref ByteCodeBuilder bld){
+							loadCheck(bld);
+							emitTheField(bld).@(s)(bld);
+						}
+					});
+				}
+				foreach(s;["emitStore", "emitStoreKR", "emitStoreKV"]){
+					r~=mixin(X!q{
+						override void @(s)(ref ByteCodeBuilder bld){
+							bld.emitTmppush(size);
+							storeUpdate(bld);
+							auto fld=emitTheField(bld);
+							bld.emitTmppop(size);
+							fld.@(s)(bld);
+						}
+					});
+				}
+				return r;
+			}
+			mixin(_emitAll());
+
+			override void emitPointer(ref ByteCodeBuilder bld){
+				bld.error("taking address of union fields not yet supported in CTFE", loader.loc);
+			}
+			override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info, VarDecl vd){
+				static bool isFullStore(VarDecl vd){
+					if(!vd) return true; // union tag
+					assert(!!vd&&vd.scope_&&vd.isField);
+					auto decl=vd.scope_.getDeclaration();
+					assert(cast(AggregateDecl)decl);
+					if(auto ud=decl.isUnionDecl()) return true;
+					auto aggr=cast(AggregateDecl)cast(void*)decl;
+					size_t n=0;
+					foreach(fld;&aggr.traverseDeclaredFields)
+						if(++n>1) return false;
+					return true;
+				}
+				static class PartialUnionAccessLV: LValueStrategy{
+					UnionFieldLV outer;
+					LValueStrategy delegate() r; ErrorInfo info;
+					size_t size;
+					bool fullstore;
+					this(UnionFieldLV outer,LValueStrategy delegate() r, ErrorInfo info,size_t size,bool fullstore){
+						this.outer=outer; this.r=r; this.info=info;
+						this.size=size;
+						this.fullstore=fullstore;
+					}
+
+					override @property size_t lvBCSize(){ return outer.lvBCSize; }
+					private static _emitAll(){
+						string r;
+						foreach(s;["emitLoad", "emitLoadKR"]){
+							r~=mixin(X!q{
+								override void @(s)(ref ByteCodeBuilder bld){
+									auto lv=r();
+									outer.loadCheck(bld);
+									lv.@(s)(bld);
+								}
+							});
+						}
+						foreach(i,s;["emitStore", "emitStoreKR", "emitStoreKV"])
+							r~=mixin(X!q{ override void @(s)(ref ByteCodeBuilder bld){
+								bld.emitTmppush(size);
+								enum lderr="partial assignments to union fields not yet supported in CTFE";
+								if(fullstore) outer.storeUpdate(bld);
+								else outer.loadCheck(bld, lderr, info.loc);
+								auto lv=r();
+								bld.emitTmppop(size);
+								lv.@(s)(bld);
+							} });
+						return r;
+					}
+					mixin(_emitAll());
+					override void emitPointer(ref ByteCodeBuilder bld){
+						bld.error("taking address of members of union fields not yet supported in CTFE.", info.loc);
+					}
+					override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info2, VarDecl vd){
+						auto lv=()=>r().emitFieldLV(bld, off, len, ctlen, info2, vd);
+						return new PartialUnionAccessLV(outer, lv, info, len, fullstore&&isFullStore(vd));
+					}
+				}
+				auto r=()=>emitTheField(bld).emitFieldLV(bld, off, len, ctlen, info, vd);
+				return new PartialUnionAccessLV(this, r, info, len, isFullStore(vd));
+			}
+		}
+		return new UnionFieldLV(lv, loader, getIndex(vd), vd);
+	}
+}
+
 
 mixin template CTFEInterpret(T) if(is(T==ReferenceAggregateDecl)){
 	private Symbol[] symbols;
@@ -4319,6 +4518,7 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 
 // get size in ulongs on the bc stack
 enum bcPointerBCSize = (BCPointer.sizeof+ulong.sizeof-1)/ulong.sizeof;
+enum bcSliceBCSize = (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof;
 enum bcFunPointerBCSiz = 1;
 size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	type = type.getHeadUnqual();
@@ -4327,7 +4527,7 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 		return (bt.bitSize()+63)/64;
 	}
 	if(type.isDynArrTy() || type is Type.get!EmptyArray())
-		return (BCSlice.sizeof+ulong.sizeof-1)/ulong.sizeof + (type.getUnqual() is Type.get!(void[])());
+		return bcSliceBCSize + (type.getUnqual() is Type.get!(void[])());
 	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSiz;

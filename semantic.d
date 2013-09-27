@@ -9705,7 +9705,12 @@ mixin template Semantic(T) if(is(T==ClassDecl)){
 mixin template Semantic(T) if(is(T==InterfaceDecl)){}
 mixin template Semantic(T) if(is(T==ValueAggregateDecl)){}
 mixin template Semantic(T) if(is(T==StructDecl)){}
-mixin template Semantic(T) if(is(T==UnionDecl)){}
+mixin template Semantic(T) if(is(T==UnionDecl)){
+	override void presemantic(Scope sc){
+		if(name) stc|=STCstatic;
+		super.presemantic(sc);
+	}
+}
 
 mixin template Semantic(T) if(is(T==AggregateDecl)){
 	/* overridden in ReferenceAggregateDecl */
