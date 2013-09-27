@@ -11023,6 +11023,21 @@ private:
 	FunctionScope fsc;
 }
 
+mixin template Semantic(T) if(is(T==UnittestDecl)){
+	static bool enabled = false;
+	Scope utsc;
+
+	override void presemantic(Scope sc){
+		if(sstate!=SemState.pre) return;
+		scope_=sc;
+		sstate=SemState.begin;
+	}
+	override void semantic(Scope sc){
+		if(enabled)	super.semantic(sc);
+		else mixin(SemEplg);
+	}
+}
+
 mixin template Semantic(T) if(is(T==PragmaDecl)){
 	override void presemantic(Scope sc){
 		if(sstate != SemState.pre) return;

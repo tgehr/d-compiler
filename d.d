@@ -10,7 +10,23 @@ import std.path;
 
 import module_, scheduler;
 
-int Ḁ(){return 0;}
+bool isOption(string x){
+	return x.startsWith("--");
+}
+
+string applyOption(string x)in{assert(isOption(x));}body{
+	x=x[2..$];
+	switch(x){ // TODO: report DMD bug/update compiler
+		case "unittest":
+			import declaration;
+			UnittestDecl.enabled = true;
+			break;
+		default:
+			return "unrecognized option '"~x~"'";
+	}
+	return null;
+}
+
 int main(string[] args){
 	import core.memory; GC.disable();
 
@@ -24,14 +40,23 @@ int main(string[] args){
 	auto r = new ModuleRepository();
 	Module[] ms;
 	foreach(x; args){
+		if(!isOption(x)) continue;
+		if(auto err=applyOption(x)){
+			stderr.writeln("error: ",err);
+			errors=true;
+		}
+	}
+	foreach(x; args){
 		string err;
+		if(isOption(x)) continue;
 		auto m=r.getModule(x,err);
-		if(!m){
+		if(m){
+			Scheduler().add(m, null);
+			ms~=m;
+		}else{
 			if(err) stderr.writeln("error: ",err);
 			errors=true;
 		}
-		Scheduler().add(m, null);
-		ms~=m;
 	}
 	if(errors) return 1;
 	Scheduler().run();

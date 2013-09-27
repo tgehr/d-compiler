@@ -1544,7 +1544,7 @@ private struct Parser{
 			case Tok!"template":
 				mixin(rule!(TemplateDecl,Existing,"isMix",Existing,"stc","_",Identifier,"(",TemplateParameterList,")",OptTemplateConstraint,BlockDecl));
 			case Tok!"struct", Tok!"union", Tok!"class", Tok!"interface": return res=parseAggregateDecl(stc);
-			case Tok!"unittest": return nextToken(), res=New!UnitTestDecl(stc,parseCompoundStm());
+			case Tok!"unittest": return nextToken(), res=New!UnittestDecl(stc,parseCompoundStm());
 			case Tok!"align":
 				nextToken();
 				if(ttype!=Tok!"("){stc|=STCalign;goto dispatch;}

@@ -472,10 +472,13 @@ class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 	mixin Visitors;
 }
 
-class UnitTestDecl: Declaration{
-	CompoundStm bdy;
-	this(STC stc,CompoundStm b)in{assert(b!is null);}body{ bdy=b; super(stc,null); }
+class UnittestDecl: FunctionDef{
+	this(STC stc,CompoundStm b)in{assert(b!is null);}body{
+		super(stc,New!FunctionTy(STC.init, Type.get!void(),(Parameter[]).init, VarArgs.none), null, null, null,null,b);
+	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"unittest"~bdy.toString();}
+
+	mixin Visitors;
 }
 
 class PragmaDecl: Declaration{
