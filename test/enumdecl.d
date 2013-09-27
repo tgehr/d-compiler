@@ -35,11 +35,11 @@ enum:immutable(char)[]{A="",B,C} // error // TODO: improve error message
 
 enum NoCircDep : int{foo=bar,bar=0}
 enum ACircDep : int{foo=bar,bar} // error
-enum AnotherCircDep {foo=bar,bar=0} // error // TODO: determine if this should be supported
+enum AnotherCircDep {foo=bar,bar=0} // TODO: DMD now allows this
 
 
 enum {circdep0=circdep1, circdep1} // error
-enum CDX {foo=bar, bar="123"} // error
+enum CDX {foo=bar, bar="123"} // TODO (double check if DMD allows this)
 
 pragma(msg, CDX.bar);
 
