@@ -173,9 +173,6 @@ class Scheduler{
 			done.clear(); assert(!done.length);
 		}
 
-		void buildInterface(){
-			assert(0); // TODO!
-		}
 		void semantic(){
 			//dw(payload);
 			foreach(nd,sc; payload){
