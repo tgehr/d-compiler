@@ -677,13 +677,9 @@ mixin template Semantic(T) if(is(T==Expression)){
 		if(l && r){
 			// note: r.getLongRange is always valid for basic types
 			if(l.op == Tok!"long" || l.op == Tok!"ulong"){
-				auto rng = getLongRange();
-				return (r.getLongRange().contains(rng)
-				        || r.flipSigned().getLongRange().contains(rng)).independent;
+				return r.getLongRange().contains(getLongRange()).independent;
 			}else{
-				auto rng = getIntRange();
-				return (r.getIntRange().contains(rng)
-				        || r.flipSigned().getIntRange().contains(rng)).independent;
+				return r.getIntRange().contains(getIntRange()).independent;
 			}
 		}
 		return false.independent;
@@ -5940,7 +5936,6 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			e2.ignoreProperty=true;
 			auto args = Seq!(b,(Expression[]).init);
 			auto r = e2.meaning.stc&STCproperty?New!PropertyCallExp(args):New!CallExp(args);
-			dw(e2);
 			r.loc = loc;
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
@@ -5995,7 +5990,9 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		if(e1.sstate!=SemState.completed) return;
 		if(auto i=e2.isIdentifier()){
 			if(i.meaning) return;
-			auto unresolved = e1.getMemberScope().getUnresolved(sc,i, false, true).force;
+			auto msc = e1.getMemberScope();
+			if(!msc) return;
+			auto unresolved = msc.getUnresolved(sc,i, false, true).force;
 			if(unresolved&&!unresolved.inexistent(sc,i))
 				mixin(ErrEplg);
 		}
@@ -8221,36 +8218,324 @@ mixin template Semantic(T) if(is(T==ForeachRangeStm)){
 	}
 }
 
+import bst;
+struct DisjointIntervalSet(T, alias l=(auto ref x)=>x.l,alias r=(auto ref x)=>x.r)
+	if(is(typeof((T a,T b)=>l(a)<l(a)&&l(a)<l(b)&&l(b)<l(a)&&l(b)<l(b)&&
+	                        r(a)<r(a)&&r(a)<r(b)&&r(b)<r(a)&&r(b)<r(b))))
+{
+	private static struct CompareR{
+		T payload;
+		int opCmp(CompareR rhs){ return opCmp(rhs); }
+		int opCmp(ref CompareR rhs){
+			static if(is(typeof(r(payload).opCmp(r(rhs.payload)))))
+				return r(payload).opCmp(r(rhs.payload));
+			else{
+				auto a=r(payload),b=r(rhs.payload);
+				return a<b?-1:a>b?1:0;
+			}
+		}
+		int opCmp(typeof(r(payload)) rhs){ return opCmp(rhs); }
+		int opCmp(ref typeof(r(payload)) rhs){
+			static if(is(typeof(r(payload).opCmp(rhs))))
+				return r(payload).opCmp(rhs);
+			else{
+				auto a=r(payload),b=rhs;
+				return a<b?-1:a>b?1:0;
+			}			
+		}
+	}
+	private Set!CompareR right;
+	auto range(){ return right.range.map!(a=>a.payload); }
+	alias range opSlice;
+	private size_t _length;
+	@property size_t length(){ return _length; }
+
+	auto S tryIntersect(S)(
+		T toIntersect,
+		scope S delegate(T) intersected,
+		scope S delegate() noneFound)
+	{
+		auto rng=right.from(l(toIntersect));
+		if(!rng.empty && l(rng.front.payload)<=r(toIntersect))
+			return intersected(rng.front.payload);
+		return noneFound();
+	} 
+
+	// TODO: how to accept both ref and non-ref delegates without using alias?
+	auto S insertOrIntersect(S)(
+		T toInsert,
+		scope S delegate() inserted,
+		scope S delegate(T)intersected)
+	{
+		return tryIntersect(toInsert, intersected, (){
+			right.insert(CompareR(toInsert));
+			_length++;
+			return inserted();
+		});
+	}
+}
+
+
 mixin template Semantic(T) if(is(T==SwitchStm)){
+	BlockScope lsc;
+
+	SwitchLabelStm[] cases;
+	DefaultStm theDefault;
+
+	VarDecl tmpVarDecl, tmpVarDeclStr; // store temporary value and it's length/characters
+
+	import variant;
+	private struct ComparisonValue{
+		Variant value;
+		int opCmp(ComparisonValue rhs){ return opCmp(rhs); }
+		int opCmp(ref ComparisonValue rhs){
+			return value.opBinary!"<"(rhs.value)?-1:value.opBinary!">"(rhs.value)?1:0;
+		}
+	}
+	private struct CaseRange{
+		ComparisonValue l,r;
+		SwitchLabelStm stm;
+		size_t index;
+	}
+	private DisjointIntervalSet!CaseRange casesInOrder;
+
+	bool addCase(CaseStm c, Scope sc){
+		bool err=false;
+		foreach(i,e;c.e){
+			auto cv=ComparisonValue(e.interpretV());
+			auto cr=CaseRange(cv,cv,c,i);
+			CaseRange pr;
+			casesInOrder.insertOrIntersect(cr, {}, (CaseRange p){ pr=p; });
+			auto prev = pr.stm;
+			if(!prev) continue;
+			err=true;
+			if(auto p=prev.isCaseStm()){
+				sc.error(format("duplicate case '%s' in switch statement",
+				                c.e[cr.index]), c.e[cr.index].loc);
+				sc.note("previous case is here",p.e[pr.index].loc);
+			}else if(auto p=prev.isCaseRangeStm()){
+				sc.error(format("case '%s' already occurs in case range '%s..%s'",
+				                c.e[0], p.e1, p.e2), c.e[0].loc);
+				sc.note("this case range is here",p.loc);
+			}else assert(0);
+		}
+		if(err) return false;
+		cases ~= c;
+		return true;
+	}
+	bool addCaseRange(CaseRangeStm c, Scope sc){
+		if(f){
+			if(sc){
+				sc.error("final switch statement cannot include a case range", c.loc);
+				sc.note("enclosing final switch statement is here", loc);
+			}
+			return false;
+		}
+		
+		auto cr=CaseRange(ComparisonValue(c.e1.interpretV()),
+		                  ComparisonValue(c.e2.interpretV()), c);
+		CaseRange pr;
+		casesInOrder.insertOrIntersect(cr, {}, (CaseRange p){ pr=p; });
+		auto prev = pr.stm;
+		if(!prev){cases ~= c; return true; }
+		if(auto p=prev.isCaseStm()){
+			sc.error(format("case range '%s..%s' includes duplicate case '%s'", c.e1, c.e2, p.e[pr.index]), c.e1.loc.to(c.e2.loc));
+			sc.note("previous case is here",p.e[0].loc);
+		}else if(auto p=prev.isCaseRangeStm()){
+			auto l=pr.l.value.opBinary!">="(cr.l.value)?pr.l.value:cr.l.value,
+				r=pr.r.value.opBinary!"<="(cr.r.value)?pr.r.value:cr.r.value;
+			assert(l.opBinary!"<="(r));
+			if(l==r){
+				auto ce = pr.l.value.opBinary!">"(cr.l.value)?c.e2:c.e1;
+				sc.error(format("case '%s' already occurs in case range '%s..%s' (case ranges are inclusive)", ce, p.e1, p.e2), ce.loc);
+				sc.note("this case range is here", p.loc);
+			}else{
+				auto le=pr.l.value.opBinary!">="(cr.l.value)?p.e1:c.e1,
+					re=pr.r.value.opBinary!">="(cr.l.value)?p.e2:c.e2;
+				sc.error(format("case range '%s..%s' overlaps with previous case range '%s..%s' in cases '%s..%s'", c.e1, c.e2, p.e1, p.e2, le, re), c.e1.loc.to(c.e2.loc));
+				sc.note("previous case range was here",p.loc);
+			}
+		}
+		return false;
+	}
+	bool addDefault(DefaultStm d, Scope sc){
+		if(!theDefault){
+			theDefault = d;
+			if(f){
+				sc.error("final switch statement cannot have a default clause", theDefault.loc);
+				sc.note("enclosing final switch statement is here", loc);
+				return false;
+			}
+			return true;
+		}
+		if(sc){
+			sc.error("switch statement already has a default branch", d.loc);
+			sc.note("previous default branch is here", theDefault.loc);
+		}
+		return false;
+	}
+
+	enum Kind{
+		invalid,
+		sintegral,
+		uintegral,
+		string,
+		wstring,
+		dstring,
+	}
+	Kind kind;
+	
+	bool isIntegral(){ return kind==kind.uintegral||kind==kind.sintegral; }
+	bool isString(){ return kind==Kind.string||kind==Kind.wstring||kind==Kind.dstring; }
+
+	private static Kind determineStringKind(Type tt){
+		return tt is Type.get!string()  ? Kind.string  :
+			   tt is Type.get!wstring() ? Kind.wstring :
+			   tt is Type.get!dstring() ? Kind.dstring :
+				                          Kind.invalid ;
+	}
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		sc.error("unimplemented feature SwitchStm",loc);
-		mixin(ErrEplg);
-		//mixin(SemEplg);
+		if(!lsc){lsc = New!BlockScope(sc); lsc.setSwitchStm(this);}
+		mixin(SemChldPar!q{e});
+		void expErr(lazy string err){
+			sc.error(err, e.loc);
+			e.sstate = SemState.error;
+		}
+		if(e.sstate==SemState.completed){
+			assert(!!e.type);
+			kind = determineStringKind(e.type);
+			if(kind==Kind.invalid){
+				if(auto i=e.type.isIntegral()){
+					kind = i.isSigned()?kind.sintegral:kind.uintegral;
+				}else{
+					if(auto et=e.type.isEnumTy()){
+						assert(!!et.decl);
+						Type base;
+						do{
+							mixin(GetEnumBase!q{base;et.decl});
+							et=base.isEnumTy();
+						}while(et&&base);
+						if(!base) e.sstate=SemState.error;
+						else{
+							kind = determineStringKind(base);
+							if(kind == Kind.invalid){
+								if(auto i=base.isIntegral()){
+									kind = i.isSigned()?kind.sintegral:kind.uintegral;
+								}else{
+									expErr("enum base type of switch expression type should be a built-in string or integral type");
+									e.sstate=SemState.error;
+								}
+							}
+						}
+					}else{
+						sc.error(format("switch expression should be of built-in string or integral type instead of '%s'",e.type), e.loc);
+						e.sstate=SemState.error;
+					}
+				}
+			}
+		}
+		if(f&&e.sstate==SemState.completed&&!e.type.isEnumTy()){
+			expErr(format("final switch expression should be of enumeration type instead of '%s'",e.type));
+		}
+		mixin(SemChldPar!q{sc=lsc;s});
+
+		bool err=false;
+		if(f){
+			assert(!!cast(EnumTy)e.type);
+			auto et=cast(EnumTy)cast(void*)e.type;
+			if(et.decl){
+				mixin(SemChld!q{et.decl});
+				foreach(m;et.decl.members){
+					assert(m.init&&m.init.isConstant());
+					auto v=ComparisonValue(m.init.interpretV());
+					auto cr=CaseRange(v,v);
+					if(!casesInOrder.tryIntersect(cr, (CaseRange _)=>true, ()=>false)){
+						if(!err){
+							sc.error("non-exhaustive final switch", loc);
+							err=true;
+						}
+						sc.note(format("enum member '%s' not represented",m.name), m.loc);
+					}
+				}
+			}else err=true;
+		}else if(!theDefault){
+			sc.error("non-final switch statement requires a default clause", loc);
+			err=true;
+		}
+		if(err) mixin(ErrEplg);
+		mixin(SemProp!q{e,s});
+		assert(!tmpVarDecl);
+		if(!tmpVarDecl) tmpVarDecl = New!TmpVarDecl(STC.init, null, null, e);
+		if(!tmpVarDeclStr && this.isString())
+			tmpVarDeclStr = New!TmpVarDecl(STC.init, null, null, New!LengthExp(e));
+		if(tmpVarDeclStr) mixin(SemChld!q{tmpVarDeclStr});
+	    mixin(SemChld!q{tmpVarDecl});
+		mixin(SemEplg);
 	}
 }
 
-mixin template Semantic(T) if(is(T==CaseStm)){
-	override void semantic(Scope sc){
-		mixin(SemPrlg);
-		sc.error("unimplemented feature CaseStm",loc);
-		mixin(ErrEplg);
-	}
-}
+mixin template Semantic(T) if(is(T==SwitchLabelStm)) { }
+mixin template Semantic(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==DefaultStm)){
+	enum _which = is(T==CaseStm)?"case":is(T==CaseRangeStm)?"case range":"default";
 
-mixin template Semantic(T) if(is(T==CaseRangeStm)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		sc.error("unimplemented feature CaseRangeStm",loc);
-		mixin(ErrEplg);
-	}
-}
+		auto sw = sc.getSwitchStm();
+		if(!sw){
+			sc.error(_which~" statement must occur in switch statement", loc);
+			mixin(ErrEplg);
+		}
+		static if(is(T==CaseRangeStm)){
+			alias SwitchStm.Kind K;
+			if(sw.kind!=K.invalid&&!sw.kind.among(K.sintegral,K.uintegral)){
+				sc.error("cannot use a case range within a "~to!string(sw.kind)~" switch statement", loc);
+				mixin(SemChld!q{s});
+				mixin(ErrEplg);
+			}
+		}
 
-mixin template Semantic(T) if(is(T==DefaultStm)){
-	override void semantic(Scope sc){
-		mixin(SemPrlg);
-		sc.error("unimplemented feature DefaultStm",loc);
-		mixin(ErrEplg);
+		static if(is(T==CaseStm)){
+			foreach(x;e) x.prepareInterpret();
+			mixin(SemChldPar!q{e});
+			foreach(ref x;e) if(x.sstate == SemState.completed){
+				x.interpret(sc);
+				mixin(PropRetry!q{x});
+			}
+		}else static if(is(T==CaseRangeStm)){
+			e1.prepareInterpret(); e2.prepareInterpret();
+			mixin(SemChldPar!q{e1,e2});
+			e1.interpret(sc);
+			e2.interpret(sc);
+			mixin(PropRetry!q{e1,e2});
+		}
+		else static assert(is(T==DefaultStm));
+
+		static if(!is(T==DefaultStm)){
+			if(sw.e.sstate==SemState.completed){
+				static if(is(T==CaseStm)) foreach(ref ee;e){
+					if(ee.sstate==SemState.completed)
+						mixin(ImplConvertToPar!q{ee,sw.e.type});
+				}else static if(is(T==CaseRangeStm)){
+					if(e1.sstate==SemState.completed)
+						mixin(ImplConvertToPar!q{e1,sw.e.type});
+					if(e2.sstate==SemState.completed)
+						mixin(ImplConvertToPar!q{e2,sw.e.type});
+				}else static assert(0);
+			}
+		}
+		mixin(SemChld!q{s});
+		static if(is(T==CaseStm)) mixin(PropErr!q{e});
+		static if(is(T==CaseRangeStm)){
+			mixin(PropErr!q{e1,e2});
+			if(e1.interpretV().opBinary!">"(e2.interpretV())){
+				sc.error(format("lower bound '%s' exceeds upper bound '%s' in case range", e1, e2), e1.loc.to(e2.loc));
+				mixin(ErrEplg);
+			}
+		}
+		if(!mixin(`sw.add`~__traits(identifier,T)[0..$-3])(this,sc)) mixin(ErrEplg);
+		mixin(SemEplg);
 	}
 }
 
@@ -8308,7 +8593,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 		if(!e){
 			if(!mixin(_name)) mixin(_name) = mixin(`sc.get`~_query)();
 			if(!mixin(_name)){
-				sc.error("'"~_which~"' statement must be in "~_enc~" statement",loc);
+				sc.error(_which~" statement must occur in "~_enc~" statement",loc);
 				mixin(ErrEplg);
 			}
 		}else{
@@ -9915,8 +10200,9 @@ class OverloadSet: Declaration{ // purely semantic node
 			mixin(Rewrite!q{decl});
 			auto fd=decl.isFunctionDecl();
 			if(!fd) continue;
+			/*
 			if(fd.needRetry||fd.sstate == SemState.error)
-				return Dependee(fd,fd.scope_).dependent!FunctionDecl;// TODO: depend just on type
+			return Dependee(fd,fd.scope_).dependent!FunctionDecl;// TODO: check if we really do not need this*/
 			mixin(CanOverride!q{auto covr; OverloadSet, fd, fun});
 			if(covr) swap(decl, decls[num++]);
 		}

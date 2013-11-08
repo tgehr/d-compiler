@@ -94,6 +94,15 @@ string upperf(string s){
 
 
 // memory allocation stuff
+
+import std.container;
+
+auto tmpArray(R)(R elems){
+	Array!(ElementType!R) r;
+	r.insertBack(elems);
+	return r;
+}
+
 struct MallocAppender(T:T[]){ // NO RAII. Loosely compatible to the std.array.appender interface.
 	static MallocAppender create(size_t initial=16){//pure
 		MallocAppender app;
@@ -343,7 +352,6 @@ auto or(T)(T t, lazy T s){ if(t) return t; return s; }
 S and(T,S)(T t, lazy S s){ if(!t) return null; return s; }
 
 // Versions from Phobos do not work. TODO: reduce and file bug report
-
 import std.range;
 bool any(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool) && isInputRange!R){
 	foreach(x;range) if(a(x)) return true;

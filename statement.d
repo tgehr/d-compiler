@@ -131,25 +131,39 @@ class SwitchStm: BreakableStm{
 
 	mixin Visitors;
 }
-class CaseStm: Statement{
+
+abstract class SwitchLabelStm: Statement{
+	mixin DownCastMethods!(
+		CaseStm,
+		CaseRangeStm,
+		DefaultStm,
+	);
+
+	mixin Visitors;
+}
+
+class CaseStm: SwitchLabelStm{
 	Expression[] e; Statement[] s;
 	this(Expression[] es, Statement[] ss){e=es; s=ss;}
 	override string toString(){return "case "~join(map!(to!string)(e),",")~":"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
-class CaseRangeStm: Statement{
+class CaseRangeStm: SwitchLabelStm{
 	Expression e1,e2; Statement[] s;
 	this(Expression first, Expression last, Statement[] ss){e1=first; e2=last; s=ss;}
 	override string toString(){return "case "~e1.toString()~": .. case "~e2.toString()~":"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
-class DefaultStm: Statement{
+class DefaultStm: SwitchLabelStm{
 	Statement[] s;
 	this(Statement[] ss){s=ss;}
 	override string toString(){return "default:"~(s?"\n":"")~indent(join(map!(to!string)(s),"\n"));}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class ContinueStm: Statement{

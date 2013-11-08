@@ -1177,12 +1177,10 @@ struct ByteCodeBuilder{
 	void emitPushConstant(T)(T v)if(!is(T==void[])){ emitPushConstant((cast(void*)&v)[0..T.sizeof]); }
 
 	struct Label{
-		private{
-			ByteCodeBuilder* outer;
-			size_t loc = -1; // no allocation if label used exactly once
-			size_t[] locs;
-			ulong pos = -1;
-		}
+		ByteCodeBuilder* outer;
+		size_t loc = -1; // no allocation if label used exactly once
+		size_t[] locs;
+		ulong pos = -1;
 		void here()in{
 			assert(outer && loc == -1 || outer.byteCode[loc] == ~0);
 		}body{
@@ -1484,6 +1482,7 @@ class LVstorea: LValueStrategy{
 	ulong els;
 	ulong bcsiz;
 	bool isarr;
+	int signedBitSize=-1;
 	bool isptr;
 	ErrorInfo info;
 	static opCall(Type elty, ErrorInfo info){
@@ -1493,6 +1492,10 @@ class LVstorea: LValueStrategy{
 		isarr = cast(bool)elty.getHeadUnqual().isDynArrTy();
 		if(!isarr) els = getCTSizeof(elty);
 		bcsiz = getBCSizeof(elty);
+		if(auto i=elty.isIntegral()){
+			if(i.isSigned())
+				signedBitSize=i.bitSize();
+		}
 		info = inf;
 		isptr=ptr;
 	}
@@ -1535,15 +1538,24 @@ class LVstorea: LValueStrategy{
 		if(!isarr) bld.emitConstant(els);
 	}
 
+	private void emitSignedAdjust(ref ByteCodeBuilder bld){
+		if(signedBitSize!=-1&&signedBitSize<64){
+			bld.emit(Instruction.truncs);
+			bld.emitConstant(signedBitSize);
+		}		
+	}
+
 	override void emitLoad(ref ByteCodeBuilder bld){
 		ptrPrlg(bld,false);
 		bld.emitUnsafe(isarr?Instruction.loadaa:Instruction.loada, info);
 		if(!isarr) bld.emitConstant(els);
+		emitSignedAdjust(bld);
 	}
 	override void emitLoadKR(ref ByteCodeBuilder bld){
 		ptrPrlg(bld,false);
 		bld.emitUnsafe(isarr?Instruction.loadaak:Instruction.loadak, info);
 		if(!isarr) bld.emitConstant(els);
+		emitSignedAdjust(bld);
 		ptrKREplg(bld,false);
 	}
 
@@ -2683,7 +2695,7 @@ Lfail:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)&&!is(T:Type)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T==MultiReturnValueExp)&&!is(T:Type)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2811,6 +2823,7 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 			else{
 				bld.emitUnsafe(I.loada, this);
 				bld.emitConstant(getCTSizeof(type));
+				ctToBCAdjust(bld, type);
 			}
 		}else static assert(0,TokChars!S);
 	}
@@ -2916,6 +2929,18 @@ enum byteCompileDollar = q{
 	}
 };
 
+void ctToBCAdjust(ref ByteCodeBuilder bld, Type t){
+	if(auto i=t.isIntegral()){
+		if(i.isSigned()){
+			auto bs=i.bitSize();
+			if(bs<64){
+				bld.emit(Instruction.truncs);
+				bld.emitConstant(bs);
+			}
+		}
+	}
+}
+
 // workaround for DMD bug, other part is in expression.IndexExp
 mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
@@ -2961,6 +2986,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 		}
 		bld.emitUnsafe(I.loada, this);
 		bld.emitConstant(siz);
+		ctToBCAdjust(bld, type);
 	}
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
@@ -2985,7 +3011,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			// compiler has larger size_t than target.
 			auto t_siz=getCTSizeof(a[0].type);
 			if(t_siz<size_t.sizeof){
-				bld.emit(I.truncs);
+				bld.emit(I.trunc);
 				bld.emitConstant(t_siz*8);
 			}
 		}
@@ -3012,7 +3038,7 @@ mixin template CTFEInterpret(T) if(is(T==SliceExp)){
 			// compiler has larger size_t than target.
 			auto t_siz=getCTSizeof(l.type);
 			if(t_siz<size_t.sizeof){
-				bld.emit(Instruction.truncs);
+				bld.emit(Instruction.trunc);
 				bld.emitConstant(t_siz*8);
 			}
 		}
@@ -3527,6 +3553,268 @@ private:
 	ByteCodeBuilder.Label* bccontinue;
 }
 
+mixin template CTFEInterpret(T) if(is(T==SwitchStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		// TODO: specialized byte code instructions for switching on a value?
+		//bld.error("switch statements are not yet supported in CTFE", loc);
+		tmpVarDecl.byteCompile(bld);
+
+		// emit binary search
+		static struct Expr{
+			Variant exp;
+			SwitchLabelStm equal;
+			SwitchLabelStm smaller; // but larger than the previous one
+		}
+
+		auto expr(CaseRange c){
+			static struct Only(T){ // TODO: use updated std.range
+				T front;
+				bool empty;
+				void popFront(){ empty = true; }
+			}
+			auto only(T)(T arg){ return Only!T(arg); }
+			if(auto cs=c.stm.isCaseStm()){
+				auto e=cs.e[c.index];
+				assert(e.isConstant());
+				auto ee=Expr(e.interpretV(), cs, theDefault);
+				return chain(only(ee),only(ee)).take(1);
+			}else if(auto cs=c.stm.isCaseRangeStm()){
+				assert(cs.e1.isConstant() && cs.e2.isConstant());
+				return chain(only(Expr(cs.e1.interpretV(), cs, theDefault)),only(Expr(cs.e2.interpretV(), cs, cs))).take(2);
+			}else assert(0);
+		}
+		auto exprs=casesInOrder[].map!expr.joiner.array; // TODO: get rid of temp allocation
+		enum siz = 1;
+		assert(e.type &&
+		       (isIntegral()&&getBCSizeof(e.type)==siz
+		        ||isString()&&e.type.getElementType()&&
+		        getBCSizeof(e.type.getElementType())==siz));
+		bool signed = kind==Kind.sintegral;
+		assert(Type.get!Size_t().isIntegral()&&!Type.get!Size_t().isIntegral().isSigned());
+		auto errorLabel=bld.getLabel();
+		// TODO: DMD should allow this to be a template...
+		// don't want to use dynamic delegates, but still want to reuse binary search code
+		
+		enum linearSearchThreshold=4;
+		void binarySearch(VarDecl tmpVarDecl, Expr[] exprs, SwitchLabelStm larger, scope void delegate(size_t index, Instruction jmpInstr) found)in{assert(exprs.length);}body{
+			assert(f||theDefault);
+
+			void emitComparands(size_t i){
+				tmpVarDecl.byteCompileSymbol(bld, e, tmpVarDecl.scope_);
+				LiteralExp.byteCompileValue(bld, exprs[i].exp);
+			}
+			void emitCmpL(){ with(Instruction) return bld.emit(signed?cmpli:cmpbi); }
+			void emitCmpLE(){ with(Instruction) return bld.emit(signed?cmplei:cmpbei); }
+			void emitCmpE(){ return bld.emit(Instruction.cmpei); }
+
+
+			void linearSearch(Expr[] range, SwitchLabelStm larger) in{
+				assert(range.length<=linearSearchThreshold);
+				// assert(range.isSorted())
+			}body{
+				// linear search
+				foreach(i;0..range.length){
+					if(range[i].equal.isCaseRangeStm()){
+						if(range[i].smaller is range[i].equal){
+							if(i) continue;
+							emitComparands(&range[0]-exprs.ptr);
+							emitCmpLE();
+							bld.emit(Instruction.jnz);
+							bld.emitLabel(range[i].equal.getBCLabel(bld));
+						}else{
+							emitComparands(&range[i]-exprs.ptr);
+							emitCmpL();
+							if(i+1<range.length){
+								// (we have already excluded all smaller cases)
+								bld.emit(Instruction.jnz);
+								bld.emitLabel(theDefault?theDefault.getBCLabel(bld):errorLabel);
+								emitComparands(&range[i+1]-exprs.ptr);
+								emitCmpLE();
+								found(&range[i]-exprs.ptr, Instruction.jnz);
+							}else found(&range[i]-exprs.ptr, Instruction.jz);
+						}
+					}else{
+						assert(!!range[i].equal.isCaseStm());
+						emitComparands(&range[i]-exprs.ptr);
+						emitCmpE();
+						found(&range[i]-exprs.ptr, Instruction.jnz);
+					}
+				}
+				bld.emit(Instruction.jmp);
+				bld.emitLabel(theDefault?theDefault.getBCLabel(bld):errorLabel);
+			}
+
+			void go(Expr[] range, SwitchLabelStm larger){
+				if(range.length<=linearSearchThreshold) return linearSearch(range, larger);
+				emitComparands(&range[$/2]-exprs.ptr);
+				emitCmpL();
+				bld.emit(Instruction.jz);
+				auto lbl=bld.emitLabel();
+				go(range[0..$/2], range[$/2].smaller);
+				lbl.here();
+				go(range[$/2..$], larger);
+			}
+			go(exprs, larger);
+		}
+		void found(size_t index, Instruction jmpInstr){
+			bld.emit(jmpInstr);
+			bld.emitLabel(exprs[index].equal.getBCLabel(bld));			
+		}
+		if(exprs.length){
+			if(isIntegral()) binarySearch(tmpVarDecl, exprs, theDefault, &found);
+			else{
+				assert(isString());
+				// we first search for length, then for the characters in order
+				// TODO: how to determine the order the characters are compared in the
+				// smartest way?
+				// stable sort in 2.063 is buggy.
+				// sort!((a,b)=>a.exp.length<b.exp.length, SwapStrategy.stable)(exprs);
+				sort!((a,b)=>a.exp.length<b.exp.length||a.exp.length==b.exp.length&&a.exp.opBinary!"<"(b.exp))(exprs);
+
+				// auto lenClasses=exprs.chunkBy!(a=>a.exp.length).array; // phobos should have this
+				Expr[] lenClasses; // TODO: avoid temporary allocation
+				size_t lengthCriterion(ref Expr a){ return a.exp.length; }
+				void locateNextClass(T)(ref size_t i, scope T delegate(ref Expr) criterion){
+					T c=criterion(exprs[i]);
+					for(i++;i<exprs.length&&criterion(exprs[i])==c;i++){}
+				}
+				for(size_t i=0;i<exprs.length;locateNextClass(i, &lengthCriterion)){
+					// TODO: DMD wrong-code if for-loop in increment position
+					lenClasses~=exprs[i];
+					(ref v){ v=Variant(v.length,Type.get!Size_t); }(lenClasses[$-1].exp);
+				}
+				tmpVarDeclStr.byteCompile(bld);
+				size_t j=0;
+
+				size_t ctSiz = isString()?getCTSizeof(e.type.getElementType()):0;
+				void foundLength(size_t index, Instruction jmpInstr){
+					with(Instruction) assert(jmpInstr==jz||jmpInstr==jnz);
+					with(Instruction) bld.emit(jmpInstr==jz?jnz:jz);
+					auto skipLbl = bld.emitLabel();
+					scope(exit) skipLbl.here(); // continue outer binary search
+
+					assert(j<exprs.length);
+					size_t i=j;
+					locateNextClass(j, &lengthCriterion);
+					static struct Trie{
+						union{
+							SwitchLabelStm lbl;
+							struct{
+								Variant head;
+								Trie[] children; // TODO: get rid of temporary gc allocations
+							}
+						}
+
+						void insert(Variant x, SwitchLabelStm lbl){
+							if(!x.length){
+								Trie c;
+								c.lbl = lbl;
+								children~=c;
+								return;
+							}
+							// TODO: dollar
+							if(children.length&&children[$-1].head.get!size_t==x[0].get!size_t)
+								return children[$-1].insert(x[1..x.length], lbl);
+							assert(!children.length||children[$-1].head.get!size_t<x[0].get!size_t,text(children[$-1].head," ",x));
+							Trie c;
+							c.head=x[0];
+							c.insert(x[1..x.length], lbl);
+							children~=c;
+						}
+
+						bool isLast(){
+							return children.length==1&&!children[0].children.length;
+						}
+
+						SwitchLabelStm label()in{assert(isLast());}body{
+							return children[0].lbl;
+						}
+					}
+					Trie t;
+					foreach(x,ref e;exprs[i..j]){
+						assert(cast(CaseStm)e.equal);
+						t.insert(e.exp, e.equal);
+					}
+					
+					void emitSearch(ref Trie t, size_t i){
+						if(t.isLast()){
+							bld.emit(Instruction.jmp);
+							bld.emitLabel(t.label().getBCLabel(bld));
+							return;
+						}
+
+						tmpVarDecl.byteCompileSymbol(bld,e,tmpVarDecl.scope_);
+						bld.emit(Instruction.push);
+						bld.emitConstant(i);
+						bld.emitUnsafe(Instruction.loada,e);
+						bld.emitConstant(ctSiz);
+						
+						void binarySearch(Trie[] c){
+							assert(c.length);
+							static assert(linearSearchThreshold>=1);
+							if(c.length<=linearSearchThreshold){
+								foreach(j,ref ct;c){
+									if(j+1!=c.length) bld.emit(Instruction.dup);
+									LiteralExp.byteCompileValue(bld, ct.head);
+									bld.emit(Instruction.cmpei);
+									bld.emit(Instruction.jz);
+									auto lbl=bld.getLabel();
+									if(j+1==c.length)
+										bld.emitLabel(theDefault?theDefault.getBCLabel(bld):errorLabel);
+									else bld.emitLabel(lbl);
+									if(j+1!=c.length) bld.emit(Instruction.pop);
+									emitSearch(ct,i+1);
+									if(j+1!=c.length) lbl.here();
+								}
+							}else{
+								bld.emit(Instruction.dup);
+								LiteralExp.byteCompileValue(bld, c[$/2].head);
+								bld.emit(Instruction.cmpbi);
+								bld.emit(Instruction.jz);
+								auto lbl=bld.emitLabel();
+								binarySearch(c[0..$/2]);
+								lbl.here();
+								binarySearch(c[$/2..$]);
+							}
+						}
+						binarySearch(t.children);
+					}
+					emitSearch(t,0);
+				}
+				//dw("!! ",exprs, "\nlencl: ", lenClasses,"\n",exprs.map!(a=>a.exp.length));
+
+				binarySearch(tmpVarDeclStr, lenClasses, theDefault, &foundLength);
+			}
+		}else if(theDefault){
+			bld.emit(Instruction.jmp);
+			bld.emitLabel(theDefault.getBCLabel(bld));
+		}
+		if(!theDefault){
+			errorLabel.here();
+			assert(f);
+			bld.error("final switch expression does not evaluate to one of the allowed enum values",e.loc);
+		}
+		s.byteCompile(bld);
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==SwitchLabelStm)){
+	ByteCodeBuilder.Label bcLabel;
+	final ref ByteCodeBuilder.Label getBCLabel(ref ByteCodeBuilder bld){
+		if(bcLabel.outer !is &bld) bcLabel=bld.getLabel();
+		return bcLabel;
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==DefaultStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		assert(bcLabel.outer is &bld);
+		bcLabel.here();
+		bcLabel=ByteCodeBuilder.Label.init;
+		foreach(ss;s) ss.byteCompile(bld);
+	}
+}
+
 mixin template CTFEInterpret(T) if(is(T==ReturnStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		if(e) e.byteCompileRet(bld, isRefReturn);
@@ -3555,6 +3843,9 @@ mixin template CTFEInterpret(T) if(is(T==GotoStm)){
 
 mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		byteCompileValue(bld, value);
+	}
+	static void byteCompileValue(ref ByteCodeBuilder bld, ref Variant value){
 		auto tu = value.getType().getHeadUnqual();
 		assert(!tu.isEnumTy());
 		if(auto bt = tu.isBasicType()){
@@ -3696,7 +3987,8 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		}
 		if(auto from=t1.isIntegral()){
 			if(auto to=t2.isIntegral()){
-				if(from.bitSize()<=to.bitSize()) return;
+				auto fb=from.bitSize(), tb=to.bitSize();
+				if(fb<tb && from.isSigned==to.isSigned()||tb==64) return;
 				if(to is Type.get!bool()){
 					bld.emit(I.int2bool);
 					return;

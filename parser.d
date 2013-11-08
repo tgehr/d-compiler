@@ -552,7 +552,7 @@ private struct Parser{
 				mixin(doParse!(Expression,"e1",")"));
 				return res=New!TypeofExp(e1);
 			mixin({string r;
-					foreach(x;unaryOps) r~=mixin(X!q{case Tok!"@(x)":nextToken(); return res=New!(UnaryExp!(Tok!"@(x)"))(parseExpression(nbp));});
+				foreach(x;unaryOps) r~=mixin(X!q{case Tok!"@(x)":nextToken(); return res=New!(UnaryExp!(Tok!"@(x)"))(parseExpression(nbp));});
 				return r;
 			}());
 			default: throw new PEE("invalid unary operator '"~tok.toString()~"'");

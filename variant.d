@@ -690,19 +690,18 @@ struct Variant{
 	}
 
 	Variant opSlice(Variant l, Variant r)in{
-		assert(l.occupies==Occupies.int64);
+		assert(l.occupies==Occupies.int64&&r.occupies==Occupies.int64);
 		assert(occupies == Occupies.arr||occupies == Occupies.str
 		       || occupies == Occupies.wstr || occupies == Occupies.dstr);
 	}body{
 		if(occupies == Occupies.arr){
-			assert(l.int64<=arr.length && r.int64<=arr.length);
-			assert(l.int64<=r.int64);
+			assert(l.int64<=r.int64 && r.int64<=arr.length);
 			return Variant(arr[cast(size_t)l.int64..cast(size_t)r.int64],cnt,type.getElementType().getDynArr()); // aliasing ok?
 		}else switch(occupies){
 			foreach(x; ToTuple!(["str","wstr","dstr"])){
 				case mixin(`Occupies.`~x):
-					assert(l.int64<mixin(x).length && r.int64<=mixin(x).length);
-					return Variant(mixin(x)[cast(size_t)l.int64..cast(size_t)r.int64],Type.get!(ElementType!(typeof(mixin(x)))));
+					assert(l.int64<=r.int64 && r.int64<=mixin(x).length);
+					return Variant(mixin(x)[cast(size_t)l.int64..cast(size_t)r.int64],Type.get!(typeof(mixin(x))));
 			}
 			default: assert(0);
 		}

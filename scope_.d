@@ -698,7 +698,7 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 	void setLoopingStm(LoopingStm loop)in{assert(!brokenOne&&!theLoop);}body{
 		brokenOne = theLoop = loop;
 	}
-	void setSwitchStm(SwitchStm swstm)in{assert(!brokenOne&&!swstm);}body{
+	void setSwitchStm(SwitchStm swstm)in{assert(!brokenOne&&!theSwitch);}body{
 		brokenOne = theSwitch = swstm;
 	}
 
