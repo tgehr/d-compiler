@@ -1,3 +1,13 @@
+
+struct ReverseEpoLookupSkipScope{
+	template Test(int x) if(x>0){
+		static if(is(typeof(Test!(x-1)))) enum Test = Test!(x-1);
+		else enum Test=0; // TODO
+	}
+
+	pragma(msg, Test!5);
+}
+
 struct InaccessibleMemberAlias{
 	static bool compare(A,B)(A a,B b){
 		return a.opCmp(b)<0; // error

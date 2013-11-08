@@ -1,3 +1,37 @@
+
+/+
+int foo(){
+	int i;
+	while(auto x=i++<3){}
+	return i;
+}
+pragma(msg, foo());
++/
+
+/+enum Foo{
+	xxx
+}
+
+immutable arr = [Foo.xxx]; // TODO+/
+
+
+/+struct S{
+	struct G{
+		int x;
+	}
+	G g;
+	alias g.x x;
+}+/
+
+/+
+auto foo(){
+	void[][] x = [["1","2","3"],cast(void[])[1,2,3]];
+	x[0]=x[1];
+	return x;
+}
+pragma(msg, foo());
++/
+
 /+
 immutable int x=2;
 immutable int* p = &x + 1; // TODO: error

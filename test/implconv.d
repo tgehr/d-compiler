@@ -1,3 +1,4 @@
+
 void contextpointerqualimplconv(){
 
 	void delegate()inout w;
@@ -38,12 +39,11 @@ static assert(!is(int delegate() : int delegate() const));
 
 static assert(!is(int[2]: int[1]));
 
-enum x = 2i*1; // TODO
-pragma(msg, x);
-pragma(msg, typeof(x));
+enum xx = 2i*1; // TODO
+pragma(msg, xx);
+pragma(msg, typeof(xx));
 
-
-static assert(is(typeof(x)==idouble)); // TODO!
+static assert(is(typeof(xx)==idouble)); // TODO!
 /+
 static assert(is(typeof([1,1L])==long[]));
 
@@ -98,3 +98,5 @@ void cj(){ short[] scjjj = [sciii]; }
 
 immutable int sciii2 = 200000;
 void ci(){ short[] cjjj2 = [sciii2]; }// error
+
+enum int x = 3287373738; // error
