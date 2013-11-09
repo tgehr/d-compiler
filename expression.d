@@ -131,6 +131,7 @@ abstract class Expression: Node{
 		AssignExp,
 		FieldExp,
 		LengthExp,
+		CurrentExp,
 		SuperExp,
 		TemplateInstanceExp,
 		IndexExp,

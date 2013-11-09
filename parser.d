@@ -403,7 +403,7 @@ private struct Parser{
 	Expression parseTypeOrExpression(){
 		Expression e;
 		auto save=saveState();
-		auto ist=skipType()&&(ttype==Tok!","||ttype==Tok!")");
+		auto ist=skipType()&&(ttype==Tok!","||ttype==Tok!")"||ttype==Tok!";");
 		restoreState(save);
 		e=ist?parseType():parseExpression(rbp!(Tok!","));
 		return e;
@@ -864,6 +864,13 @@ private struct Parser{
 				tt.loc=tok.loc;
 				nextToken();
 				break;
+			case Tok!"this": tt=New!ThisExp(); goto Lextendbyidentifierlist;
+			case Tok!"super": tt=New!SuperExp(); goto Lextendbyidentifierlist;
+			Lextendbyidentifierlist:
+				tt.loc=tok.loc;
+				nextToken();
+				if(ttype==Tok!".") tt=parseIdentifierList(tt);
+				break;
 			case Tok!".": goto case;
 			case Tok!"i": tt=parseIdentifierList(); break;
 			mixin({string r;
@@ -931,6 +938,10 @@ private struct Parser{
 	bool skipType(){
 		switch(ttype){
 			mixin(getTTCases(basicTypes)); nextToken(); break;
+			case Tok!"this",Tok!"super":
+				nextToken();
+				if(ttype==Tok!".") goto case;
+				break;
 			case Tok!".": nextToken(); case Tok!"i":
 				if(!skipIdentifierList()) goto Lfalse; break;
 			mixin({string r;
@@ -1084,20 +1095,35 @@ private struct Parser{
 	Declaration parseDeclaration(const ref Location begin,STC stc=STC.init){ // Helper function for parseDeclDef.
 		Expression type;
 		Declaration d;
-		bool isAlias=ttype==Tok!"alias";
-		if(isAlias) nextToken();
+		scope(success) if(d) d.loc=begin.to(ptok.loc);
 		STC nstc, ostc=stc; // hack to make alias this parsing easy. TODO: refactor a little
 		stc|=nstc=parseSTC!toplevelSTC();
 		bool needtype=ttype!=Tok!"this" && (ttype!=Tok!"~"||peek().type!=Tok!"this") && ttype!=Tok!"invariant";
+		if(ttype==Tok!"alias"){
+			nextToken();
+			bool isaliasthis=ttype==Tok!"this";
+			Identifier i;
+			if((ttype==Tok!"i"||isaliasthis)&&peek().type==Tok!"="){
+				i=parseIdentifier(); nextToken();
+				type=parseTypeOrExpression();
+				expect(Tok!";");
+			}else{
+				type=parseType("symbol");
+				isaliasthis=ttype==Tok!"this";
+				if(isaliasthis) nextToken();
+			}
+			if(isaliasthis){
+				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!Identifier("this"),Expression.init));
+				expect(Tok!";");
+			}else if(i){
+				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,i,Expression.init));				
+			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
+			return d;
+		}
 		TokenType p;
 		if(needtype&&(!stc||(ttype!=Tok!"i" || (p=peek().type)!=Tok!"=" && p!=Tok!"("))) type=parseType("declaration");
 		if(cast(ErrorExp)type) return New!ErrorDecl();
-		if(isAlias){
-			if(ttype==Tok!"this"){
-				nextToken();
-				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!Identifier("this"),Expression.init)); expect(Tok!";"); // alias this
-			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
-		}else if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type,begin);
+		if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type,begin);
 		else d=parseDeclarators(stc,type);
 		return d;
 	}

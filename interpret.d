@@ -4805,6 +4805,11 @@ size_t getCTSizeof(Type type)out(res){assert(!!res);}body{
 		assert(et.decl.base);
 		return getCTSizeof(et.decl.base);
 	}
+	if(auto tt = type.isTypeTuple()){
+		size_t r=0;
+		foreach(Type t;tt) r+=getCTSizeof(t);
+		return r;
+	}
 	return cast(size_t)type.getSizeof();
 }
 
@@ -4838,6 +4843,11 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	if(auto et = type.isEnumTy()){
 		assert(et.decl.base);
 		return getBCSizeof(et.decl.base);
+	}
+	if(auto tt = type.isTypeTuple()){
+		size_t r=0;
+		foreach(Type t;tt) r+=getBCSizeof(t);
+		return r;
 	}
 	assert(0, "type "~type.toString~" not yet supported in CTFE");
 }
@@ -5022,6 +5032,17 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		byteCodeStackOffset = off;
 		byteCodeStackLength = len;
 		// dw("yes ", this," ",off," ",len," ",cast(void*)this);
+
+		if(tupleContext){
+			size_t toff=off;
+			foreach(vd;tupleContext.vds){
+				assert(vd.sstate == SemState.completed);
+				auto tlen=getBCSizeof(vd.type);
+				vd.setBCLoc(toff, tlen);
+				toff+=tlen;
+			}
+			assert(toff==off+len);
+		}
 	}
 	final size_t getBCLoc(ref size_t len){
 		// import std.stdio; writeln("l ",this," ",cast(void*)this," ", byteCodeStackLength," ", byteCodeStackOffset);
@@ -5106,6 +5127,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 			void perform(Symbol self){
 				if(self.sstate!=SemState.completed) return;
+				assert(self.scope_,text(self," ",self.loc));
 				if(self.scope_.getFrameNesting()       >
 				   self.meaning.scope_.getFrameNesting()){
 					runAnalysis!MarkHeapContext(self);

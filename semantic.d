@@ -535,7 +535,6 @@ mixin template Semantic(T) if(is(T==Expression)){
 		}
 	}
 
-
 	void initOfVar(VarDecl decl){}
 
 	override void semantic(Scope sc){
@@ -1112,13 +1111,12 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 
 		if(!ascope) ascope = New!DollarScope(sc_, this);
 		alias ascope sc;
-
 		if(e.isType()){
 			auto r=typeSemantic(sc); // TODO: ok?
 			mixin(SemCheck);
 			assert(!!r);
 			mixin(RewEplg!q{r});
-		}else if(auto et=e.isExpTuple()){
+		}else if(e.isExpTuple()||e.sstate == SemState.completed && e.type.isTypeTuple()){
 			mixin(SemChldExp!q{a});
 			if(a.length==0){
 				e.loc=loc;
@@ -1134,11 +1132,30 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 			mixin(ImplConvertTo!q{a[0],s_t});
 			mixin(IntChld!q{a[0]});
 			auto n = a[0].interpretV().get!ulong();
-			if(n>=et.length){
-				sc.error(format("tuple index %s is out of bounds [0%s..%d%s)",a[0].toString(),Size_t.suffix,et.length,Size_t.suffix),a[0].loc);
-				mixin(ErrEplg);
+			bool checkn(size_t len){
+				if(n<len) return true;
+				sc.error(format("tuple index %s is out of bounds [0%s..%d%s)",a[0].toString(),Size_t.suffix,len,Size_t.suffix),a[0].loc);
+				return false;
 			}
-			auto r=et.index(sc,inContext,loc,n);
+			Expression r;
+			if(auto et=e.isExpTuple()){
+				if(!checkn(et.length)) mixin(ErrEplg);
+				r=et.index(sc,inContext,loc,n);
+			}else{
+				// sequence of fields
+				mixin(PropErr!q{e});
+				assert(!!cast(FieldExp)e);
+				auto f=cast(FieldExp)cast(void*)e;
+				assert(cast(Tuple)f.e2.rewrite);
+				auto tpl=cast(Tuple)f.e2.rewrite;
+				if(!checkn(tpl.length)) mixin(ErrEplg);
+				auto rhs=tpl.index(sc,inContext,f.e2.loc,n);
+				assert(cast(Symbol)rhs);
+				auto rf=New!(BinaryExp!(Tok!"."))(f.e1, cast(Symbol)cast(void*)rhs);
+				rf.loc=loc;
+				rf.semantic(sc);
+				r=rf;
+			}
 			mixin(RewEplg!q{r});
 		}else{
 			mixin(SemChld!q{a});
@@ -1853,7 +1870,7 @@ class TemplateInstanceDecl: Declaration{
 		foreach(i,x;args){
 			Declaration decl = null;
 			if(auto addr=x.isAddressExp()) x=addr.e; // delegate literals
-			if(auto sym = x.isSymbol()) decl=sym.meaning;
+			if(auto sym = AliasDecl.getAliasBase(x)) decl=sym.meaning;
 			else if(auto ty = x.isType()) // DMD 2.060 does not do this:
 				if(auto at = ty.isAggregateTy()) decl=at.decl;
 			if(!decl) continue;
@@ -2477,7 +2494,7 @@ class ExpTuple: Expression, Tuple{
 	private Expression indexImpl(Scope sc, InContext inContext, const ref Location loc, Expression exp){
 		auto r=exp.clone(sc,inContext,loc);
 
-		if(auto s=r.isSymbol()){
+		if(auto s=AliasDecl.getAliasBase(r)){
 			if(s.accessCheck<accessCheck){
 				s.accessCheck = accessCheck;
 				s.performAccessCheck();
@@ -2782,7 +2799,7 @@ mixin template Semantic(T) if(is(T==TemplateParameter)){
 		final switch(which) with(WhichTemplateParameter){
 			case alias_:
 				// TODO: rspec!!
-				return (arg.isSymbol()||arg.isType()||arg.isConstant()).independent;
+				return (AliasDecl.getAliasBase(arg)||arg.isType()||arg.isConstant()).independent;
 			case constant:
 				if(!arg.isConstant()) return false.independent;
 
@@ -2865,7 +2882,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		if(auto ae=x.isAddressExp()) if(auto lit=ae.e.isSymbol()){
 			// turn the function literal into a function declaration
 			lit.isFunctionLiteral=false;
-			if(auto fd = lit.meaning.isFunctionDecl())
+			if(auto fd = lit.meaning.isFunctionDecl()){
 				if(fd.type.hasUnresolvedParameters()){
 					lit.sstate = SemState.begin;
 					fd.sstate = SemState.pre;
@@ -2877,9 +2894,10 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 					assert(lit.meaning.sstate == SemState.completed && !lit.meaning.needRetry);
 					x = lit;
 				}
-			return;
+				return;
+			}
 		}
-		if(x.isSymbol()||x.isType()) return;
+		if(x.isType()||AliasDecl.getAliasBase(x)) return;
 		x.interpret(sc);
 	}
 
@@ -4226,10 +4244,11 @@ class Symbol: Expression{ // semantic node
 	static Symbol circ = null;
 	private static Symbol[] clist = [];
 
+
 	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
-		Symbol r=ddup();
-		r.sstate = SemState.begin;
+		auto r=ddup();
 		r.scope_ = null;
+		r.sstate = SemState.begin;
 		r.loc = loc;
 		r.inContext = inContext;
 		r.semantic(sc);
@@ -4660,8 +4679,6 @@ class Symbol: Expression{ // semantic node
 				Declaration.isDeclAccessible(sdecl, meaning).force;
 				                  
 		}
-		// presumably this will never happen, as only parameters matching the
-		// same template are tested
 		return false;
 	}
 
@@ -5759,6 +5776,7 @@ abstract class CurrentExp: Expression{
 	abstract Dependent!Type determineType(Scope sc, AggregateDecl d);
 	override @property string kind(){ return "current object"; }
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 mixin template Semantic(T) if(is(T==CurrentExp)){}
@@ -5797,6 +5815,18 @@ mixin template Semantic(T) if(is(T==SuperExp)){
 mixin template Semantic(T) if(is(T==FieldExp)){
 
 	mixin ContextSensitive;
+
+	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
+		if(e1.isCurrentExp()) return e2.clone(sc, inContext, loc);
+		auto fe1 = e1.clone(sc, inContext==InContext.fieldExp?inContext:InContext.none, loc);
+		auto fe2 = e2.clone(sc, e2.inContext, loc);
+		assert(cast(Symbol)fe2);
+		auto r = New!(BinaryExp!(Tok!"."))(fe1,cast(Symbol)cast(void*)fe2);
+		r.loc = loc;
+		r.inContext = inContext;
+		r.semantic(sc);
+		return r;
+	}
 
 	Expression res;
 	Expression ufcs; // TODO: we do not want this to take up space in every instance
@@ -5899,9 +5929,33 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				type = res.type;
 				mixin(SemEplg);
 			}
+
+			Expression r;
+			if(auto fres=res.isFieldExp()){
+				Expression go(FieldExp f){
+					if(auto f2=f.e1.isFieldExp()){
+						auto e1=go(f2);
+						auto r = New!(BinaryExp!(Tok!"."))(e1,f.e2);
+						r.loc = f.loc;
+						return r;
+					}else if(auto sym=f.e1.isSymbol()){
+						auto r = New!(BinaryExp!(Tok!"."))(this.e1, sym);
+						auto l=r.loc=this.e1.loc.to(f.e1.loc);
+						r = New!(BinaryExp!(Tok!"."))(r, f.e2);
+						r.loc=l.to(f.e2.loc);
+						return r;
+					}else{
+						// TODO: investigate why this is needed (why are types left in the AST?)
+						r = New!(BinaryExp!(Tok!"."))(this.e1, f.e2);
+						r.loc=this.e1.loc.to(f.e2.loc);
+						return r;
+					}
+				}
+				r=go(fres);
+				transferContext(r);
+				r.semantic(sc);
+			}else r=res; // type or enum on instance. ignore side effects of e1
 			
-			// type or enum on instance. ignore side effects of e1
-			auto r=res;
 			mixin(RewEplg!q{r});
 			/*// TODO: do we rather want this:
 			// enum reference. we need to evaluate 'this', but it
@@ -6150,6 +6204,18 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		mixin(RewEplg!q{r});
 	Lnorewrite:
 		mixin(SemEplg);
+	}
+
+	// TemplateDecl needs this.
+	override bool tmplArgEquals(Expression rhs){
+		if(auto fld = rhs.isFieldExp())
+			return e2.tmplArgEquals(fld.e2) && e1.tmplArgEquals(fld.e1);
+		return false;
+	}
+
+	override size_t tmplArgToHash(){
+		import hashtable;
+		return FNV(e2.meaning.toHash(), e1.tmplArgToHash());
 	}
 }
 
@@ -8817,7 +8883,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			mixin(MeaningSemantic); // TODO: does this generate invalid circ. dependencies?
 			mixin(CircErrMsg);
 			mixin(PropRetry!q{sc=meaning.scope_;meaning});
-			if(meaning.sstate == SemState.completed){
+			if(vd.tupleContext){
 				assert(!!vd.tupleContext && !!vd.tupleContext.tupleAlias);
 				meaning = vd.tupleContext.tupleAlias;
 				sstate = SemState.begin;
@@ -8894,7 +8960,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			if(!tc) tc = New!TupleContext();
 			ExpTuple et = null;
 			TypeTuple tt = null;
-			if(init){
+			if(init && init.type){
 				et=init.isExpTuple();
 				if(!et) tt=init.type.isTypeTuple();
 				if(et||tt){
@@ -8915,7 +8981,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				}
 				///
 			}
-			if(init) assert(tt || et && et.length==len && init.sstate == SemState.completed);
+			if(init) assert(tt || init.sstate == SemState.error || et && et.length==len);
 			// TODO: gc allocations
 			if(!tc.vds){
 				tc.vds = new VarDecl[cast(size_t)len];
@@ -8951,11 +9017,15 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				tc.tupleAlias.scope_=scope_;
 			}
 			mixin(SemChld!q{tc.tupleAlias});
-			assert(!tt||cast(CallExp)init);
 			if(tt){
-				sstate = SemState.completed;
-				init = makeMultiReturn(cast(CallExp)cast(void*)init);
+				if(init.isCallExp()){
+					sstate = SemState.completed;
+					init = makeMultiReturn(cast(CallExp)cast(void*)init);
+				}else if(init.isFieldExp()){
+					sstate = SemState.completed;
+				}
 			}
+			if(init) mixin(SemProp!q{init});
 			return doSemEplg(); // Symbol will rewrite the meaning
 		}
 
@@ -9395,14 +9465,46 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		aliasee.willAlias();
 		mixin(SemChld!q{aliasee});
 		mixin(FinishDeductionProp!q{aliasee}); // TODO: necessary?
-		if(!aliasee.isSymbol() && !aliasee.isType() && !aliasee.isConstant() && !aliasee.isExpTuple()){
-			auto ae = aliasee.isAddressExp();
-			if(!ae||!ae.e.isSymbol()){
-				sc.error("cannot alias an expression",loc);
-				mixin(ErrEplg);
-			}
+		if(!checkAlias(aliasee)){
+			sc.error("cannot alias an expression",loc);
+			mixin(ErrEplg);
 		}
 		mixin(SemEplg);
+	}
+
+	private static auto checkAlias(bool wantSymbol=false)(Expression aliasee){
+		static if(wantSymbol) alias Symbol R;
+		else alias bool R;
+		if(auto ae=aliasee.isAddressExp())
+			if(aliasee.type.getFunctionTy())
+				if(auto sym=ae.e.isSymbol()){
+					static if(wantSymbol) return sym;
+					else return true;
+				}
+		R go(Expression aliasee){
+			if(auto sym=aliasee.isSymbol()){
+				static if(wantSymbol) return sym;
+				else return true;
+			}
+			static if(!wantSymbol)
+				if(aliasee.isType()||aliasee.isConstant()||aliasee.isExpTuple())
+					return true;
+			if(auto fld=aliasee.isFieldExp()){
+				auto r=go(fld.e1);
+				if(!r && fld.e1.isCurrentExp){
+					static if(wantSymbol) return fld.e2;
+					else return true;
+				}
+				return r;
+			}
+			static if(wantSymbol) return null;
+			else return false;
+		}
+		return go(aliasee);		
+	}
+
+	static Symbol getAliasBase(Expression aliasee){
+		return checkAlias!true(aliasee);
 	}
 
 	Declaration aliasedDecl()in{
