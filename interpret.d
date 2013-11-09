@@ -783,7 +783,7 @@ enum Instruction : uint{
 	ptra,                       // get pointer field
 	lengtha,                    // get length field
 	setlengtha,                 // set length field
-	newarray,                   // creates an array, stack top is ptr, ltop is length
+	newarray,                   // creates an array, stack top is length
 	makearray,                  // pop values from the stack and turn them into an array
 	appenda,
 	concata,
@@ -4386,6 +4386,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 	}
 
 	void byteCompileInit(ref ByteCodeBuilder bld, Scope sc){
+		if(!isLayoutKnown()) updateLayout();
 		void emitNullPtr(){
 			foreach(i;0..bcPointerBCSize){
 				bld.emit(Instruction.push);
@@ -4396,6 +4397,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 			if(sc is null) emitNullPtr();
 			else{
 				auto diff = sc.getFrameNesting() - scope_.getFrameNesting();
+				assert(diff>=0);
 				bld.emitUnsafe(Instruction.pushcontext, this);
 				bld.emitConstant(diff);
 			}
@@ -4725,25 +4727,66 @@ mixin template CTFEInterpret(T) if(is(T==NewExp)){
 	void byteCompileForType(ref ByteCodeBuilder bld, Type type){
 		auto tu = type.getHeadUnqual();
 		if(auto da=tu.isDynArrTy()){
-			bld.error("type "~type.toString()~" not yet supported in CTFE", loc);
+			void go(Type ty, size_t index){
+				if(index<a2.length){
+					a2[index].byteCompile(bld);
+					assert(getBCSizeof(a2[index].type)==1);
+					bld.emit(Instruction.dup);
+					bld.emit(Instruction.tmppush);
+					bld.emit(Instruction.newarray);
+					auto elt=ty.getElementType();
+					assert(!!elt);
+					auto elsiz=getCTSizeof(elt);
+					bld.emitConstant(elsiz);
+					bld.emit(Instruction.push);
+					bld.emitConstant(0); // loop index
+					auto start=bld.getLocation();
+					bld.emit(Instruction.tmppop); // termination criterion
+					bld.emit(Instruction.dup);
+					bld.emit(Instruction.push);
+					bld.emitConstant(1);
+					bld.emit(Instruction.subi);
+					bld.emit(Instruction.tmppush); // termination criterion
+					bld.emit(Instruction.jz);
+					auto end=bld.emitLabel();
+					go(elt, index+1);
+					bld.emitUnsafe(Instruction.storeakr, this); // (always safe)
+					bld.emitConstant(elsiz);
+					bld.emit(Instruction.push);
+					bld.emitConstant(1);
+					bld.emit(Instruction.addi); // increment loop index
+					bld.emit(Instruction.jmp);
+					bld.emitConstant(start);
+					end.here();
+					bld.emit(Instruction.tmppop); // discard termination criterion
+					bld.emit(Instruction.pop);
+					bld.emit(Instruction.pop); // discard loop index
+				}else VarDecl.byteCompileDefaultInit(bld, ty, scope_);
+			}
+			go(type,0);
 			return;
 		}
+		size_t siz;
 		if(auto aggrty=tu.isAggregateTy()){
-			bld.emit(Instruction.push); bld.emitConstant(1);
-			bld.emit(Instruction.newarray);
-			auto els=aggrty.decl.getBCSize();
-			bld.emitConstant(els*ulong.sizeof);
-			bld.emit(Instruction.ptra);
-			bld.emitDup(bcPointerBCSize); // duplicate the reference
 			aggrty.decl.byteCompileInit(bld, scope_); // TODO: context is null
-			bld.emitUnsafe(Instruction.storef, this); // perfectly safe in this case
-			bld.emitConstant(0);
-			bld.emitConstant(els);
-
-			if(consCall){
-				bld.emitDup(bcPointerBCSize); // duplicate the reference
-				consCall.byteCompile(bld);
-			}
+			auto els=aggrty.decl.getBCSize();
+			siz=els*ulong.sizeof;
+		}else{
+			// built-in
+			if(a2.length){
+				assert(a2.length==1);
+				a2[0].byteCompile(bld);
+			}else VarDecl.byteCompileDefaultInit(bld, tu, scope_);
+			siz=getCTSizeof(tu);
+		}
+		bld.emit(Instruction.push); bld.emitConstant(1);
+		bld.emit(Instruction.makearray);
+		bld.emitConstant(siz);
+		bld.emit(Instruction.ptra);
+		
+		if(consCall){
+			bld.emitDup(bcPointerBCSize); // duplicate the reference
+			consCall.byteCompile(bld);
 		}
 	}
 	override void byteCompile(ref ByteCodeBuilder bld){
@@ -4853,6 +4896,19 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 }
 
 mixin template CTFEInterpret(T) if(is(T==VarDecl)){
+
+	static void byteCompileDefaultInit(ref ByteCodeBuilder bld, Type type, Scope sc){
+		auto len = getBCSizeof(type);
+		if(auto aggrty=type.isAggregateTy()){
+			if(auto decl=aggrty.decl.isStructDecl()){
+				decl.byteCompileInit(bld, sc); // TODO: handle scope not being accessible
+				return;
+			}
+		}
+		// TODO: emit the correct inits
+		foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
+	}
+
 	override void byteCompile(ref ByteCodeBuilder bld){
 		if(auto tp=type.isTypeTuple()){
 			assert(tupleContext && tupleContext.vds.length == tp.length);
@@ -4880,7 +4936,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		}
 
 		if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
-		else foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
+		else byteCompileDefaultInit(bld, type, scope_);
 
 		// dw(this," ",off," ",len);
 
