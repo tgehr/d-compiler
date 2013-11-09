@@ -5944,12 +5944,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 						r = New!(BinaryExp!(Tok!"."))(r, f.e2);
 						r.loc=l.to(f.e2.loc);
 						return r;
-					}else{
-						// TODO: investigate why this is needed (why are types left in the AST?)
-						r = New!(BinaryExp!(Tok!"."))(this.e1, f.e2);
-						r.loc=this.e1.loc.to(f.e2.loc);
-						return r;
-					}
+					}else assert(0);
 				}
 				r=go(fres);
 				transferContext(r);
@@ -5971,7 +5966,6 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			// and we do not need a 'this' pointer
 			Expression r=res;
 			if(auto sym=r.isSymbol()){
-				if(e1.isType()) goto Lok;
 				// allow implicit call rewrite
 				sym.sstate = SemState.begin;
 				sym.inContext = InContext.none;
