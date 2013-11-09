@@ -1,3 +1,34 @@
+struct Tuple(T...){
+	T expand;
+}
+auto test0(){
+	Tuple!(int,double) t;
+	t.expand[0]=2;
+	int x;
+	Seq!(int,double) a=Seq!(x+2); // error
+	return a[0];
+}
+
+/+ // TODO!
+auto test1(){
+	Tuple!(int,double) t;
+	Seq!(int,double) a=(()=>t.expand)();
+	a[0]=2;
+	return a[0];
+}
+
+pragma(msg, test1());
++/
+
+auto test2(){
+	Tuple!(int,double) t;
+	t.expand[0]=2;
+	alias t.expand[0] xx;
+	alias t.expand[1] yy;
+	Seq!(int,double) a=Seq!(xx,yy);
+	return xx+a[0]+a[1];
+}
+static assert(test2()==4.0);
 
 struct TestMemberTuple1(A...){
 	A a; 

@@ -130,7 +130,7 @@ struct S{
 	int x = 2;
 	int y;
 	G f;
-	alias f.g foo; // TODO
+	alias f.g foo;
 	alias x bar;
 }
 

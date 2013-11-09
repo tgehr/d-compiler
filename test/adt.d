@@ -1,5 +1,4 @@
-/+ // TODO!
-
+/+ // TODO
 //mixin(adt(q{ ListI: NilI | Cons int ListI }));
 mixin(adt(q{ Pair(T,S): PP T S }));
 
@@ -9,17 +8,28 @@ void main(){
 	Pair!(int,int) p;
 	p=PP(1,2);
 }
-/+
+
 pragma(msg, adt(q{
  List(T):
  | Nil
  | Cons T List!T
 }));
-+/
-/+mixin(adt(q{
+
+mixin(adt(q{
  List(T):
  | Nil
  | Cons T List!T
+}));
+
+pragma(msg, adt(q{
+ DayOfWeek:
+ | Monday
+ | Tuesday
+ | Wednesday
+ | Thursday
+ | Friday
+ | Saturday
+ | Sunday
 }));
 
 mixin(adt(q{ Tree(T): Leaf | Node Tree!T T Tree!T }));
@@ -32,7 +42,7 @@ mixin(adt(q{
  | Friday
  | Saturday
  | Sunday
-}));+/
+}));
 
 auto list(R)(R r){
 	if(r.empty) return Nil!(ElementType!R);
@@ -123,8 +133,8 @@ string create(string s){
 		s.popFront();
 		sums~=s.sum();
 	}
-	if(sums.length>1) r~="\n\tprivate{\n\t\tsize_t tag;\n\t\tunion{";
-	else r~="\n\t";
+	if(sums.length>1) r~="\n\tprivate{\n\t\tsize_t tag;\n\t\tunion{ ";
+	else r~="\n\tprivate ";
 	r~="Seq!(";
 	//foreach(sum;sums){
 	for(size_t i=0;i<sums.length;i++){ auto sum=sums[i];
@@ -181,15 +191,13 @@ string create(string s){
 	for(size_t i=0;i<sums.length;i++) r~="alias "~sums[i].name~"case,";
 	if(hasparams) r~=params;
 	r~=")("~name~(hasparams?"!("~params~")":"")~" arg){\n";
-	r~="\tswitch(arg.tag){\n\t\t\tdefault: assert(0);\n";
+	if(sums.length!=1) r~="\tswitch(arg.tag){\n\t\tdefault: assert(0);\n";
 	//foreach(i,sum;sums){
 	for(size_t i=0;i<sums.length;i++){ auto sum=sums[i];
-		r~="\t\t\tcase "~to!string(i)~": auto v=*arg.data["~to!string(i)~"]; return "~sum.name~"case(";
-		//foreach(j,tt;sum.types) r~="v["~to!string(j)~"],";
-		for(size_t j=0;j<sum.types.length;j++) r~="v["~to!string(j)~"],";
-		r~=");\n";
+		r~=(sums.length==1?"\t":"\t\tcase "~to!string(i)~": ")~"auto v=*arg.data["~to!string(i)~"]; return "~sum.name~"case(v.expand);\n";
 	}
-	r~="\t}\n}\n";
+	if(sums.length!=1) r~="\t}\n";
+	r~="}\n";
 
 	return r;//~"\n\npragma(msg,`"~r~"`);";
 }
