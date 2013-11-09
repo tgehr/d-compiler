@@ -1,4 +1,52 @@
 
+struct NewExpBuiltInTypes{
+	static tt1()=>new int(331);
+	static assert(*tt1()==331);
+	static tt2()=>new float;
+	static assert(*tt2()!<>=*tt2()); // TODO
+
+	static newarraytest(){
+		auto r=new int[][][](3,4,5);
+		assert(r.length==3);
+		for(int i=0;i<3;i++){
+			assert(r[i].length==4);
+			for(int j=0;j<4;j++){
+				assert(r[i][j].length==5);
+				for(int k=0;k<5;k++){
+					assert(r[i][j][k]==0);
+					r[i][j][k]=i+j+k;
+				}
+			}
+		}
+		return to!string(r);
+	}
+	pragma(msg, "newarraytest: ",newarraytest());
+
+	static newarraytest2(){
+		struct Tuple{
+			int x=1,y=2,z=3;
+			string toString(){
+				return "("~to!string(x)~", "~to!string(y)~", "~to!string(z)~")";
+			}
+		}
+		auto r=new Tuple[][][](3,4,5);
+		for(int i=0;i<3;i++){
+			for(int j=0;j<4;j++){
+				for(int k=0;k<5;k++){
+					assert(r[i][j][k].x==1 &&
+					       r[i][j][k].y==2 && 
+					       r[i][j][k].z==3);
+					r[i][j][k].x=i;
+					r[i][j][k].y=j;
+					r[i][j][k].z=k;
+				}
+			}
+		}
+		return to!string(r);
+	}
+	pragma(msg, "newarraytest2: ",newarraytest2());
+}
+
 struct LVStackStruct{
 	struct Sum{
 		string name;
@@ -1930,13 +1978,23 @@ alias immutable(char)[] string;
 alias typeof({int[] r; return r;}().length) size_t;
 
 auto toString(int i){
+	string s="";
+	if(!i) return "0";
+	bool n = i<0;
+	if(n) i=-i;
+	do s=('0'+i%10)~s, i/=10; while(i);
+	if(n) s="-"~s;
+	return s;
+}
+/+auto toString(int i){
 	immutable(char)[] s;
 	do s=(i%10+'0')~s, i/=10; while(i);
 	return s;
-}
+}+/
+
 T[] iota(T)(T a, T b){ T[] r; for(T i=a;i<b;i++) r~=i; return r; }
 
-auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0]))[])){
+auto map(alias a,T)(T[] arg) if(is(typeof(a(arg[0])))){
 	typeof(a(arg[0]))[] r;
 	for(int i=0;i<arg.length;i++)
 		r~=a(arg[i]);
@@ -1956,18 +2014,29 @@ auto join(T,S)(T[] arg, S sep){
 	return r;
 }
 
-auto to(T,S)(S arg)if(is(S==int)&&is(T==string)){
-	string r="";
-	if(!arg) return "0";
-	bool n = arg<0;
-	if(n) arg=-arg;
-	while(arg) r=('0'+arg%10)~r, arg/=10;
-	if(n) r="-"~r;
+/+ // TODO: which locations are missing?
+template to(T){
+	auto to(S)(S arg){
+		return to!T(arg);
+	}
+}+/
+
+auto to(T,S)(S arg)if(is(typeof(arg.toString()):T)&&is(T==string)){
+	return arg.toString();
+}
+auto to(T,S)(S[] arg)if(is(typeof((size_t i)=>to!string(arg[i])))&&is(T==string)){
+	//return "["~map!(to!string)(arg).join(", ")~"]"; // TODO: this should work!
+	string r="[";
+	for(int i=0;i<arg.length;i++){
+		r~=to!string(arg[i]);
+		if(i+1<arg.length) r~=", ";
+	}
+	r~="]";
 	return r;
 }
+
 auto to(T,S)(S arg)if(is(S==string)&&is(T==string)){
 	return arg;
 }
-
 
 template Seq(T...){alias T Seq;}

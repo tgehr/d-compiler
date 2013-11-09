@@ -290,7 +290,7 @@ struct ConstantArrayLiteralAliasing{
 }
 
 int[] allocarr(){
-	auto x = new int[5]; // TODO!
+	auto x = new int[5];
 	return x;
 }
 pragma(msg, allocarr());

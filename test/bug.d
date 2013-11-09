@@ -1,3 +1,19 @@
+/+ // TODO!
+auto foo(){
+	auto bar(){
+		struct S{}
+		S s;
+		return s;
+	}
+	return bar();
+}
+
+auto bar(){
+	auto x=new typeof(foo())[](3);
+	return x;
+}
+pragma(msg, bar());
++/
 /+alias immutable(char)[] string;
 
 void main(){
