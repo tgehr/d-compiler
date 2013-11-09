@@ -123,14 +123,15 @@ auto testtemplatefunclit(fun...)(){
 		alias fun[0] tmpl;
 		static if(is(typeof(tmpl!(double,string)))) alias tmpl!(double,string) ff;
 		else alias tmpl ff;
-		pragma(msg, typeof(ff));
+		static if(is(typeof(ff))) pragma(msg, typeof(ff));
+		else pragma(msg, typeof(&ff));
 		return ff(0,4.5,"fun ")()~testtemplatefunclit!(fun[1..$])();
 	}
 }
 struct FunContainer{
 	static fun(int x,double y,string z)=>()=>z~"hi1";
 }
-pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)()); // // TODO!
+pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
 pragma(msg, "testtemplatefunclit 2: ",testtemplatefunclit!((int x,double y,string z)=>()=>z~"hi2")());
 immutable u = "123";
 pragma(msg, "testtemplatefunclit 3: ",testtemplatefunclit!((int x,y,z)=>()=>u~u~" hi3")());
@@ -350,7 +351,7 @@ class TemplatedLocalVariable{
 	}
 	static void fooz(){
 		TemplatedLocalVariable s;
-		TemplatedLocalVariable.foo!().z=2;
+		TemplatedLocalVariable.foo!().z=2; // TODO
 		s.foo!(33).z=2; // error
 		foo!().z=2;     // TODO (shouldn't show anything)
 		s.foo!().z=2;
