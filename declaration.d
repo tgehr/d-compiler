@@ -192,13 +192,13 @@ class TypedefDecl: Declaration{
 }
 class BlockDecl: Declaration{
 	Declaration[] decls;
-	this(STC s,Declaration[] declarations){decls=declarations; super(stc,null);}
+	this(STC stc,Declaration[] declarations){decls=declarations; super(stc,null);}
 	override string toString(){return STCtoString(astStc)~"{\n"~(stc?join(map!(to!string)(decls),"\n")~"\n}":indent(join(map!(to!string)(decls),"\n"))~"\n}");}
 
 	mixin Visitors;
 }
 class AttributeDecl: BlockDecl{
-	this(STC stc,Declaration[] declarations){decls=declarations; super(stc,null);}
+	this(STC stc,Declaration[] declarations){super(stc,declarations);}
 	override string toString(){return STCtoString(astStc)~":\n"~join(map!(to!string)(decls),"\n");}
 }
 
