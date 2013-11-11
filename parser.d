@@ -312,7 +312,7 @@ private struct Parser{
 		auto loc=e.loc;
 
 		displayExpectErr=true;
-		for(bool multerr=0;;){
+		for(/+bool multerr=0+/;;){
 			if(ttype==Tok!"."){
 				nextToken();
 				static if(!instNew){
@@ -333,26 +333,27 @@ private struct Parser{
 			}else static if(tmpl){
 				if(ttype==Tok!"!"){
 					e=led(e);
-					if(ttype==Tok!"!"&&!multerr){
+					/+if(ttype==Tok!"!"&&!multerr){ // EXTENSION
 						error("multiple '!' arguments are disallowed"), multerr=1;
-					}
+					}+/
 				}else break;
 			}else break;
 		}
 		return e;
+	}
+	bool skipTemplateArgs()in{ assert(ttype==Tok!"!"); }body{
+		nextToken();
+		if(ttype!=Tok!"(") return skip();
+		nextToken();
+		return skipToUnmatched() && skip(Tok!")");
 	}
 	bool skipIdentifierList(){ // only used for types, so no handling of instance.new
 		skip(Tok!".");
 		if(!skip(Tok!"i")) return false;
 		for(;;){
 			if(skip(Tok!".")){if(!skip(Tok!"i")) return false;}
-			else if(ttype==Tok!"!"){
-				nextToken();
-				if(ttype==Tok!"("){
-					nextToken();
-					if(!skipToUnmatched()||!skip(Tok!")")) return false;
-				}else skip();
-			}else return true;
+			else if(ttype==Tok!"!"){if(!skipTemplateArgs()) return false;}
+			else return true;
 		}
 	}
 	// allows only non-associative expressions
@@ -444,7 +445,7 @@ private struct Parser{
 				Token t=tok;
 				for(nextToken();;nextToken()){
 					if(ttype==t.type||ttype==Tok!"``"){}
-					else if(t.type==Tok!"``" && Tok!"``c"<=ttype && ttype<=Tok!"``d") t.type=ttype; // ENHANCEMENT
+					else if(t.type==Tok!"``" && Tok!"``c"<=ttype && ttype<=Tok!"``d") t.type=ttype; // EXTENSION
 					else break;
 					t.str~=tok.str; // TODO: make more efficient than simple append
 				}
@@ -881,12 +882,16 @@ private struct Parser{
 						if(ttype==Tok!"(") brk=true, nextToken();
 						auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
 						tt.loc=loc.to(ptok.loc);
-						if(ttype==Tok!".") tt=parseIdentifierList(tt); // ENHANCEMENT
 						break;
 				};
 				return r;
 			}());
 			case Tok!"typeof": tt=nud(); if(ttype==Tok!".") tt=parseIdentifierList(tt); break;
+			case Tok!"(": // EXTENSION
+				nextToken();
+				tt=parseTypeOrExpression();
+				expect(Tok!")");
+				break;
 			default:
 				error("found '"~tok.toString()~"' when expecting "~expectwhat);
 				nextToken();
@@ -929,6 +934,8 @@ private struct Parser{
 					tt=New!DelegateTy(New!FunctionTy(stc,tt,params,vararg));
 					tt.loc=loc.to(ptok.loc);
 					continue;
+				case Tok!"!": tt=led(tt); continue; // EXTENSION
+				case Tok!".": tt=parseIdentifierList(tt); // EXTENSION
 				default: break;
 			}
 			break;
@@ -948,7 +955,7 @@ private struct Parser{
 				foreach(x;typeQualifiers) r~=q{
 					case Tok!}`"`~x~`":`q{
 						nextToken(); bool brk=skip(Tok!"("); if(!skipType()||brk&&!skip(Tok!")")) return false;
-						if(ttype==Tok!"." && !skipIdentifierList()) goto Lfalse; break; // ENHANCEMENT
+						break;
 				};
 				return r;
 			}());
@@ -959,6 +966,10 @@ private struct Parser{
 					nextToken();
 					if(!skipIdentifierList()) goto Lfalse;
 				}
+				break;
+			case Tok!"(": // EXTENSION
+				skip();
+				if(!skipToUnmatched()||!skip(Tok!")")) goto Lfalse;
 				break;
 			default: goto Lfalse;
 		}
@@ -974,6 +985,8 @@ private struct Parser{
 					if(!skip(Tok!"(")||!skipToUnmatched()||!skip(Tok!")")) goto Lfalse;
 					skipSTC!functionSTC();
 					continue;
+				case Tok!"!": if(!skipTemplateArgs()) goto Lfalse; continue; // EXTENSION
+				case Tok!".": if(!skipIdentifierList()) goto Lfalse; break; // EXTENSION
 				default: return true;
 			}
 		}
@@ -1103,8 +1116,23 @@ private struct Parser{
 			nextToken();
 			bool isaliasthis=ttype==Tok!"this";
 			Identifier i;
-			if((ttype==Tok!"i"||isaliasthis)&&peek().type==Tok!"="){
-				i=parseIdentifier(); nextToken();
+			TemplateParameter[] tparams = null;
+			Expression tconstraint = null;
+
+			if(isaliasthis&&peek.type==Tok!"=" ||
+			   ttype==Tok!"i"&&peek().type.among(Tok!"=",Tok!"(")
+			){
+				if(isaliasthis){nextToken(); nextToken(); }
+				else{
+					i=parseIdentifier();
+					if(ttype==Tok!"("){
+						nextToken();
+						tparams=parseTemplateParameterList();
+						expect(Tok!")");
+						tconstraint=parseOptTemplateConstraint();
+						expect(Tok!"=");
+					}else nextToken();
+				}
 				type=parseTypeOrExpression();
 				expect(Tok!";");
 			}else{
@@ -1117,6 +1145,7 @@ private struct Parser{
 				expect(Tok!";");
 			}else if(i){
 				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,i,Expression.init));				
+				if(tparams) d=wrapInTemplate(d, tparams, tconstraint);
 			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
 			return d;
 		}
@@ -1289,17 +1318,20 @@ private struct Parser{
 			r=New!FunctionDecl(stc,New!FunctionTy(STC.init,ret,params,vararg),name,pre,post,pres);
 		}
 		r.loc = begin.to(tok.loc);
-		if(isTemplate){
-			// uncontrolled allocation ahead
-			auto tmplname = New!Identifier(r.name.name);
-			tmplname.loc = name.loc;
-			auto t=New!TemplateDecl(false, stc, tmplname,
-			                        tparam, constr, New!BlockDecl(stc,[cast(Declaration)r]));
-			t.loc = r.loc;
-			return t;
-		}
+		if(isTemplate) return wrapInTemplate(r, tparam, constr);
 		return r;
 	}
+	TemplateDecl wrapInTemplate(Declaration r, TemplateParameter[] tparams, Expression constr){
+		auto tmplname = New!Identifier(r.name.name);
+		tmplname.loc = r.name.loc;
+		auto b = New!BlockDecl(r.stc,[r]);
+		b.loc = r.loc;
+		auto t=New!TemplateDecl(false, r.stc, tmplname, tparams, constr, b);
+		t.loc = r.loc;
+		return t;
+	}
+
+
 	bool skipFunctionDeclaration(){ // does not skip Parameters, STC contracts or body. I think it does not have to.
 		return skip(Tok!"i") && skip(Tok!"(");// && skipToUnmatched() && skip(Tok!")");//skipSTC!functionSTC();
 	}
@@ -1386,12 +1418,23 @@ private struct Parser{
 		}
 		return New!ImportDecl(stc, sym);
 	}
-	EnumDecl parseEnumDecl(STC stc=STC.init){
+	Declaration parseEnumDecl(STC stc=STC.init){
 		expect(Tok!"enum");
 		Identifier tag;
+		if(ttype==Tok!"i") tag=New!Identifier(tok.name), tag.loc=tok.loc, nextToken();
+		if(ttype==Tok!"("){
+			nextToken();
+			auto tparams = parseTemplateParameterList();
+			expect(Tok!")");
+			auto tconstr = parseOptTemplateConstraint();
+			expect(Tok!"=");
+			auto init=parseExpression();
+			expect(Tok!";");
+			VarDecl vd=New!VarDecl(stc|STCenum, null, tag, init);
+			return wrapInTemplate(vd, tparams, tconstr);
+		}
 		Expression base;
 		auto members=appender!(EnumVarDecl[])();
-		if(ttype==Tok!"i") tag=New!Identifier(tok.name), tag.loc=tok.loc, nextToken();
 		if(ttype==Tok!":") nextToken(), base = parseType();
 		expect(Tok!"{");
 		for(;ttype!=Tok!"}" && ttype!=Tok!"EOF";){
@@ -1504,15 +1547,7 @@ private struct Parser{
 			type==Class     ? New!ClassDecl(stc,name,parents.data,bdy)    :
 			                  New!InterfaceDecl(stc,name,parents.data,bdy);
 		r.loc = sloc.to(tok.loc);
-		if(isTemplate){
-			// uncontrolled allocation ahead
-			auto tmplname = New!Identifier(r.name.name);
-			tmplname.loc = name.loc;
-			auto b = New!BlockDecl(stc,[r]);
-			b.loc = r.loc;
-			r=New!TemplateDecl(false, stc, tmplname,params, constraint, b);
-			r.loc = b.loc;
-		}
+		if(isTemplate) return wrapInTemplate(r, params, constraint);
 		return r;
 		//return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;
 	}
@@ -1561,7 +1596,7 @@ private struct Parser{
 			case Tok!"import": return res=parseImportDecl(stc);
 			case Tok!"enum":
 				auto x=peek(), y=peek(2);
-				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":") goto default;
+				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":" && y.type!=Tok!"(") goto default;
 				return res=parseEnumDecl(stc);
 			case Tok!"mixin":
 				nextToken(); if(ttype==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",ArgumentList,")",";"));}
@@ -1575,7 +1610,7 @@ private struct Parser{
 				nextToken();
 				if(ttype!=Tok!"("){stc|=STCalign;goto dispatch;}
 				nextToken();
-				if(ttype!=Tok!"0"&&ttype!=Tok!"0U"&&ttype!=Tok!"0L"&&ttype!=Tok!"0LU") expectErr!"positive integer"(); // ENHANCEMENT: U,L,LU
+				if(ttype!=Tok!"0"&&ttype!=Tok!"0U"&&ttype!=Tok!"0L"&&ttype!=Tok!"0LU") expectErr!"positive integer"(); // EXTENSION: U,L,LU
 				auto i=tok.int64;
 				mixin(rule!(AlignDecl,Existing,"stc",Existing,"i","_",")",DeclDef));
 			case Tok!"extern":
