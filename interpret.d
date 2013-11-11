@@ -4901,7 +4901,8 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		auto len = getBCSizeof(type);
 		if(auto aggrty=type.isAggregateTy()){
 			if(auto decl=aggrty.decl.isStructDecl()){
-				decl.byteCompileInit(bld, sc); // TODO: handle scope not being accessible
+				auto b = Declaration.isDeclAccessible(sc.getDeclaration(), decl).force;
+				decl.byteCompileInit(bld, b?sc:null); // TODO: handle scope not being accessible
 				return;
 			}
 		}
