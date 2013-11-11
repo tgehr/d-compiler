@@ -1,33 +1,25 @@
-/+ // TODO!
-auto foo(){
-	auto bar(){
-		struct S{}
-		S s;
-		return s;
+
+/+
+class C{
+	auto _InsertAllBut(int v) {
+		int* node = null;
+		//enum mutable = is(typeof({node.value;}));
+		enum foo = {return ()=>node;};
+		return 2;//foo()();
 	}
-	return bar();
 }
 
-auto bar(){
-	auto x=new typeof(foo())[](3);
-	return x;
-}
-pragma(msg, bar());
+pragma(msg, (()=>(new C())._InsertAllBut(2))());
 +/
+
+
 /+alias immutable(char)[] string;
 
 void main(){
 	string delegate(string, double) dg = (n, int x){return "";};
 	import std.stdio; writeln(dg("2",2));
 }+/
-/+
-int foo(){
-	int i;
-	while(auto x=i++<3){}
-	return i;
-}
-pragma(msg, foo());
-+/
+
 
 /+enum Foo{
 	xxx

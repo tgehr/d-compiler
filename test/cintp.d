@@ -1,4 +1,46 @@
 
+struct ConditionExpCTFE{ static:
+	int foo(){
+		int i;
+		while(auto x=i++<3){}
+		if(auto x=2){ return i+x;}
+		return i;
+	}
+	pragma(msg, foo());
+	static assert(foo()==6);
+
+	int f(int i){
+		return 10-i;
+	}
+	int[] bar(){
+		int[] r;
+		for(int i=0;auto x=f(i);i++) r~=x;
+		return r;
+	}
+	static assert(bar()==[10,9,8,7,6,5,4,3,2,1]);
+}
+
+struct NewExpMissingStructContext{
+	static foo(){
+		auto bar(){
+			int x;
+			struct S{
+				int bar(){ return x; }
+			}
+			S s;
+			return s;
+		}
+		return bar();
+	}
+
+	static bar(){
+		auto x=new typeof(foo())[](3);
+		//x[0].bar();
+		return x;
+	}
+	pragma(msg, bar());
+}
+
 struct NewExpBuiltInTypes{
 	static tt1()=>new int(331);
 	static assert(*tt1()==331);

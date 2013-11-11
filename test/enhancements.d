@@ -1,3 +1,16 @@
+// (code taken from dlang changelog)
+
+struct SlicingSyntax{
+	static call(const(char)* str) { }
+	static main(){
+		const(char)* abc = "abc";
+		call(abc);
+		
+		const(char)* ab = "abc"[0 .. 2];
+		call(ab);
+	}
+}
+
 /+struct A
 {
     struct Foo { }
