@@ -6352,7 +6352,8 @@ mixin template Semantic(T) if(is(T==ConditionDeclExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!decl) decl=New!VarDecl(stc,ty,name,init);
-		mixin(SemChld!q{decl});
+		if(!sym) sym=New!Symbol(decl);
+		mixin(SemChld!q{decl,sym});
 		type = decl.type;
 		mixin(SemEplg);
 	}
