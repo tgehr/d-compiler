@@ -28,16 +28,7 @@ void main(){
 immutable arr = [Foo.xxx]; // TODO+/
 
 
-/+struct S{
-	struct G{
-		int x;
-	}
-	G g;
-	alias g.x x;
-}+/
-
-/+
-auto foo(){
+/+auto foo(){
 	void[][] x = [["1","2","3"],cast(void[])[1,2,3]];
 	x[0]=x[1];
 	return x;
@@ -80,40 +71,6 @@ pragma(msg, foo());
 	}
 }+/
 
-/+struct UndefinedIdentifierError{
-	void foo(T)(T delegate(int) arg, T delegate(S) brg){} // TODO: better error message
-	pragma(msg, foo(a=>1,a=>1.0));
-}+/
-
-/+
-auto testtemplatefunclit(fun...)(){
-	static if(!fun.length) return "";
-	else{
-		alias fun[0] tmpl;
-		static if(is(typeof(tmpl!(double,string)))) alias tmpl!(double,string) ff;
-		else alias tmpl ff;
-		pragma(msg, typeof(ff));
-		return ff(0,4.5,"fun ")()~testtemplatefunclit!(fun[1..$])();
-	}
-}
-struct FunContainer{
-	static fun(int x,double y,string z)=>()=>z~"hi1";
-}
-pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)()); // TODO! (currently fails to show error message)
-+/
-
-/+
-struct Foo(_T) {
-	alias _T T;
-}
-void bar(FooT)(FooT foo, FooT.T x){ // TODO: silence
-	pragma(msg, typeof(x));
-}
-void main() {
-	Foo!int foo;
-	bar(foo, 1);
-}+/
-
 
 /+
 // TODO: make interpretation of partially analyzed functions work
@@ -137,12 +94,16 @@ pragma(msg,{
 	}());
 +/
 
-/+
-template asdf(){}
+
+/+template asdf(){ }
 template Uninstantiable() if(asdf(2)){}
 template Instantiable() if(Uninstantiable!()){}
-pragma(msg, typeof(Instantiable!())); // show error!
-+/
+pragma(msg, typeof(Instantiable!())); // show error!+/
+
+/+template asdf(){ enum asdf=(int x)=>true; }
+template Uninstantiable() if(asdf(2)){}
+template Instantiable() if(Uninstantiable!()){}
+pragma(msg, typeof(Instantiable!()));+/
 
 /+
 template Seq(T...){ alias T Seq; }
@@ -150,33 +111,29 @@ int aMatchError(R)(Seq!R delegate(int) dg){ return dg(2); }
 pragma(msg, aMatchError(a=>a)); // TODO: remove reference to matcher type in error message
 +/
 
-/+
-pragma(msg, ElementType!(int));
-template ElementType(T=S,S=T){ alias typeof({T t; return t[0];}()) ElementType; } // display error message
-+/
 
 /+improve error messages!+/
 
-/+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+/+pragma(msg, ElementType!(int));
+template ElementType(T=S,S=T){ alias typeof({T t; return t[0];}()) ElementType; }
++/
 
-auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
-auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
-	return (R delegate(B) k)=>me(r=>f(r)(k));
-}
-
-auto callCC(B,R,A,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
-	1=2;
-	return (R delegate(A) k)=>f(a=>_=>k(a), args)(k);
-}
-
-auto testcallCC(){
-	auto f(Cont!(int,int) delegate(int) cont, int x){
-		return cat(x<3?cont(x):ret!int(1),a=>cont(x+a));
+/+
+auto testtemplatefunclit(fun...)(){
+	static if(!fun.length) return "";
+	else{
+		alias fun[0] tmpl;
+		static if(is(typeof(tmpl!(double,string)))) alias tmpl!(double,string) ff;
+		else alias tmpl ff;
+		// pragma(msg, typeof(ff));
+		return ff(0,4.5,"fun ")()~testtemplatefunclit!(fun[1..$])();
 	}
-	assert(callCC(&f,1)(x=>x)==1);
-	assert(callCC(&f,3)(x=>x)==4);
-	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
-}+/
+}
+struct FunContainer{
+	static fun(int x,double y,string z)=>()=>z~"hi1";
+}
+pragma(msg, "testtemplatefunclit 1: ",testtemplatefunclit!(FunContainer.fun)());
++/
 
 // +/
 // +/

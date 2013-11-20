@@ -541,7 +541,7 @@ auto foo(alias a)(){
 T foo123(T)(T arg){
 	return arg>0?arg+foo!T(arg-1):0;
 }
-void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);} // error
+void fooz(){pragma(msg, typeof(foo123!int));foo123!int(2);}
 
 pragma(msg, foo123!double(42.23));
 

@@ -1,4 +1,53 @@
+// messages ok now
+
+struct UndefinedIdentifierError{
+	static void foo(T)(T delegate(int) arg, T delegate(Undefined) brg){} // error
+	pragma(msg, foo(a=>1,a=>1.0));
+}
+template Cont(R,A){ alias R delegate(R delegate(A)) Cont; }
+
+auto ret(R,A)(A arg){ return (R delegate(A) k)=>k(arg); }
+auto cat(R,A,B)(Cont!(R,A) me, Cont!(R,B) delegate(A) f){
+	return (R delegate(B) k)=>me(r=>f(r)(k));
+}
+
+auto callCC(B,R,A,T...)(Cont!(R,A) delegate(Cont!(R,B) delegate(A),T) f, T args){
+	1=2; // error
+	return (R delegate(A) k)=>f(a=>_=>k(a), args)(k);
+}
+
+auto testcallCC(){
+	auto f(Cont!(int,int) delegate(int) cont, int x){
+		return cat(x<3?cont(x):ret!int(1),a=>cont(x+a));
+	}
+	assert(callCC(&f,1)(x=>x)==1);
+	assert(callCC(&f,3)(x=>x)==4);
+	return callCC(&f,1)(x=>x)+callCC(&f,3)(x=>x);
+}
+
 // ok now
+
+struct GagIftiScope{
+	static:
+	struct Foo(_T) {
+		alias _T T;
+	}
+	void bar(FooT)(FooT foo, FooT.T x){
+		pragma(msg, typeof(x));
+	}
+	void main() {
+		Foo!int foo;
+		bar(foo, 1);
+	}
+}
+
+struct S{
+	struct G{
+		int x;
+	}
+	G g;
+	alias g.x x;
+}
 
 struct DRPF{
 	struct DynRange(T){

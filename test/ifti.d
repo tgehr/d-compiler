@@ -251,7 +251,7 @@ auto potentiallyambiguous(R)(R delegate(int) a, R delegate(int) b){
 	return true;
 }
 immutable string mxinx = "x";
-pragma(msg, potentiallyambiguous!()(x=>toString(x), x=>mixin(mxinx))); // error. TODO: show it!
+pragma(msg, potentiallyambiguous!()(x=>toString(x), x=>mixin(mxinx))); // error
 pragma(msg, "notambiguous: ",potentiallyambiguous!()(x=>1.0,x=>1.0L));
 
 auto qux(S,T...)(S s, T arg){
@@ -302,11 +302,11 @@ static assert(mixin(exec!()((int x,short y,byte z)=>toString(x)~"+"~toString(y)~
 //auto foo()(int a, int b){return a;}
 //pragma(msg, foo!()(1));
 
-auto inexistentparamtype(T...)(S arg){ }
-auto inexistentparamtype(T...)(S arg) if(T.length){
+auto inexistentparamtype(T...)(S arg){ } // error
+auto inexistentparamtype(T...)(S arg) if(T.length){ // error
 	return arg.length;
 }
-pragma(msg, inexistentparamtype!()(2)); // error
+pragma(msg, inexistentparamtype!()(2));
 
 bool all(alias a,T)(T[] r){
 	pragma(msg, typeof(a!int));
@@ -369,7 +369,7 @@ int test2(alias a)(){ return test(&a); }
 pragma(msg, test2!(x=>x)());+/
 
 T idint(T: int)(T arg){ return arg;}
-pragma(msg, "idint: ",idint!()(1.0)); // TODO: error
+pragma(msg, "idint: ",idint!()(1.0)); // error
 //T idfloat(T : float)(T arg){ return arg;}
 //pragma(msg, idfloat!()(1.0));
 

@@ -59,16 +59,16 @@ auto nosfinae2()(int x){return true;}
 auto nosfinae2(T=int)(int x){return 1+"";}
 
 pragma(msg, nosfinae2!()(2));// error
-pragma(msg, nosfinae2(2));// TODO: error message
+pragma(msg, nosfinae2(2));// error
 
-auto sfinae()(int x){return x;}
-auto sfinae()(int x = sfinae2()){return false;}
-static assert(sfinae(1));
+auto nosfinae4()(int x){return x;}
+auto nosfinae4()(int x = sfinae2()){return false;} // error
+pragma(msg, nosfinae4(1));
 
 pragma(msg, is(typeof(sfinae2(1))));
 
 T foo(T)(T x){return x;}
-T foo()(int x){return x;} // sfinae kicks in
+T foo()(int x){return x;} // error
 int foo(int x){return x+1;}
 auto foo(S...)(S args)if(!is(typeof(args[0])==idouble)){return args[0];}
 
