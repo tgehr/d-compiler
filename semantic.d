@@ -9488,7 +9488,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		aliasee.weakenAccessCheck(AccessCheck.none);
 		aliasee.willAlias();
 		mixin(SemChld!q{aliasee});
-		mixin(FinishDeductionProp!q{aliasee}); // TODO: necessary?
+		TemplateDecl.finishArgumentPreparation(sc, aliasee); // EXTENSION
 		if(!checkAlias(aliasee)){
 			sc.error("cannot alias an expression",loc);
 			mixin(ErrEplg);
