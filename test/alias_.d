@@ -1,3 +1,12 @@
+
+struct TemplateFunctionLiteralAlias{
+	alias id = (a)=>a;
+	alias plus = (a,b)=>a+b;
+	static assert(id(1)==1 && id(2.5)==2.5);
+	static assert(plus(1,2)==3 && plus(1,2.5)==3.5 &&
+	              plus(1.5,2)==3.5 && plus(1.25,2.25)==3.5);
+}
+
 struct AliasToSuperMember{
 	alias intp = int*;
 
