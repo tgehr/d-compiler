@@ -1,4 +1,18 @@
 
+struct OverloadAliasToMemberOfMember{
+	struct S{
+		int foo(){ return 0; }
+		struct T{
+			int foo(int){ return 1; }
+		}
+		T t;
+		alias t.foo foo; // TODO
+	}
+	S s;
+	pragma(msg, s.foo()," ",s.foo(1)); // TODO
+
+}
+
 struct TemplateFunctionLiteralAlias{
 	alias id = (a)=>a;
 	alias plus = (a,b)=>a+b;
