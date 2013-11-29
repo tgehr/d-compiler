@@ -74,8 +74,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				}
 				assert(!d.isOverloadableDecl());
 			}
-			error(format("redefinition of '%s'",decl.name), decl.name.loc);
-			note("previous definition was here",d.name.loc);
+			redefinitionError(decl, d);
 			mixin(SetErr!q{d});
 			return false;
 		}
@@ -89,6 +88,13 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		decl.scope_=this;
 		Identifier.tryAgain = true; // TODO: is this required?
 		return true;
+	}
+
+	void redefinitionError(Declaration decl, Declaration prev) in{
+		assert(decl.name.ptr is prev.name.ptr);
+	}body{
+		error(format("redefinition of '%s'",decl.name), decl.name.loc);
+		note("previous definition was here",prev.name.loc);		
 	}
 
 	// lookup interface

@@ -4188,7 +4188,7 @@ enum AccessCheck{
 }
 AccessCheck accessCheckCombine(AccessCheck a, AccessCheck b){ return max(a,b); }
 
-class Symbol: Expression{ // semantic node
+class Symbol: Expression{
 	Declaration meaning;
 	protected this(){} // subclass can construct parent lazily
 
@@ -5299,7 +5299,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 	}
 }
 
-class ImplicitCastExp: CastExp{ // semantic node
+class ImplicitCastExp: CastExp{
 	this(Expression tt, Expression exp){super(STC.init, tt, exp);}
 
 	protected override Dependent!bool checkConv(Scope sc){
@@ -10190,12 +10190,12 @@ mixin template Semantic(T) if(is(T==Declarators)){
 	}
 }
 
-abstract class OverloadableDecl: Declaration{ // semantic node
+abstract class OverloadableDecl: Declaration{
 	this(STC stc,Identifier name){super(stc,name);}
 	override OverloadableDecl isOverloadableDecl(){return this;}
 }
 
-class OverloadSet: Declaration{ // purely semantic node
+class OverloadSet: Declaration{
 	// A lookup that sealed this overloadset:
 	// TODO: less conservative strategy only forbidding inserting overloads
 	// that are superior matches to prior lookups / overrides?
@@ -10219,8 +10219,8 @@ class OverloadSet: Declaration{ // purely semantic node
 		if(!loc.line) loc=decl.loc;
 		if(auto td=decl.isTemplateDecl()) tdecls~=td;
 		else decls~=decl;
-		// TODO: check that all overloads are @property or non-property
-		// TODO: detect @property function templates
+		// TODO: check that all overloads are @property or non-property (?)
+		// TODO: detect @property function templates (?)
 		if(decl.stc&STCproperty) stc|=STCproperty;
 	}
 
@@ -10559,7 +10559,8 @@ class OverloadSet: Declaration{ // purely semantic node
 	}
 
 	override Declaration matchInstantiation(Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression owner, TemplArgsWithTypes args){
-		if(tdecls.length==0) return null; // TODO: error message
+		if(tdecls.length==0)
+			return decls[0].matchInstantiation(sc, loc, gagged, isMixin, owner, args);
 		if(tdecls.length==1) return tdecls[0].matchInstantiation(sc, loc, gagged, isMixin, owner, args);
 		return New!TemplateOverloadMatcher(this, sc, loc, gagged, isMixin, owner, args);
 	}
@@ -10584,6 +10585,8 @@ class OverloadSet: Declaration{ // purely semantic node
 	}
 
 	override Declaration matchIFTI(Scope sc, const ref Location loc, Type this_, Expression func, TemplArgsWithTypes args, Expression[] funargs){
+		if(tdecls.length==0)
+			return decls[0].matchIFTI(sc, loc, this_, func, args, funargs);
 		if(tdecls.length==1) return tdecls[0].matchIFTI(sc, loc, this_, func, args, funargs);
 		return New!FunctionOverloadMatcher(this, sc, loc, this_, func, args, funargs);
 	}
@@ -10654,7 +10657,7 @@ class CrossScopeOverloadSet : Declaration{
 			this.decls=decls;
 			super(STC.init, decls[0].name);
 		}
-		void semantic(Scope sc){
+		override void semantic(Scope sc){
 			mixin(SemPrlg);
 			mixin(op);
 			if(sstate == SemState.pre){scope_=sc; sstate = SemState.begin; }

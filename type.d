@@ -260,7 +260,7 @@ class PointerTy: Type{
 	mixin Visitors;
 }
 
-class DynArrTy: Type{ //purely semantic node
+class DynArrTy: Type{
 	Expression e;
 	this(Expression next)in{assert(next&&1);}body{e=next;}
 	override string toString(){return _brk(e.toString()~"[]");}
@@ -269,14 +269,14 @@ class DynArrTy: Type{ //purely semantic node
 	mixin Visitors;
 }
 
-// class SliceTy: DynArrTy{ //purely semantic node
+// class SliceTy: DynArrTy{
 // 	this(Expression next)in{assert(next&&1);}body{super(next);}
 // 	override SliceTy isSliceTy(){return this;}
 
 // 	mixin Visitors;
 // }
 
-class ArrayTy: Type{ //purely semantic node
+class ArrayTy: Type{
 	Expression e;
 	ulong length;
 	this(Expression next, long len)in{assert(next&&1);}body{e=next; length=len;}
