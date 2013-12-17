@@ -1,18 +1,28 @@
 
+struct AliasToNonOverloadable{
+	static:
+	int x;
+	int foo(){ return 2; }
+	alias foo = x; // error
+	alias foo = 2; // error
+	alias foo=foo; // TODO
+	static assert(foo()==2);
+}
+
 struct OverloadAliasToMemberOfMember{
 	struct S{
 		int foo(){ return 0; }
+		//int foo(){ return 0; }
 		struct T{
 			int foo(int){ return 1; }
 		}
 		T t;
 		alias t.foo foo; // TODO
 	}
-	S s;
-	pragma(msg, s.foo()," ",s.foo(1)); // TODO
-
+	enum s=S();
+	pragma(msg, "foo: ",s.foo()," ",s.foo(1)); // TODO
 }
-
+/+
 struct TemplateFunctionLiteralAlias{
 	alias id = (a)=>a;
 	alias plus = (a,b)=>a+b;
