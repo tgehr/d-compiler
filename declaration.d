@@ -176,7 +176,7 @@ class MixinDecl: GenerativeDecl{
 	mixin DownCastMethod;
 	mixin Visitors;
 }
-class AliasDecl: Declaration{
+final class AliasDecl: Declaration{
 	Declaration decl;
 	this(STC stc, Declaration declaration){decl=declaration; super(stc, declaration.name);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"alias "~decl.toString();}

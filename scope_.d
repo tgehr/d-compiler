@@ -71,6 +71,15 @@ abstract class Scope: IncompleteScope{ // SCOPE
 					}
 					os.add(fd);
 					return true;
+				}else if(auto ad=decl.isAliasDecl()){
+					auto add=ad.getAliasedDecl();
+					if(!add||add.isOverloadableDecl()){
+						fd.scope_ = this;
+						auto os=New!OverloadSet(fd);
+						os.addAlias(ad);
+						decl=os;
+						goto Lok;
+					}
 				}
 				assert(!d.isOverloadableDecl());
 			}
@@ -83,7 +92,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			decl.scope_ = this;
 			decl = New!OverloadSet(ov);
 		}
-
+	Lok:
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
 		Identifier.tryAgain = true; // TODO: is this required?

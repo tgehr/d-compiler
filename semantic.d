@@ -4319,7 +4319,7 @@ class Symbol: Expression{
 			mixin(CircErrMsg);
 			mixin(SemCheck);
 			mixin(SemProp!q{sc=meaning.scope_;meaning});
-			if(auto decl = al.aliasedDecl()) meaning = decl;
+			if(auto decl = al.simpleAliasedDecl()) meaning = decl;
 			else{
 				// assert(!!al.aliasee.isType());
 				sstate = SemState.begin;
@@ -9493,6 +9493,14 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 			sc.error("cannot alias an expression",loc);
 			mixin(ErrEplg);
 		}
+		if(set){
+			assert(set.scope_ is scope_);
+			auto add=getAliasedDecl();
+			if(!add||!add.isOverloadableDecl()&&!add.isOverloadSet()){
+				scope_.redefinitionError(this, set);
+				mixin(ErrEplg);
+			}
+		}
 		mixin(SemEplg);
 	}
 
@@ -9531,13 +9539,26 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		return checkAlias!true(aliasee);
 	}
 
-	Declaration aliasedDecl()in{
+	Declaration simpleAliasedDecl()in{
 		assert(sstate == SemState.completed);
 	}body{
 		if(auto sym = aliasee.isSymbol()){
 			assert(!!sym.meaning);
 			return sym.meaning;
 		}
+		return null;
+	}
+
+	Declaration getAliasedDecl(){
+		if(auto sym = aliasee.isSymbol()){
+			assert(!!sym.meaning);
+			return sym.meaning;
+		}
+		if(auto fd = aliasee.isFieldExp()){
+			assert(!!fd.e2.meaning);
+			return fd.e2.meaning;
+		}
+		assert(sstate != SemState.completed);
 		return null;
 	}
 
@@ -9555,8 +9576,11 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		return r;
 	}
 
+	void setOverloadSet(OverloadSet set)in{assert(this.set is null);}body{ this.set=set; }
+
 private:
 	Expression aliasee;
+	OverloadSet set;
 }
 
 
@@ -10215,6 +10239,7 @@ class OverloadSet: Declaration{
 		assert(!sealingLookup);
 		assert(!decls.length||decls[0].name.name is decl.name.name);
 		assert(!tdecls.length||tdecls[0].name.name is decl.name.name);
+		assert(!adecls.length||adecls[0].name.name is decl.name.name);
 	}body{
 		if(!loc.line) loc=decl.loc;
 		if(auto td=decl.isTemplateDecl()) tdecls~=td;
@@ -10222,6 +10247,16 @@ class OverloadSet: Declaration{
 		// TODO: check that all overloads are @property or non-property (?)
 		// TODO: detect @property function templates (?)
 		if(decl.stc&STCproperty) stc|=STCproperty;
+	}
+
+	void addAlias(AliasDecl decl)in{
+		assert(!sealingLookup);
+		assert(!decls.length||decls[0].name.name is decl.name.name);
+		assert(!tdecls.length||tdecls[0].name.name is decl.name.name);
+		assert(!adecls.length||adecls[0].name.name is decl.name.name);
+	}body{
+		decl.setOverloadSet(this);
+		adecls~=decl;
 	}
 
 	bool hasFunctions(){
@@ -10363,9 +10398,9 @@ class OverloadSet: Declaration{
 
 	override Dependent!Declaration matchCall(Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args, ref MatchContext context){
 
-		if(!tdecls.length){
-			if(decls.length == 1) return decls[0].matchCall(sc, loc, this_, func, args, context);
-		}else return New!FunctionOverloadMatcher(this, sc, loc, this_, func, args).independent!Declaration;
+		if(tdecls.length||adecls.length)
+			return New!FunctionOverloadMatcher(this, sc, loc, this_, func, args).independent!Declaration;
+		if(decls.length == 1) return decls[0].matchCall(sc, loc, this_, func, args, context);
 
 		auto matches = new Matched[decls.length]; // pointless GC allocation
 		foreach(i,decl; decls){
@@ -10541,13 +10576,25 @@ class OverloadSet: Declaration{
 	private FunctionDecl cand; // TODO: somewhat fragile, maybe better to just recompute
 	private FunctionDecl altCand;
 	final override void matchError(Scope sc, Location loc, Type this_, Expression[] args){
-		if(count == 1) return (decls.length?decls[0]:tdecls[0]).matchError(sc,loc,this_,args);
+		if(count == 1){
+			if(!adecls.length)
+				return (decls.length?decls[0]:tdecls[0]).matchError(sc,loc,this_,args);
+		}
 		if(altCand is null){
 			sc.error(format("no matching function for call to '%s(%s)'",name,join(map!"a.type.toString()"(args),",")), loc);
 			foreach(decl; decls){
 				if(auto fdef = decl.isFunctionDecl())
 					if(fdef.type.sstate == SemState.error) continue;
 				sc.note(format("candidate %s not viable", decl.kind), decl.loc); // TODO: say why
+			}
+			foreach(decl; adecls){
+				auto add = decl.getAliasedDecl();
+				if(add){
+					if(auto fdef = add.isFunctionDecl())
+						if(fdef.type.sstate == SemState.error) continue;
+				}else continue;
+				sc.note("candidate alias not viable", decl.loc);
+				sc.note(format("this is the aliased %s", add.kind), add.loc);
 			}
 		}else{
 			assert(cand !is altCand);
@@ -10596,11 +10643,12 @@ class OverloadSet: Declaration{
 		return "overload set";
 	}
 
-	public final @property size_t count(){ return decls.length + tdecls.length; }
+	public final @property size_t count(){ return decls.length + tdecls.length + adecls.length; }
 
 // private: // TODO: introduce again
 	OverloadableDecl[] decls;
 	TemplateDecl[] tdecls;
+	AliasDecl[] adecls;
 }
 
 
@@ -10830,7 +10878,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	size_t[] positions;
 
 	this(OverloadSet set, Scope sc, const ref Location loc, Type this_, Expression func, Expression[] args)in{
-		assert(set.decls.length>1||set.tdecls.length>0);
+		assert(set.count>0);
 	}body{
 		this.this_=this_;
 		this.args=args;
@@ -10886,6 +10934,12 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			assert(!!rewriteIfOk);
 			auto r=rewriteIfOk;
 			mixin(RewEplg!q{r});
+		}
+
+		foreach(ad; set.adecls){
+			if(ad.sstate == SemState.error) continue;
+			ad.semantic(set.scope_);
+			mixin(PropRetry!q{ad});
 		}
 
 		assert(iftis.length == set.tdecls.length);
