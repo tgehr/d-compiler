@@ -9265,18 +9265,22 @@ mixin template Semantic(T) if(is(T==EnumVarDecl)){
 				init=New!(BinaryExp!(Tok!"+"))(previnit,one);
 				init.loc=previnit.loc=one.loc=loc;				
 			}
-		}else if(enc.name&&prec||enc.rbase){
-			mixin(GetEnumBase!q{auto base;enc});
-			type=base;
 		}
 		needRetry=false;
 		if(!rinit) super.semantic(sc);
 		mixin(SemCheck);
-		if(!prec) enc.base=type;
+		if(!prec&&!enc.base) enc.base=type;
 		if(!rinit) rinit=init;
 		if(enc.name){
 			auto ty=enc.getType();
 			assert(!!ty);
+			mixin(GetEnumBase!q{auto base;enc});
+			assert(init.type is type && base);
+			mixin(ImplConvertsTo!q{auto b; type, base});
+			if(!b){
+				sc.error(format("incompatible initializer '%s' of type '%s' for enum member of base type '%s'",init, init.type, base), loc);
+				mixin(ErrEplg);
+			}
 			mixin(ConvertTo!q{init,ty});
 		}
 		mixin(SemEplg);
@@ -9340,7 +9344,6 @@ mixin template Semantic(T) if(is(T==EnumDecl)){
 		if(rbase&&(!base||base.sstate!=SemState.completed)){
 			base=rbase.typeSemantic(sc);
 			mixin(SemProp!q{rbase});
-			if(!members[0].rtype) members[0].rtype=base;
 		}
 		mixin(SemChld!q{sc=msc?msc:sc;members[0]});
 		assert(members[0].init.isConstant());
