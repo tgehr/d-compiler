@@ -1,4 +1,20 @@
 
+struct ManOrBoy{
+	static int a(int k, lazy int x1, lazy int x2, lazy int x3, lazy int x4, lazy int x5){
+		int r;
+		int b(){
+			k--;
+			return r=a(k, b(), x1, x2, x3, x4);
+		}
+		if(k<=0) r=x4+x5;
+		else b();
+		return r;
+	}
+	static string kind() => a(10,1,-1,-1,1,0)==-67?"man":"boy";
+	static assert(kind()=="man");
+	pragma(msg, "This compile-time function evaluator is a "~kind()~".");
+}
+
 struct ConditionExpCTFE{ static:
 	int foo(){
 		int i;
