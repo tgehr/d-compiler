@@ -4929,7 +4929,7 @@ mixin template Semantic(T) if(is(T==CallExp)){
 			}
 		}
 
-		mixin(SemChld!q{adapted});
+		foreach(ref x;adapted) if(x) mixin(SemChld!q{x});
 
 		type = tt.ret;
 
@@ -4943,7 +4943,6 @@ mixin template Semantic(T) if(is(T==CallExp)){
 			auto pty = x.type;
 			args[i]=args[i].implicitlyConvertTo(pty);
 		}
-
 		mixin(SemChld!q{args});
 		mixin(ConstFold!q{e});
 		foreach(ref x; args) mixin(ConstFold!q{x});
