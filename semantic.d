@@ -1767,7 +1767,7 @@ class TemplateInstanceDecl: Declaration{
 	TypeTemplArgs argTypes; // types of the template arguments
 	TemplArgs resolved;     // arguments as given to the template body
 
-	Match match = Match.exact; // match level
+	Match match = Match.exact; // match level. TODO: this is not a property of the returned instantiation...
 
 	Expression constraint;
 	BlockDecl bdy;
@@ -2156,6 +2156,13 @@ class TemplateInstanceDecl: Declaration{
 		assert(parent.sstate == SemState.completed);
 		assert(!!paramScope);
 	}body{
+		auto r = parent.getUniqueInstantiation(this);		
+		if(r !is this){
+			if(startAnalysis) r.startAnalysis();
+			mixin(RewEplg!q{r});
+		}
+		match=Match.none; // clean up
+
 		auto bdyscope=New!NestedScope(paramScope);
 		bdy = bdy.ddup();
 
@@ -2267,10 +2274,6 @@ class TemplateInstanceDecl: Declaration{
 				}
 
 				matchState = checkConstraint;
-				
-				auto r = parent.completeMatching(this, isGagged);
-				if(r !is this) mixin(RewEplg!q{r});
-
 				goto case checkConstraint;
 			case checkConstraint:
 				if(constraint){
@@ -2979,7 +2982,7 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		return inst;
 	}
 
-	TemplateInstanceDecl completeMatching(TemplateInstanceDecl inst, bool gagged){
+	TemplateInstanceDecl getUniqueInstantiation(TemplateInstanceDecl inst){
 		if(!inst.isMixin){
 			if(auto exst = store.lookup(inst.resolved)) inst = exst;
 			else store.add(inst);
@@ -3261,7 +3264,10 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		needRetry=false;
 
 		// ! changing meaning of 'sym'
-		if(!inst.finishedInstantiation()) inst.finishInstantiation(!matchOnly); // start analysis?
+		if(!inst.finishedInstantiation()){
+			inst.finishInstantiation(!matchOnly); // start analysis?
+			mixin(Rewrite!q{inst});
+		}
 		if(sc.handler.showsEffect&&inst.isGagged) inst.ungag();
 		sym = New!Symbol(inst);
 		sym.loc = loc;
@@ -6555,7 +6561,7 @@ mixin template Semantic(T) if(is(T==Type)){
 
 	final Dependent!bool constConvertsTo(Type rhs){
 		return !this.getUnqual().equals(rhs.getUnqual()) ?false.independent:
-			this.refConvertsTo(rhs,0);
+			implicitlyConvertsTo(rhs);
 	}
 
 
@@ -10284,9 +10290,18 @@ class OverloadSet: Declaration{
 		return false;
 	}
 
-	private static struct Matched{ // local structs cannot be qualified yet
-		MatchContext context;      // TODO: move into matchCall
+	private static struct Matched{
+		MatchContext context; // context for matching of function call
 		FunctionDecl decl;
+
+		Match tmatch; // match level of template instantiation
+		Declaration tdecl;
+
+		/+ //just for documentation for now
+		bool isMatch(){ return context.match!=Match.none && (decl || tdecl); }
+		bool isFunctionMatch(){ return decl && !tdecl; }
+		bool isTemplateMatch(){ return tdecl && !decl; }
+		bool isIftiMatch(){ return decl && tdecl; }+/
 	}
 
 	private mixin CreateBinderForDependent!("CanOverride");
@@ -10509,71 +10524,41 @@ class OverloadSet: Declaration{
 	}
 
 	static Dependent!void eliminateLessSpecializedTemplateMatches(Matched[] tmatches){
-		foreach(ref m; tmatches) if(m.decl is null) m.context.match = Match.none;
-		auto best = reduce!max(Match.none, map!(_=>_.context.match)(tmatches));
-
+		auto best = reduce!max(Match.none, map!(a=>a.tmatch)(tmatches));
 		if(best == Match.none) return indepvoid;
 
 		TemplateDecl cand = null;
 		size_t cpos;
-		foreach(i,c; tmatches){
-			if(c.context.match!=best) continue;
-			cand = c.decl.extractTemplateInstance().parent;
+		foreach(i,ref c; tmatches){
+			if(c.tmatch!=best){
+				c.tdecl = c.decl = null;
+				continue;
+			}
+			assert(cast(TemplateInstanceDecl)c.tdecl);
+			cand = c.tdecl.isTemplateInstanceDecl().parent;
 			cpos = i;
 			break;
 		}
 		if(!cand) return indepvoid;
-		foreach(i,c; tmatches[cpos+1..$]){
-			if(c.context.match!=best) continue;
-			auto altCand = c.decl.extractTemplateInstance().parent;
-			//if(altCand.atLeastAsSpecialized(cand)) { cand = altCand; }
+		foreach(ref c; tmatches[cpos+1..$]){
+			if(c.tmatch!=best){
+				c.tdecl = c.decl = null;
+				continue;
+			}
+			assert(cast(TemplateInstanceDecl)c.tdecl);
+			auto altCand = c.tdecl.isTemplateInstanceDecl().parent;
 			mixin(AtLeastAsSpecialized!q{bool alas; altCand, cand});
 			if(alas) { cand = altCand; }
 		}
 		foreach(ref c; tmatches){
-			if(c.context.match!=best) continue;
-			auto altCand = c.decl.extractTemplateInstance().parent;
-			// if(!altCand.atLeastAsSpecialized(cand)) { c.decl = null; }
+			if(!c.tdecl) continue;
+			assert(cast(TemplateInstanceDecl)c.tdecl);
+			auto altCand = c.tdecl.isTemplateInstanceDecl().parent;
 			mixin(AtLeastAsSpecialized!q{bool alas; altCand, cand});
-			if(!alas) { c.decl = null; }
+			if(!alas) { c.tdecl = c.decl = null; }
 		}
 		return indepvoid;
 	}
-
-	static Dependent!void eliminateLessSpecializedTemplateInstances(TemplateInstanceDecl[] insts){
-		auto best = reduce!max(Match.none, map!(_=>_?_.match:Match.none)(insts));
-
-		if(best == Match.none) return indepvoid;
-
-		TemplateDecl cand = null;
-		size_t cpos;
-		foreach(i,ref c; insts){
-			if(!c) continue;
-			if(c.match!=best) { c=null; continue; }
-			cand = c.parent;
-			cpos = i;
-			break;
-		}
-		if(!cand) return indepvoid;
-		foreach(i,c; insts[cpos+1..$]){
-			if(!c) continue;
-			if(c.match!=best) { c=null; continue; }
-			auto altCand = c.parent;
-			// if(altCand.atLeastAsSpecialized(cand)) { cand = altCand; }
-			mixin(AtLeastAsSpecialized!q{bool alas; altCand, cand});
-			if(alas) { cand = altCand; }
-		}
-		foreach(ref c; insts){
-			if(!c) continue;
-			if(c.match!=best) { c=null; continue; }
-			auto altCand = c.parent;
-			// if(!altCand.atLeastAsSpecialized(cand)) { c = null; }
-			mixin(AtLeastAsSpecialized!q{bool alas; altCand, cand});
-			if(!alas) { c = null; }
-		}
-		return indepvoid;
-	}
-
 
 	private FunctionDecl cand; // TODO: somewhat fragile, maybe better to just recompute
 	private FunctionDecl altCand;
@@ -10819,31 +10804,35 @@ abstract class SymbolMatcher: Declaration{
 }
 
 class TemplateOverloadMatcher: SymbolMatcher{
-	Declaration[] insts;
+	OverloadSet.Matched[] insts;
 	TemplArgsWithTypes args;
 	this(OverloadSet set, Scope sc, const ref Location loc, bool gagged, bool isMixin, Expression func, TemplArgsWithTypes args){
 		this.args=args;
 		super(set, loc, func);
 		// TODO: gc allocation
-		insts = new Declaration[](set.tdecls.length);
-		foreach(i, ref x; insts) x=set.tdecls[i].matchInstantiation(sc, loc, false, isMixin, func, args);
+		insts = new OverloadSet.Matched[](set.tdecls.length);
+		foreach(i, ref x; insts)
+			x.tdecl=set.tdecls[i].matchInstantiation(sc, loc, false, isMixin, func, args);
 		enum SemRet = q{return;}; // TODO: remove
 		mixin(RetryEplg);
 	}
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		foreach(ref x; insts){
-			if(!x) continue;
-			mixin(SemChldPar!q{x});
-			auto inst=x.isTemplateInstanceDecl();
+			if(!x.tdecl) continue;
+			mixin(SemChldPar!q{x.tdecl});
+			auto inst=x.tdecl.isTemplateInstanceDecl();
 			assert(!!inst);
-			if(inst.hasFailedToMatch()) x = null;
-			assert(!x||x.sstate==SemState.error||inst.completedMatching);
+			if(inst.hasFailedToMatch()){
+				x.tmatch = Match.none;
+				x.tdecl = null;
+			}else x.tmatch=inst.match;
+			assert(!x.tdecl||x.tdecl.sstate==SemState.error||inst.completedMatching);
 		}
-		OverloadSet.eliminateLessSpecializedTemplateInstances(cast(TemplateInstanceDecl[])insts);
+		OverloadSet.eliminateLessSpecializedTemplateMatches(insts);
 		size_t c = 0;
-		foreach(x; insts) if(x){ mixin(PropErr!q{x}); c++; } // TODO: show instantiation site!
-		if(c==1) foreach(r; insts) if(r) mixin(RewEplg!q{r});
+		foreach(x; insts) if(x.tdecl){ mixin(PropErr!q{x.tdecl}); c++; }
+		if(c==1) foreach(r; insts) if(r.tdecl) mixin(RewEplg!q{r.tdecl});
 		failMatching();
 	}
 
@@ -10959,7 +10948,10 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			auto inst = cast(TemplateInstanceDecl)cast(void*)x;
 			assert(!!inst.completedMatching);
 			if(inst.hasFailedToMatch()){ x=null; continue; }
-			if(!inst.finishedInstantiation()) inst.finishInstantiation(false);
+			if(!inst.finishedInstantiation()){
+				inst.finishInstantiation(false);
+				mixin(Rewrite!q{inst});
+			}
 
 			auto fd = inst.iftiDecl();
 			if(!fd){
@@ -11111,6 +11103,7 @@ private:
 			       text(fd.type.sstate));
 
 			tmatches[i].decl = fd;
+			tmatches[i].tdecl = fd.extractTemplateInstance();
 			tmatches[i].context = tcontext;
 		}
 		OverloadSet.eliminateLessSpecializedTemplateMatches(tmatches);

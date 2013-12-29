@@ -36,7 +36,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			alias TemplArgInfo S;
 			auto len = roundToPwrTwo(rng.length);
 			auto arr = new S[2*len];
-			foreach(i,x;rng) arr[len+i]=S(x);;
+			foreach(i,x;rng) arr[len+i]=S(x);
 			foreach_reverse(i;1..len) arr[i]=arr[2*i].combine(arr[2*i+1]);
 			return SegTree(arr);
 		}
@@ -95,7 +95,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			}
 			return rope;
 		}
-		auto generalize(Q)()@trusted if(is(Q==class)&&is(T==class)&&is(T:Q)){
+		auto generalize(Q)()if(is(Q==class)&&is(T==class)&&is(T:Q)){
 			return cast(Rope!(Q,S))this;
 		}
 		@property size_t length(){ return isArray() ? array.length : rope.length; }
@@ -127,7 +127,6 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			return (*rope)[i];
 		}
 		Rope opIndexAssign(T t,size_t i){
-			if(isArray()) array[i]=t;
 			return this=this[0..i]~Rope([t])~this[i+1..length];
 		}
 		Rope opSliceAssign(Rope r, size_t a, size_t b){
