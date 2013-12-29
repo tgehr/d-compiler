@@ -2158,10 +2158,11 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		auto r = parent.getUniqueInstantiation(this);		
 		if(r !is this){
-			if(startAnalysis) r.startAnalysis();
+			if(!r.finishedInstantiation) r.finishInstantiation(startAnalysis);
+			else if(startAnalysis) r.startAnalysis();
 			mixin(RewEplg!q{r});
 		}
-		match=Match.none; // clean up
+		match=Match.exact; // everything within resolved has been converted accordingly
 
 		auto bdyscope=New!NestedScope(paramScope);
 		bdy = bdy.ddup();
@@ -2276,14 +2277,21 @@ class TemplateInstanceDecl: Declaration{
 				matchState = checkConstraint;
 				goto case checkConstraint;
 			case checkConstraint:
-				if(constraint){
-					analyzeConstraint();
-					mixin(SemCheck);
-					if(!constraint.interpretV()){
-						mixin(fail);
+				auto uniq=parent.getUniqueInstantiation(this);
+				if(uniq is this){
+					if(constraint){
+						analyzeConstraint();
+						mixin(SemCheck);
+						if(!constraint.interpretV()){
+							mixin(fail);
+						}
 					}
+				}else{
+					if(!uniq.completedMatching) mixin(SemChld!q{uniq});
+					assert(uniq.completedMatching);
+					if(uniq.matchState == failed){ matchState=failed; goto case failed; }
 				}
-
+				
 				matchState = completed;
 				goto case completed;
 			case checkingConstraint:
@@ -2966,9 +2974,12 @@ mixin template Semantic(T) if(is(T==TemplateDecl)){
 		assert(!!scope_);
 		assert(sstate == SemState.completed);
 
+		// shortcut, could also be left out
 		static if(!isIFTI) if(!isMixin) if(auto r=store.lookup(args.args)){
-			if(!gagged&&r.isGagged()) r.ungag();
-			return r;
+			if(r.finishedInstantiation()){
+				if(!gagged&&r.isGagged()) r.ungag();
+				return r;
+			}
 		}
 
 		auto inst = New!TemplateInstanceDecl(this,loc,ts[isIFTI..$]);
@@ -10861,6 +10872,9 @@ class FunctionOverloadMatcher: SymbolMatcher{
 	Type this_;
 
 	UnaryExp!(Tok!"&")[][] literals;
+
+	OverloadSet.Matched[] matches;
+	OverloadSet.Matched[] tmatches;
 	Declaration[] iftis;
 	// match the eponymous declaration
 	// if it was not determined by IFTI.
@@ -10875,8 +10889,13 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		this.args=args;
 		super(set, loc, func);
 		// TODO: GC allocations
+		matches = new OverloadSet.Matched[](set.decls.length);
+		tmatches = new OverloadSet.Matched[](set.tdecls.length);
 		iftis = new Declaration[](set.tdecls.length);
-		foreach(i, ref x; iftis) x=set.tdecls[i].matchIFTI(sc, loc, this_, func, templArgs, args);
+		foreach(i, ref x; iftis){
+			tmatches[i].tmatch=Match.none;
+			x=set.tdecls[i].matchIFTI(sc, loc, this_, func, templArgs, args);
+		}
 
 		size_t numfunclit;
 		foreach(a;args)
@@ -10949,8 +10968,10 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			assert(!!inst.completedMatching);
 			if(inst.hasFailedToMatch()){ x=null; continue; }
 			if(!inst.finishedInstantiation()){
+				tmatches[i].tmatch=inst.match;
 				inst.finishInstantiation(false);
 				mixin(Rewrite!q{inst});
+				x=inst;
 			}
 
 			auto fd = inst.iftiDecl();
@@ -11002,22 +11023,18 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			}
 		}
 
-		OverloadSet.Matched[] matches, tmatches;
 		if(!matchATemplate){
-			mixin(DetermineFunctionMatches!q{matches; this, sc});
+			mixin(DetermineFunctionMatches!q{_;this, sc});
 			foreach(l1;literals[0..$-1]) foreach(ref l2;l1){mixin(SemChldPar!q{l2});}
 		}
 
 		MatchContext tcontext;
-		//tmatches=determineTemplateMatches();
-		mixin(DetermineTemplateMatches!q{tmatches; this});
+		mixin(DetermineTemplateMatches!q{_;this});
 
 		// TODO: error handling
 		FunctionDecl r=null;
-		//auto t=set.determineMostSpecialized(tmatches, tcontext);
 		mixin(DetermineMostSpecialized!q{auto t; set, tmatches, this_, tcontext});
 		auto cand = set.cand, altCand = set.altCand;
-		//auto r=set.determineMostSpecialized(matches, context);
 		mixin(DetermineMostSpecialized!q{auto f; set, matches, this_, context});
 
 		TemplateInstanceDecl inst;
@@ -11053,9 +11070,8 @@ class FunctionOverloadMatcher: SymbolMatcher{
 private:
 	mixin CreateBinderForDependent!("DetermineFunctionMatches");
 	mixin CreateBinderForDependent!("DetermineTemplateMatches");
-	Dependent!(OverloadSet.Matched[]) determineFunctionMatches(Scope sc){
-		enum SemRet = q{ return (OverloadSet.Matched[]).init.independent; };
-		auto matches = new set.Matched[set.decls.length];   // pointless GC allocations
+	Dependent!void determineFunctionMatches(Scope sc){
+		enum SemRet = q{ return indepvoid };
 	    trymatch: foreach(i,decl; set.decls){
 			adjustArgs(args, i);
 			foreach(a; args) if(a.sstate == SemState.error) continue trymatch;
@@ -11069,19 +11085,19 @@ private:
 			}
 		}
 		restoreArgs(args);
-		return matches.independent;
+		return indepvoid;
 	}
 
-	Dependent!(OverloadSet.Matched[]) determineTemplateMatches()in{
+	Dependent!void determineTemplateMatches()in{
 		assert(set.tdecls.length == iftis.length);
 	}body{
 		MatchContext tcontext;
-		auto tmatches = new set.Matched[set.tdecls.length]; // pointless GC allocation
 		foreach(i,ref x; iftis){
+			scope(success) if(!tmatches[i].tdecl) tmatches[i].tmatch=Match.none;
 			if(!x) continue;
 			assert(!!cast(TemplateInstanceDecl)x);
 			auto inst = cast(TemplateInstanceDecl)cast(void*)x;
-			if(!inst.finishedInstantiation()) continue;
+			assert(inst.finishedInstantiation());
 			auto fd = inst.iftiDecl();
 			if(!fd){
 				if(eponymous.length<=i || !eponymous[i]) continue;
@@ -11090,7 +11106,7 @@ private:
 				fd = sym.meaning.isFunctionDecl();
 			}else{
 				if(fd.type.sstate==SemState.error)
-					return Dependee(fd.type,null).dependent!(OverloadSet.Matched[]);
+					return Dependee(fd.type,null).dependent!void;
 				mixin(MatchCall!q{auto tmp; fd, null, loc, this_, func, args, tcontext});
 				assert(!tmp||cast(FunctionDecl)tmp);
 				fd = cast(FunctionDecl)cast(void*)tmp;
@@ -11107,7 +11123,7 @@ private:
 			tmatches[i].context = tcontext;
 		}
 		OverloadSet.eliminateLessSpecializedTemplateMatches(tmatches);
-		return tmatches.independent;
+		return indepvoid;
 	}
 
 	void adjustArgs(Expression[] args, size_t j){
