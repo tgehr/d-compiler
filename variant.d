@@ -586,7 +586,7 @@ struct Variant{
 			foreach(x; ToTuple!(["``c","``w","``d"])){
 				alias typeof(mixin(x)) T;
 				alias getOccupied!T occ;
-				assert(occupies == occ);
+				if(occupies != occ) continue;
 				enum code = to!string(occ)~` `~op~` rhs.`~to!string(occ);
 				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
 				static if(is(typeof(mixin(code)))){
