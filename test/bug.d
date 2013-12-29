@@ -1,4 +1,10 @@
 
+/+alias Seq(T...)=T;
+enum ESeq{ foo=Seq!(1,2), bar=Seq!(2,3) } // TODO. (TODO: bug report against DMD.)
+pragma(msg, ESeq.foo);+/
+
+//pragma(msg, typeof(CDX.foo));
+
 /+
 class C{
 	auto _InsertAllBut(int v) {

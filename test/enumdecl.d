@@ -1,4 +1,21 @@
 
+
+// // TODO: wait until semantics of the following is clarified by spec
+// // (I currently assume the spec is not implementable.)
+/+string bb(string x, string y){ return x~y; }
+enum E { foo = bb(cast(string)bar, cast(string)baz), bar="1", baz="2" }
+
+enum CDX {foo=bar, bar="123"}
+
+pragma(msg, CDX.foo);
+pragma(msg, typeof(CDX.foo));
+
+enum Incompat { foo = qux, bar = 1, baz = "12", qux=bar+baz }
+
+
+enum Test{ foo = ((int b)=>"hello")(cast(int)bar), bar=2 }
+pragma(msg, typeof(Test.foo));+/
+
 enum Weekdays{
 	Monday,
 	Tuesday,
@@ -35,11 +52,11 @@ enum:immutable(char)[]{A="",B,C} // error // TODO: improve error message
 
 enum NoCircDep : int{foo=bar,bar=0}
 enum ACircDep : int{foo=bar,bar} // error
-enum AnotherCircDep {foo=bar,bar=0} // TODO: DMD now allows this
+enum AnotherCircDep {foo=bar,bar=0} // TODO?: DMD now allows this
 
 
 enum {circdep0=circdep1, circdep1} // error
-enum CDX {foo=bar, bar="123"} // TODO (double check if DMD allows this)
+enum CDX {foo=bar, bar="123"} // TODO?
 
 pragma(msg, CDX.bar);
 

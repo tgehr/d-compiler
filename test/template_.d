@@ -1,4 +1,12 @@
 
+struct TemplateParameterMatchLevel{
+	static:
+	auto foo(int x)(int y){ return 1; }
+	auto foo(const int x)(int y){ return 2; }
+	static assert(foo!1(1)==1);
+	static assert(foo!(cast(const)1)(2)==2);
+}
+
 struct MatchLevels{
 	enum foos=[
 		q{static int fooN(int x)(int y){ return M; }},
@@ -6,7 +14,7 @@ struct MatchLevels{
 		q{static int fooN(int x)(float y){ return M; }},
 		q{static int fooN(const int x)(int y){ return M; }},
 		q{static int fooN(const int x)(const int y){ return M; }},
-		q{static int fooN(const int x)(const int y){ return M; }},
+		q{static int fooN(const int x)(float y){ return M; }},
 		q{static int fooN(float x)(int y){ return M; }},
 		q{static int fooN(float x)(const int y){ return M; }},
 		q{static int fooN(float x)(float y){ return M; }},
@@ -35,33 +43,21 @@ struct MatchLevels{
 		}
 		return r;
 	}
-	mixin(generate()); // TODO!
+	mixin(generate());
 }
 
-template toStringNow(ulong v)
-{
-    static if (v < 10)
-        enum toStringNow = "" ~ cast(char)(v + '0');
-    else
-        enum toStringNow = toStringNow!(v / 10) ~ toStringNow!(v % 10);
+template toStringNow(ulong v){
+	static if (v < 10) enum toStringNow = "" ~ cast(char)(v + '0');
+	else enum toStringNow = toStringNow!(v / 10) ~ toStringNow!(v % 10);
 }
-void unittest_()
-{
-    static assert(toStringNow!(1uL << 62) == "4611686018427387904");
-}
-template toStringNow(long v)
-{
-    static if (v < 0)
-        enum toStringNow = "-" ~ toStringNow!(cast(ulong) -v);
-    else
-        enum toStringNow = toStringNow!(cast(ulong) v);
-}
+static assert(toStringNow!(1uL << 62) == "4611686018427387904");
 
-void unittest_()
-{
-	static assert(toStringNow!(0x100000000) == "4294967296"); // TODO
-	static assert(toStringNow!(-138L) == "-138");             // TODO
+template toStringNow(long v){
+	static if (v < 0) enum toStringNow = "-" ~ toStringNow!(cast(ulong) -v);
+	else enum toStringNow = toStringNow!(cast(ulong) v);
 }
+static assert(toStringNow!(0x100000000) == "4294967296");
+static assert(toStringNow!(-138L) == "-138");
 
 struct TemplatedParserHack(T){
 	this(int a[]){}
@@ -229,7 +225,7 @@ pragma(msg, [to!(string,uint)(1337u)]);
 template Ov(const(int) x){pragma(msg, 1);}
 template Ov(uint x){pragma(msg, 2);}
 
-mixin Ov!2u; // TODO
+mixin Ov!2u;
 
 template isInputRange(R){
 	enum isInputRange=is(typeof({
