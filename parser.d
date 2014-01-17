@@ -144,7 +144,7 @@ private template fillParseNamesImpl(int n,string b,T...){ // val: new TypeTuple,
 	else static if(is(typeof(T[0]):const(char)[])){// ==string. TODO: reduce bug
 		static if(T[0].length>3 && T[0][0..3]=="OPT"){
 			private alias fillParseNamesImpl!(n,b,TTfromStr!(T[0][3..$])) a;
-			enum strip = a.val.stringof[0..6]=="tuple(" ? 6 : 0; // workaround for DMDs inconsistent tuple formatting
+			enum strip = a.val.stringof[0..6]=="tuple(" ? 6 : 1; // workaround for DMDs inconsistent tuple formatting
 			alias TypeTuple!("OPT"~a.val.stringof[strip..$-1],fillParseNamesImpl!(n+a.off,b,T[1..$]).val) val;
 			alias a.off off;
 		}else{
@@ -969,7 +969,7 @@ private struct Parser{
 				break;
 			case Tok!"(": // EXTENSION
 				skip();
-				if(!skipToUnmatched()||!skip(Tok!")")) goto Lfalse;
+				if(!skipType()||!skip(Tok!")")) goto Lfalse;
 				break;
 			default: goto Lfalse;
 		}
