@@ -571,10 +571,22 @@ struct Variant{
 			}else assert(0);
 		}else if(occupies == Occupies.vars){
 			assert(rhs.occupies==Occupies.vars);
-			assert(!!type && type.getHeadUnqual().isAggregateTy() && type.getHeadUnqual().isAggregateTy().decl.isClassDecl());
-			static if(op=="is"||op=="!is")
-				return Variant((op=="!is")^(vars is rhs.vars),Type.get!bool());
-			else assert(0);
+			assert(!!type && type.getHeadUnqual().isAggregateTy());
+			auto decl=type.getHeadUnqual().isAggregateTy().decl;
+			static if(op=="is"||op=="!is"||op=="=="||op=="!="){
+				enum neq=op=="!is"||op=="!=";
+				if(decl.isReferenceAggregateDecl())
+					return Variant(neq^(vars is rhs.vars),Type.get!bool());
+				else{
+					foreach(k,v;vars)
+						if(k !in rhs.vars||!v.opBinary!"=="(rhs.vars[k]))
+							return Variant(neq, Type.get!bool());
+					foreach(k,v;rhs.vars)
+						if(k !in vars)
+							return Variant(neq, Type.get!bool());
+					return Variant(!neq, Type.get!bool());
+				}
+			}else assert(0);
 		}else if(occupies == Occupies.none){
 			static if(is(typeof(mixin(`null `~op~` null`))))
 				return Variant(mixin(`null `~op~` null`),

@@ -120,6 +120,11 @@ Dependee multidep(Node[] dep, Scope sc=null)in{assert(dep.length);}body{
 abstract class Expression: Node{
 	int brackets=0;
 	override string toString(){return _brk("{}()");}
+	protected static string leftoverToString(Expression[] es, Expression leftover){
+		if(!leftover) return "";
+		return (es.length?",":"")~"("~leftover.toString~","~Tuple.toStringEmpty~")";
+	}
+
 	protected string _brk(string s){return std.array.replicate("(",brackets)~s~std.array.replicate(")",brackets); return s;}
 
 	override @property string kind(){return isConstant?"constant":"expression";}
@@ -130,6 +135,7 @@ abstract class Expression: Node{
 		LookupIdentifier,
 		AssignExp,
 		FieldExp,
+		CommaExp,
 		LengthExp,
 		CurrentExp,
 		SuperExp,
@@ -211,8 +217,9 @@ class ArrayAssocExp: Expression{
 class ArrayLiteralExp: Expression{
 	Expression[] lit;
 	this(Expression[] literal){lit=literal;}
-	override string toString(){ return _brk("["~join(map!(to!string)(lit),",")~"]"); }
-
+	override string toString(){
+		return _brk("["~join(map!(to!string)(lit),",")~leftoverToString(lit,litLeftover)~"]");
+	}
 	mixin DownCastMethod;
 	mixin Visitors;
 }
@@ -289,6 +296,7 @@ class CastExp: Expression{
 	Expression e; Expression ty;
 	this(STC ss,Expression tt,Expression exp){stc=ss; ty=tt; e=exp;}
 	override string toString(){return _brk("cast("~(stc?STCtoString(stc)~(ty?" ":""):"")~(ty?ty.toString():"")~")"~e.toString());}
+	override string kind(){ return "cast expression"; }
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -299,7 +307,7 @@ class NewExp: Expression{
 	Expression[] a2;
 	this(Expression[] args1,Expression type,Expression[] args2){a1=args1; rty=type; a2=args2;}
 	override string toString(){
-		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~rty.toString()~(a2?"("~join(map!(to!string)(a2),",")~")":""));
+		return _brk("new"~(a1?"("~join(map!(to!string)(a1),",")~") ":" ")~rty.toString()~(a2||a2Leftover?"("~join(map!(to!string)(a2),",")~leftoverToString(a2,a2Leftover)~")":""));
 	}
 
 	override @property string kind(){ return "new expression"; }
@@ -325,7 +333,9 @@ class InstanceNewExp: Expression{
 class MixinExp: Expression{
 	Expression[] a;
 	this(Expression[] arg){a=arg;}
-	override string toString(){return _brk("mixin("~join(map!(to!string)(a),",")~")");}
+	override string toString(){
+		return _brk("mixin("~join(map!(to!string)(a),",")~leftoverToString(a,aLeftover)~")");
+	}
 
 	mixin Visitors;
 }
@@ -337,7 +347,9 @@ class ImportExp: Expression{
 class AssertExp: Expression{
 	Expression[] a;
 	this(Expression[] args){a = args;}
-	override string toString(){return _brk("assert("~join(map!(to!string)(a),",")~")");}
+	override string toString(){
+		return _brk("assert("~join(map!(to!string)(a),",")~leftoverToString(a,aLeftover)~")");
+	}
 
 	mixin Visitors;
 }
@@ -369,7 +381,9 @@ class IndexExp: Expression, DollarProvider{ //e[a...]
 	Expression e;
 	Expression[] a;
 	this(Expression exp, Expression[] args){e=exp; a=args;}
-	override string toString(){return _brk(e.toString()~(a.length?'['~join(map!(to!string)(a),",")~']':"[]"));}
+	override string toString(){
+		return _brk(e.toString()~'['~join(map!(to!string)(a),",")~leftoverToString(a,aLeftover)~']');
+	}
 
 	mixin Visitors;
 	mixin DownCastMethod;
@@ -388,7 +402,9 @@ class CallExp: TemporaryExp{
 	Expression e;
 	Expression[] args;
 	this(Expression exp, Expression[] args){e=exp; this.args=args;}
-	override string toString(){return _brk(e.toString()~(args.length?'('~join(map!(to!string)(args),",")~')':"()"));}
+	override string toString(){
+		return _brk(e.toString()~'('~join(map!(to!string)(args),",")~leftoverToString(args,argsLeftover)~')');
+	}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -447,10 +463,15 @@ abstract class FieldExp: Expression{
 	mixin DownCastMethod;
 	mixin Visitors;
 }
+abstract class CommaExp: Expression{
+	Expression e1,e2;
+	mixin DownCastMethod;
+}
 
 template BinaryExpGetParent(TokenType op){
 	static if(isAssignOp(op)) alias AssignExp result;
 	else static if(op==Tok!".") alias FieldExp result;
+	else static if(op==Tok!",") alias CommaExp result;
 	else alias ABinaryExp result;
 	alias result BinaryExpGetParent;
 }
