@@ -329,6 +329,12 @@ int testInvalidContext(){
 }
 pragma(msg, testInvalidContext());
 
+struct CannotInterpretThis{
+	void foo(){
+		pragma(msg, this); // error
+	}
+}
+
 int testThis(){
 	struct S{
 		int x;
@@ -1230,6 +1236,27 @@ int testlazy(){
 	return x;
 }
 pragma(msg, "testlazy: ",testlazy());
+
+void norefvar(ref int y){ // ok
+	ref int x=y; // error
+	struct S{
+		ref int u; // error
+	}
+}
+
+struct ByteByRef{
+	static:
+	auto foo(ref byte b){
+		b=2;
+		return &b;
+	}
+	int bar(){
+		byte b;
+		foo(b);
+		return b;
+	}
+	static assert(bar()==2);
+}
 
 ref int testrefret(){
 	int x;
