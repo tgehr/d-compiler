@@ -1,3 +1,24 @@
+struct NamedMixinTemplate{
+	static:
+	mixin template M(){
+		bool opBinaryRight(immutable(char)[] op:"in")(int i) { return true; }
+		int foo(){ return 2; }
+	}
+
+	struct S{
+		mixin M m;
+	}
+	
+	int main(){
+		S s;
+		assert(5 in s.m); // TODO
+		assert(s.m.foo()==2); // TODO
+		static assert(!is(typeof(s.foo()))); // TODO
+		return 0;
+	}
+	static assert(main()==0);
+}
+
 mixin template Ambig(immutable(char)[] x){
 	mixin("enum "~x~"=1;"); // error
 }
