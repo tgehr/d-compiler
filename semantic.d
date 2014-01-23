@@ -9204,6 +9204,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 						commaLeft=ExpTuple.splitCommaExp(ce, et);
 						commaLeft.semantic(sc);
 						assert(commaLeft.sstate == SemState.completed);
+						init = et;
 					}
 					assert(et || !willInterpretInit());
 				}
