@@ -1,3 +1,177 @@
+struct TupleAndSeqExpansionTests{
+	static:
+	struct Tuple(T...){
+		T expand;
+	}
+
+	auto test1(){
+		Tuple!(int,double) t;
+		t.expand[0]=2;
+		t.expand[1]=4;
+		Seq!(int,double) a=(()=>t.expand)();
+		auto x = t.expand;
+		auto b = x[1..2];
+		static assert(is(typeof(b)==Seq!(double)));
+		auto c = t.expand[1..2];
+		a[0]++;
+		return [t.expand[0],b[0],c[0],a,t.expand];
+	}
+	static assert(test1()==[2,4,4,3,4,2,4]);
+
+	auto vdLeftover(){
+		Tuple!() tp;
+		int x;
+		auto y = (x++,tp.expand);
+		return x;
+	}
+	static assert(vdLeftover()==1);
+
+	auto alLeftover(){
+		Tuple!() tp;
+		int x;
+		int[][] y=[[(x++,tp.expand)],[x]];
+		pragma(msg, typeof(y));
+		return y;
+		//return x;
+	}
+	pragma(msg, "al: ",alLeftover());
+	static assert(alLeftover()==[[],[1]]);
+	static int x;
+	enum a=[[(x++,Seq!())],[0]]; // error
+	enum int y=2;
+	enum b=[[(y,Seq!())],[y]]; // ok
+	static assert(b==[[],[2]]);
+
+	auto ceLeftover(){
+		int x=1;
+		int foo(){ return ++x; }
+		return foo((x*=3,Seq!()));
+	}
+	pragma(msg, "ce: ",ceLeftover());
+	static assert(ceLeftover()==4);
+
+	auto neLeftover(){
+		int x=1;
+		class C{
+			this(){ x++; }
+			this(int y){ x*=y; }
+		}
+		C d;
+		auto c=new C(++x+1,(d=new C((x++,Seq!())),Seq!()));
+		assert(d !is null);
+		// assert(d); // TODO
+		return x;
+	}
+	pragma(msg, "ne: ",neLeftover());
+	static assert(neLeftover()==12);
+
+	auto asLeftover(){
+		int x=1;
+		assert(true,"foo",(x++,Seq!()));
+		return x;
+	}
+	pragma(msg, "as: ",asLeftover());
+	static assert(asLeftover()==2);
+
+	enum yy=2;
+	enum zz=(assert(yy,"foo",(yy,Seq!())),yy); // ok
+	int xx;
+	enum ww=(assert(yy,"foo",(xx++,Seq!())),yy); // error
+	string str="foo";
+	enum hh=(assert(false,str),yy); // error
+	enum gg=(assert(true,str),yy); // ok
+
+	auto ieLeftover(){
+		int x=0;
+		int[] y=[x];
+		y~=y[x,(x++,Seq!())];
+		y~=x;
+		int[] z=[1,2,3];
+		//z[(x++,Seq!())]=y[(x*=2,Seq!())]; // TODO
+		//y~=z;
+		// // TODO: eliminate the need for casting?
+		y~=z[(x++,Seq!())]~x~(cast(int[])[(x*=2,Seq!())])[(x++,Seq!())]~x;
+		return y;
+	}
+	pragma(msg, "ie: ",ieLeftover());
+	static assert(ieLeftover()==[0,0,1,1,2,3,2,5]);
+
+	enum ii=[1,2,3];
+	enum jj=ii[1,(x++,Seq!())]; // error
+	pragma(msg, "jj: ",jj);
+
+	int csLeftover(int x){
+		enum y=2;
+		switch(x){
+			case 0,(x++,Seq!()): return 1; // error
+			case 1,(y,Seq!()): return 2; // ok
+			default: return 3;
+		}
+	}
+	static assert(csLeftover(0)==1&&csLeftover(1)==2&&csLeftover(csLeftover(1))==3);
+
+	int csExpand(int x){
+		alias R1=Seq!(1,2,3,4,5);
+		alias R2=Seq!(7,8);
+		switch(x){
+			case R1: return 0;
+			case 6,R2,9: return 1;
+			default: return 2;
+		}
+	}
+	int[] testCsExpand(){
+		int[] r;
+		for(int i=0;i<12;i++){
+			r~=csExpand(i);
+		}
+		return r;
+	}
+	static assert(testCsExpand()==[2,0,0,0,0,0,1,1,1,1,2,2]);
+	pragma(msg, "testCsExpand: ",testCsExpand());
+
+	void switchOnTuple(Seq!(int,string) x){
+		switch(x){ default: break; } // error
+	}
+
+	int seLeftover(){
+		int x=1;
+		struct S{ this(int y){x*=y;} }
+		auto s=S(2,(x++,Seq!()));
+		return x;
+	}
+	pragma(msg, "se: ",seLeftover());
+	static assert(seLeftover()==4);
+
+	void toStrings(){
+		int x;
+		[(x++,Seq!())]=[x];// error
+		int foo(){ return 2; }
+		foo((x++,Seq!()))=x;// error
+		class C{}
+		(new C((x++,Seq!())))=x; // error
+		assert(true,(x++,Seq!()))=x; // error
+		int[] y;
+		(y[(x++,Seq!())],x++)=x; // error
+		struct S{ this(int x){} }
+		S(2,(x++,Seq!()))=x; // error
+	}
+}
+
+struct TestCallSliceIndexTuple{
+	alias Seq(T...)=T;
+static:
+	auto foo(){
+		return Seq!(1,2,3);
+	}
+	auto bar(){
+		return [foo()[1..$]];
+	}
+	static assert(bar()==[2,3]);
+	auto baz(){
+		return foo()[1];
+	}
+	static assert(baz()==2);
+}
 
 struct DollarAndConstFolderExpansionTests{
 	alias Seq(T...)=T;
