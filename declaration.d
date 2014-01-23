@@ -46,6 +46,7 @@ abstract class Declaration: Statement{
 		UnionDecl,
 		ValueAggregateDecl,
 		ReferenceAggregateDecl,
+		TmpVarDecl,
 		ImportDecl,
 		EnumDecl,
 		ErrorDecl,

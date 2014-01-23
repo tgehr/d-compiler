@@ -29,7 +29,8 @@ abstract class Node{
 	// Workaround for DMD forward reference bug, other part is in visitors.Visitors
 	mixin CTFEInterpret!Node; // TODO: minimize, report
 	abstract void _doAnalyze(scope void delegate(Node) dg);
-	abstract inout(Node) ddup()inout in{assert(sstate==SemState.begin||sstate==SemState.pre);}body{assert(0);};
+	inout(Node) sdup()inout{ assert(0); }
+	inout(Node) ddup()inout{ assert(0); }
 }
 
 template Dependent(T){
@@ -145,11 +146,11 @@ abstract class Expression: Node{
 		ArrayLiteralExp,
 		FunctionLiteralExp,
 		VoidInitializerExp,
-		TemporaryExp,
 		StructConsExp,
 		CallExp,
 		UFCSCallExp,
-		MultiReturnValueExp,
+		TemporaryExp,
+		TmpVarExp,
 		TernaryExp,
 		CastExp,
 		Type,
@@ -414,13 +415,22 @@ class CallExp: TemporaryExp{
 import hashtable;
 struct TemplArgInfo{
 	AssocHash hash;
-	bool typeOnly=true;
-	this(AssocHash hash, bool typeOnly){this.hash=hash;this.typeOnly=typeOnly;}
+	bool typeOnly=true; // TODO: use bitfields
+	bool isConstant=true;
+	bool isConstFoldable=true;
+	this(AssocHash hash, bool typeOnly, bool isConstant, bool isConstFoldable){
+		this.hash=hash;this.typeOnly=typeOnly;
+		this.isConstant=isConstant;this.isConstFoldable=isConstFoldable;
+	}
 	this(Expression e){
-		this(!e?0.assocHash():e.tmplArgToHash().assocHash(),!e||e.isType());
+		this(!e?0.assocHash():e.tmplArgToHash().assocHash(),
+		     !e||e.isType(),!e||e.isConstant(),!e||e.isConstFoldable());
 	}
 	TemplArgInfo combine(TemplArgInfo rhs){
-		return TemplArgInfo(assocHashCombine(hash,rhs.hash),typeOnly&&rhs.typeOnly);
+		return TemplArgInfo(assocHashCombine(hash,rhs.hash),
+		                    typeOnly&&rhs.typeOnly,
+		                    isConstant&&rhs.isConstant,
+		                    isConstFoldable&&rhs.isConstFoldable);
 	}
 }
 

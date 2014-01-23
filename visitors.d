@@ -31,6 +31,7 @@ mixin template Visitors(){
 
 import expression,declaration,type;
 mixin template DeepDup(T) if(is(T: BasicType)){
+	override @trusted inout(T) sdup()inout{ return this; }
 	override @trusted inout(T) ddup()inout{ return this; }
 }
 
@@ -41,11 +42,7 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 			if(sstate==SemState.completed) return this;
 			assert(sstate == SemState.begin);
 		}
-		enum siz = __traits(classInstanceSize,T);
-		auto data = New!(void[])(siz);
-		import std.c.string;
-		memcpy(data.ptr, cast(void*)this, siz);
-		auto res=cast(T)data.ptr;
+		auto res=cast(T)sdup();
 		static if(is(T==VarDecl)){
 			if(init)
 			if(auto tmp=(cast()init).isTemporaryExp()){
@@ -75,7 +72,14 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 			res.clearCaches();// TODO: clearCaches is not good enough
 		}
 		return *cast(inout(T)*)&res;
-	}});
+	}}~(!is(T==Node)?
+	q{@trusted inout(T) sdup()inout{
+		enum siz = __traits(classInstanceSize,T);
+		auto data = New!(void[])(siz);
+		import std.c.string;
+		memcpy(data.ptr, cast(void*)this, siz);
+		return cast(inout(T))data.ptr;
+    }}:""));
 }
 
 mixin template DeepDup(T: StaticIfDecl) if(is(T==StaticIfDecl)){

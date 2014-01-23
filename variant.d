@@ -43,7 +43,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, err
+	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, tpl, err
 }
 
 template getOccupied(T){
@@ -135,6 +135,7 @@ struct Variant{
 		// TODO: this is probably too slow
 		// TODO: cache inside type?
 		if(!type) return Occupies.vars;		
+		if(type.isTypeTuple()) return Occupies.tpl;
 		auto tu=type.getHeadUnqual();
 		if(tu.isAggregateTy()) return Occupies.vars;
 		if(tu is Type.get!string()) return Occupies.str;
@@ -156,7 +157,6 @@ struct Variant{
 				default: assert(0);
 			}
 		}
-
 		
 		assert(tu is Type.get!(typeof(null)), tu.text);
 		return Occupies.none;
@@ -169,6 +169,11 @@ struct Variant{
 		//type = Type.get!T();
 		this.type = type;
 		mixin(to!string(getOccupied!T)~` = value;`);
+	}
+
+	this()(Variant[] tpl, TypeTuple type){
+		this.type=type;
+		this.tpl=tpl;
 	}
 
 	this()(Variant[] arr, Variant[] cnt, Type type)in{ // TODO: extend FieldAccess and merge with ptr constructor
@@ -253,6 +258,7 @@ struct Variant{
 			Symbol dgfptr;
 			Variant[VarDecl] dgctx;
 		}
+		Variant[] tpl;
 		string err;
 	}
 
@@ -309,6 +315,12 @@ struct Variant{
 		return dgctx;
 	}
 
+	Variant[] getTuple()in{
+		assert(occupies == Occupies.tpl);
+	}body{
+		return tpl;
+	}
+
 	/* returns a type that fully specifies the memory layout
 	   for strings, the relevant type qualifiers are preserved
 	   otherwise, gives no guarantees for type qualifier preservation
@@ -346,8 +358,8 @@ struct Variant{
 		if(auto bt=type.isBasicType()){
 			switch(bt.op){
 				foreach(x;ToTuple!basicTypes){
-					static if(x!="void")
-					case Tok!x:
+					static if(x=="void"){case Tok!"void": return "";}
+					else case Tok!x:
 						mixin(`alias typeof(`~x~`.init) T;`); // dmd parser workaround
 						enum sfx = is(T==uint) ? "U" :
 					       is(T==long)||is(T==real) ? "L" :
