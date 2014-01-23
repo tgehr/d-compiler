@@ -1,3 +1,101 @@
+struct TestByRefSeq{
+	static:
+	ref Seq!(int, int) byrefseq(ref int x, ref int y){
+		//pragma(msg, typeof(Seq!(x,y)));
+		return Seq!(x, y);
+	}
+	auto fail(){
+		int x,y;
+		byrefseq(x,y)+=Seq!(2,3); // error // TODO: do we want to allow this?
+	}
+	auto test(){
+		int x,y;
+		byrefseq(x,y)=Seq!(3,4); // ok
+
+		//return [x,y];
+		byrefseq(x,y)[1]++;
+		return [byrefseq(x,y)];
+	}
+	pragma(msg, test());
+	static assert(test()==[3,5]);
+
+	ref foo(ref int x, ref int y, int z){
+		return Seq!(x,y);
+	}
+	void inc(T...)(ref T x)if(T.length==2){
+		x[0]++;
+		x[1]++;
+	}
+	auto fail2(){
+		int a=-1,b=-1;
+		inc(foo(Seq!(a,b,a)=Seq!(1,2,3))); // error
+	}
+
+	auto test2(bool x){
+		int a,b;
+		alias aba=Seq!(a,b,a);
+		alias bab=Seq!(b,a,b);
+		aba=Seq!(1,2,3);
+		inc(foo(aba));
+		auto incx(ref int u, ref int v){
+			u+=v;
+			v*=u;
+		}
+		incx((x?aba:bab)[0..2]);
+		return [aba,x?foo(aba):foo(bab)];
+	}
+	static assert(test2(true)==[7,21,7,7,21]);
+	pragma(msg, test2(true));
+	static assert(test2(false)==[28,7,28,7,28]);
+	pragma(msg, test2(false));
+
+	struct Tuple(T...){
+		int i=0;
+		T expand;
+		ref inc(){ i++; return this; }
+	}
+
+	auto test3(){
+		Tuple!(int,int,int) t;
+		t.expand[0]=1;
+		t.expand[1]=2;
+		t.expand[2]=3;
+		auto u=t.inc().expand=Seq!(4,5,6);
+		void multiply(ref int a, ref int b, ref int c){
+			a*=2;
+			b*=3;
+			c*=4;
+		}
+		multiply(t.expand);
+		return [t.i,t.expand,u];
+	}
+	pragma(msg, test3());
+	static assert(test3()==[1,8,15,24,4,5,6]);
+
+	auto ternarytest(bool x){
+		int a,b,c;
+		(2,x?Seq!(a,b):Seq!(b,c))=Seq!(1,2);
+		return [a,b,c];
+	}
+	static assert(ternarytest(true)==[1,2,0]);
+	static assert(ternarytest(false)==[0,1,2]);
+
+	auto otherternarytest(bool x, bool y){
+		int a,b,c,d,e;
+		alias all=Seq!(a,b,c,d,e);
+		alias ab=Seq!(a,b);
+		alias cdex=Seq!(all[2..4],e,x);
+		ref seq(T...)(ref T args){ return args; }
+		x?y?Seq!(ab):seq(all[1..$-1])[0..2]:y?seq(cdex[0..2])[]:Seq!(d,e)=Seq!(1,2);
+		return [all];
+	}
+	static assert(otherternarytest(true,true)==[1,2,0,0,0]);
+	static assert(otherternarytest(true,false)==[0,1,2,0,0]);
+	static assert(otherternarytest(false,true)==[0,0,1,2,0]);
+	static assert(otherternarytest(false,false)==[0,0,0,1,2]);
+
+}
+
 struct TupleAndSeqExpansionTests{
 	static:
 	struct Tuple(T...){
@@ -271,6 +369,7 @@ struct TestExpansionForStaticConstructs{
 	static assert(Seq!((x++,Seq!()),true)); // error
 	static assert(Seq!((y,Seq!()),true));
 }
+
 struct Tuple(T...){
 	T expand;
 }
@@ -339,9 +438,9 @@ pragma(msg, "multiret: ", compose!(add,seqid)(1,2,3));
 int testmultirefret(){
 	int a, b;
 	ref Seq!(int, int) multirefret(){
-		return Seq!(a,b); // TODO
+		return Seq!(a,b);
 	}
-	multirefret()=Seq!(1,2); // TODO
+	multirefret()=Seq!(1,2);
 	return a+b;
 }
 pragma(msg, "testmultirefret: ", testmultirefret());
@@ -349,7 +448,6 @@ pragma(msg, "testmultirefret: ", testmultirefret());
 T seq(T...)(T args){ return args; }
 pragma(msg, (()=>[seq(1,2,3,4)])());
 pragma(msg, [seq(1,2,3,4)]);
-
 
 
 struct TupleExpand{

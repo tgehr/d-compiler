@@ -1,6 +1,13 @@
 
+// ref void foo(){ return; } // // TODO: should this fail?
+/+void deducetype(bool x, bool y){
+	auto foo = [x=>x, x=>x, (int x)=>x]; // ok
+	auto bar = x?x=>x:y?x=>x:(int x)=>x; // TODO (the problem is conversion to void)
+	auto baz = x?(int x)=>x:y?x=>x:x=>x; // TODO (the problem is conversion to void)
+}+/
+
 /+alias Seq(T...)=T;
-enum ESeq{ foo=Seq!(1,2), bar=Seq!(2,3) } // TODO. (TODO: bug report against DMD.)
+enum ESeq{ foo=Seq!(1,2), bar=Seq!(2,3) } // TODO? (TODO: bug report against DMD?)
 pragma(msg, ESeq.foo);+/
 
 //pragma(msg, typeof(CDX.foo));
