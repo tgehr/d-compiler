@@ -482,7 +482,10 @@ mixin template Interpret(T) if(is(T==AssertExp)){
 		}
 		if(!cond){
 			if(a.length<2||!a[1].checkInterpret(sc)){
-				sc.error(format("assertion failure: %s is false",a[0].loc.rep), loc);
+				if(a[0].loc.rep=="false"||a[0].loc.rep=="0")
+					// don't state the obvious:
+					sc.error("assertion failure", loc);
+				else sc.error(format("assertion failure: %s is false",a[0].loc.rep), loc);
 			}else{
 				auto expr = a[1];
 				sc.error(expr.interpretV().get!string(), loc);
@@ -1562,7 +1565,7 @@ class LVstorea: LValueStrategy{
 	override @property size_t lvBCSize(){
 		// an index and a pointer or slice
 		assert(getBCSizeof(Type.get!ulong())==1);
-		return 1+(isptr?bcPointerBCSize:bcSliceBCSize);
+		return isptr?bcPointerBCSize:1+bcSliceBCSize;
 	}
 	private void ptrPrlg(ref ByteCodeBuilder bld, bool isstore){
 		if(isptr){
@@ -1716,6 +1719,63 @@ class LVlength: LValueStrategy{
 
 	override void emitPointer(ref ByteCodeBuilder bld){
 		assert(0, "cannot take the address of an array length");
+	}
+}
+
+class LVtuple: LValueStrategy{
+	private LValueStrategy[] tpl;
+	private TypeTuple ty;
+	private size_t vsize;
+	static opCall(LValueStrategy[] tpl, TypeTuple ty){ return new LVtuple(tpl, ty); }
+	private this(LValueStrategy[] tpl, TypeTuple ty){
+		this.tpl=tpl; this.ty=ty;
+		this.vsize=getBCSizeof(ty);
+	}
+
+	override @property size_t lvBCSize(){
+		size_t r=0;
+		foreach(x;tpl) r+=x.lvBCSize;
+		return r;
+	}
+
+	private void emitStoreImpl(ref ByteCodeBuilder bld, bool kr, bool kv){
+		// create temporary scratch space on stack
+		auto boff=bld.getStackOffset(), off=boff;
+		bld.addStackOffset(vsize);
+		bld.emitPopp(vsize);
+		bld.emitConstant(boff);
+		if(kr) bld.emitDup(lvBCSize);
+		bld.emitTmppush(lvBCSize);
+		foreach(i,x;ty.allIndices()){
+			auto len=getBCSizeof(x);
+			bld.emitTmppop(tpl[i].lvBCSize);
+			bld.emitPushp(len);
+			bld.emitConstant(off);
+			tpl[i].emitStore(bld);
+			off+=len;
+		}
+		if(kv){
+			bld.emitPushp(vsize);
+			bld.emitConstant(boff);
+		}
+	}
+	override void emitStore(ref ByteCodeBuilder bld){
+		emitStoreImpl(bld, false, false);
+	}
+	override void emitStoreKR(ref ByteCodeBuilder bld){
+		emitStoreImpl(bld, true, false);
+	}
+	override void emitStoreKV(ref ByteCodeBuilder bld){
+		emitStoreImpl(bld, false, true);
+	}
+	override void emitLoad(ref ByteCodeBuilder bld){ assert(0, "TODO"); }
+
+	override void emitPointer(ref ByteCodeBuilder bld){
+		bld.emitTmppush(lvBCSize);
+		foreach(x;tpl){
+			bld.emitTmppop(x.lvBCSize);
+			x.emitPointer(bld);
+		}
 	}
 }
 
@@ -2755,7 +2815,7 @@ Lhltstr:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TupleAssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -2847,23 +2907,12 @@ mixin template CTFEInterpret(T) if(is(T==ExpTuple)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		foreach(x; exprs) x.byteCompile(bld);
 	}
-	static void byteCompileAddresses(ref ByteCodeBuilder bld, Expression e)in{
-		assert(e.type&&e.type.isTuple());
-		assert(e.isLvalue());
-	}body{
-		ExpTuple et;
-		if(auto ett=e.isExpTuple()) et=ett;
-		else if(auto ce=e.isCommaExp()){
-			void go(CommaExp ce){
-				ExpressionStm.byteCompileIgnoreResult(bld,ce.e1);
-				if(ce.e2.isCommaExp) return go(ce);
-				else if(auto ett=ce.e2.isExpTuple()) et=ett;
-			}
-			go(ce);
-		}
-		assert(!!et);
-		foreach(x;et.exprs) UnaryExp!(Tok!"&").emitAddressOf(bld, x);
-		return;
+	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		auto lvs=new LValueStrategy[](exprs.length);
+		foreach(i,x;exprs) lvs[i]=x.byteCompileLV(bld);
+		assert(cast(TypeTuple)type);
+		auto ty=cast(TypeTuple)cast(void*)type;
+		return LVtuple(lvs,ty);
 	}
 }
 
@@ -2913,7 +2962,6 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	static if(S==Tok!"&"){
 		static void emitAddressOf(ref ByteCodeBuilder bld, Expression e){
-			if(e.isExpTuple()) return ExpTuple.byteCompileAddresses(bld, e);
 			auto tu = e.type.getHeadUnqual();
 			if(tu.isFunctionTy()){
 				assert(cast(Symbol)e||cast(FieldExp)e);
@@ -3169,7 +3217,10 @@ mixin template CTFEInterpret(T) if(is(T==AssertExp)){
 		bld.emit(Instruction.jnz);
 		auto l = bld.emitLabel();
 		if(a.length==1){
-			bld.error(format("assertion failure: %s is false", a[0].loc.rep),loc);
+			if(a[0].loc.rep=="false"||a[0].loc.rep=="0")
+				// don't state the obvious:
+				bld.error("assertion failure", loc);
+			else bld.error(format("assertion failure: %s is false",a[0].loc.rep), loc);
 		}else{
 			assert(a.length==2);
 			assert({
@@ -3347,10 +3398,6 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 
 				if(auto bt0=e1.type.getHeadUnqual.isBasicType())
 					if(auto bt=bt0.isFloating()){
-					string either(string op1, string op2, bool neg=false){
-						return mixin(X!q{
-						});
-					}
 
 					foreach(tt; ToTuple!(["float","double","real"])){
 						enum s = tt[0];
@@ -3397,7 +3444,6 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 								bld.emit(mixin(`I.cmpg`~s));
 								bld.emit(I.notb);
 							}else static assert(0);
-							break;
 						}
 					}
 				}
@@ -3454,6 +3500,14 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 
 		assert(!isLvalue);
 		return null;
+	}
+}
+
+mixin template CTFEInterpret(T) if(is(T==TupleAssignExp)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		auto strat = e1.byteCompileLV(bld);
+		e2.byteCompile(bld);
+		strat.emitStoreKV(bld);		
 	}
 }
 
@@ -5304,6 +5358,10 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 			void perform(AssignExp self){
 				runAnalysis!MarkHeapContext(self.e1);
+			}
+			debug void perform(TupleAssignExp self){ assert(0); }
+			void perform(ExpTuple self){
+				foreach(x;self) runAnalysis!MarkHeapContext(x);
 			}
 			// can happen eg for ref arguments
 			void perform(CastExp self){

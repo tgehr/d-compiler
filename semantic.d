@@ -3521,7 +3521,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		}~SemEplg;
 		static if(isAssignOp(S)){
 			// TODO: properties, array ops \ ~=
-			if(e1.canMutate()||e1.isLengthExp()){
+			if((e1.canMutate()||e1.isLengthExp())&&(S==Tok!"="||!e1.type.isTypeTuple())){
 				type = e1.type;
 				static if(S==Tok!"~="){
 					if(auto tt=type.isDynArrTy()){
@@ -3546,6 +3546,15 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 					                e1.type.toString(), e2.type.toString()), loc);
 					mixin(ErrEplg);
 				}+/
+				static if(S==Tok!"="){
+					if(e1.type.isTypeTuple()){
+						auto r=New!TupleAssignExp(e1,e2);
+						r.brackets=brackets; // (for formatting)
+						r.loc=loc;
+						r.semantic(sc);
+						mixin(RewEplg!q{r});
+					}
+				}
 				mixin(.SemEplg); // don't const fold lhs
 			}else{
 			Lnomatch:
@@ -3556,10 +3565,12 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 									},"[e2]","e1"));
 				}
 				if(!e1.checkMutate(sc,loc)) mixin(ErrEplg);
-				static if(S==Tok!"~="){
-					if(e1.finishDeduction(sc) && e2.finishDeduction(sc)){
+				if(e1.finishDeduction(sc) && e2.finishDeduction(sc)){
+					static if(S==Tok!"~="){
 						// TODO: allocation
 						sc.error(format("cannot append to expression of type '%s'", type),loc);
+					}else{
+						sc.error(format("cannot use expression of type '%s' in the left hand side of '"~TokChars!S~"'",e1.type),loc);
 					}
 				}
 				mixin(ErrEplg);
@@ -4108,6 +4119,36 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 	mixin(__dgliteralRng());
 }
 
+// TODO: is there a more elegant but efficient solution for this?
+// eg. a more elegant but wasteful solution would be to make BinaryExp!(Tok!"=")
+// inherit from TemporaryExp
+// (the result of assign expressions involving tuples must auto-expand)
+class TupleAssignExp: TemporaryExp{
+	Expression e1, e2;
+	this(Expression e1, Expression e2)in{
+		assert(e1&&e1.sstate==SemState.completed);
+		assert(e2&&e2.sstate==SemState.completed);
+		assert(e1.type.equals(e2.type));
+		assert(e1.isLvalue());
+		assert(e1.type.isTypeTuple());
+	}body{
+		this.e1=e1;
+		this.e2=e2;
+	}
+	void semantic(Scope sc){
+		mixin(SemPrlg);
+		type=e1.type;
+		mixin(NoRetry);
+		sstate=SemState.completed;
+		createTemporary(sc);
+	}
+
+	override string toString(){ return _brk(e1.toString()~"="~e2.toString()); }
+
+	mixin Visitors;
+}
+mixin template Semantic(T) if(is(T==TupleAssignExp)){}
+
 template Semantic(T) if(is(T==TernaryExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -4135,7 +4176,9 @@ template Semantic(T) if(is(T==TernaryExp)){
 			mixin(ConstFold!q{e2});
 			mixin(ConstFold!q{e3});
 		}
-		mixin(SemEplg);
+		mixin(NoRetry);
+		sstate=SemState.completed;
+		if(!tmpVarDecl) if(type.isTypeTuple()) createTemporary(sc);
 	}
 
 	override bool isConstant(){
@@ -4720,6 +4763,7 @@ class Symbol: Expression{
 	}+/
 	// override Type isType(){...} // TODO.
 	override bool isLvalue(){
+		if(meaning.isTmpVarDecl()) return !!(meaning.stc&STCref);
 		if(!(meaning.stc&STCrvalue) && meaning.isVarDecl()) return true;
 		   if(auto ov=meaning.isOverloadSet())
 			   return !!ov.decls.length;

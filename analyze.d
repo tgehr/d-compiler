@@ -30,9 +30,11 @@ mixin template Analyze(){
 								//import std.stdio; if(_idfofodi2.length) writeln(typeof(this).stringof," ",this,".",_idfododi," ",_idfofodi2);
 								//if(_idfofodi2.length) writeln(_idfododi);
 							 foreach(x; _idfofodi2) if(x) dg(x);
-						}else static if(is(typeof(_idfofdi2)==TupleContext)){
-							foreach(x; _idfofodi2.vds) if(x) dg(x);
-							if(_idfofodi2.initLeftover) dg(_idfofodi2.initLeftover);
+						}else static if(is(typeof(_idfofodi2)==TupleContext)){
+							if(_idfofodi2){
+								foreach(x; _idfofodi2.vds) if(x) dg(x);
+								if(_idfofodi2.initLeftover) dg(_idfofodi2.initLeftover);
+							}
 						}
 					}
 				}

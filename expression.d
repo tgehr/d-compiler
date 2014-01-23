@@ -496,14 +496,19 @@ class BinaryExp(TokenType op): BinaryExpGetParent!op{
 	static if(op!=Tok!".") override string toString(){
 		// (the cast is a workaround for a DMD bug)
 		static if(op==Tok!"in"||op==Tok!"is"||op==Tok!"!in"||op==Tok!"!is") return _brk(e1.toString() ~ " "~TokChars!op~" "~e2.toString());
-		else return _brk(e1.toString() ~ TokChars!op ~ (cast(Expression)e2).toString());
+		else{
+			static if(op==Tok!",")
+				if(auto sym=e2.isSymbol())if(sym.meaning&&!sym.meaning.name)
+					return _brk(e1.toString());
+			return _brk(e1.toString() ~ TokChars!op ~ (cast(Expression)e2).toString());
+		}
 	}
 	//override string toString(){return e1.toString() ~ " "~ e2.toString~TokChars!op;} // RPN
 
 	mixin Visitors;
 }
 
-class TernaryExp: Expression{
+class TernaryExp: TemporaryExp{ // TODO: is this parent too wasteful with memory?
 	Expression e1, e2, e3;
 	this(Expression cond, Expression left, Expression right){e1=cond; e2=left; e3=right;}
 	override string toString(){return _brk(e1.toString() ~ '?' ~ e2.toString() ~ ':' ~ e3.toString());}
