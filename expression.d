@@ -418,19 +418,22 @@ struct TemplArgInfo{
 	bool typeOnly=true; // TODO: use bitfields
 	bool isConstant=true;
 	bool isConstFoldable=true;
-	this(AssocHash hash, bool typeOnly, bool isConstant, bool isConstFoldable){
+	bool isLvalue=true;
+	this(AssocHash hash, bool typeOnly, bool isConstant, bool isConstFoldable, bool isLvalue){
 		this.hash=hash;this.typeOnly=typeOnly;
 		this.isConstant=isConstant;this.isConstFoldable=isConstFoldable;
+		this.isLvalue=isLvalue;
 	}
 	this(Expression e){
 		this(!e?0.assocHash():e.tmplArgToHash().assocHash(),
-		     !e||e.isType(),!e||e.isConstant(),!e||e.isConstFoldable());
+		     !e||e.isType(),!e||e.isConstant(),!e||e.isConstFoldable(),!e||e.isLvalue());
 	}
 	TemplArgInfo combine(TemplArgInfo rhs){
 		return TemplArgInfo(assocHashCombine(hash,rhs.hash),
 		                    typeOnly&&rhs.typeOnly,
 		                    isConstant&&rhs.isConstant,
-		                    isConstFoldable&&rhs.isConstFoldable);
+		                    isConstFoldable&&rhs.isConstFoldable,
+		                    isLvalue&&rhs.isLvalue);
 	}
 }
 

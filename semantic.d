@@ -1572,7 +1572,11 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				mixin(SemEplg);
 			}
 		}else static if(S==Tok!"&"){
-			if(auto lv = e.isLvalue()){
+			if(e.type.isTuple()){
+				// TODO: propose element-wise semantics
+				sc.error("cannot take address of sequence", loc);
+				mixin(ErrEplg);
+			}if(auto lv = e.isLvalue()){
 				// TODO: this is a hack, find solution for taking address of
 				// overloaded declaration
 
@@ -2689,6 +2693,8 @@ class ExpTuple: Expression, Tuple{
 
 	override bool isConstant(){ return exprs.value.isConstant; }
 	override bool isConstFoldable(){ return exprs.value.isConstFoldable; }
+
+	override bool isLvalue(){ return exprs.value.isLvalue; }
 
 	mixin TupleImplConvTo!exprs;
 
@@ -8807,15 +8813,16 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 			assert(!!fun.type.ret);
 			mixin(PropErr!q{fun.type.ret});
 			mixin(ImplConvertTo!q{e,fun.type.ret});
-			// TODO: better error message if rvalue-ness is because of the implicit conv.
-			if(fun.type.stc&STCref && !e.checkLvalue(sc,e.loc)) mixin(ErrEplg);
 		}else if(fun.type.ret !is Type.get!void()){
 			sc.error(format("non-void function '%s' should return a value",fun.name),loc);
 			mixin(ErrEplg);
 		}
 		// TODO: auto ref
 		isRefReturn = cast(bool)(fun.type.stc&STCref);
-		if(isRefReturn && (assert(!!e),!e.checkLvalue(sc,e.loc))) mixin(ErrEplg);
+		if(isRefReturn && e){
+			// TODO: ref return should probably be banned for void returning functions
+			if(!e.checkLvalue(sc,e.loc)) mixin(ErrEplg);
+		}
 
 		if(e&&!e.finishDeduction(sc)) mixin(ErrEplg);
 		mixin(SemEplg);

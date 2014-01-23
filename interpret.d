@@ -2847,6 +2847,24 @@ mixin template CTFEInterpret(T) if(is(T==ExpTuple)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		foreach(x; exprs) x.byteCompile(bld);
 	}
+	static void byteCompileAddresses(ref ByteCodeBuilder bld, Expression e)in{
+		assert(e.type&&e.type.isTuple());
+		assert(e.isLvalue());
+	}body{
+		ExpTuple et;
+		if(auto ett=e.isExpTuple()) et=ett;
+		else if(auto ce=e.isCommaExp()){
+			void go(CommaExp ce){
+				ExpressionStm.byteCompileIgnoreResult(bld,ce.e1);
+				if(ce.e2.isCommaExp) return go(ce);
+				else if(auto ett=ce.e2.isExpTuple()) et=ett;
+			}
+			go(ce);
+		}
+		assert(!!et);
+		foreach(x;et.exprs) UnaryExp!(Tok!"&").emitAddressOf(bld, x);
+		return;
+	}
 }
 
 mixin template CTFEInterpret(T) if(is(T==EmptyStm)){
@@ -2895,6 +2913,7 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	static if(S==Tok!"&"){
 		static void emitAddressOf(ref ByteCodeBuilder bld, Expression e){
+			if(e.isExpTuple()) return ExpTuple.byteCompileAddresses(bld, e);
 			auto tu = e.type.getHeadUnqual();
 			if(tu.isFunctionTy()){
 				assert(cast(Symbol)e||cast(FieldExp)e);
@@ -3182,6 +3201,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 		import std.typetuple;
 		alias Instruction I;
 		static if(S==Tok!"="){
+			assert(!isLvalue);
 			auto strat = e1.byteCompileLV(bld);
 			e2.byteCompile(bld);
 			strat.emitStoreKV(bld);
@@ -4993,30 +5013,30 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 	size_t getBCSize(){
+		if(auto tp=type.isTypeTuple()){
+			size_t size=0;
+			foreach(x;tupleContext.vds) size+=x.getBCSize;
+			return size;
+		}
 		if(stc&STCbyref) return bcPointerBCSize;
 		if(stc&STClazy) return bcDelegateBCSize;
 		return getBCSizeof(type);
 	}
 
-	override void byteCompile(ref ByteCodeBuilder bld){
+	final override void byteCompile(ref ByteCodeBuilder bld){
+		byteCompileOptionalInit(bld, true);
+	}
+
+	private void byteCompileOptionalInit(ref ByteCodeBuilder bld, bool initialize){
 		if(auto tp=type.isTypeTuple()){
+			assert(initialize);
 			assert(tupleContext && tupleContext.vds.length == tp.length);
-			foreach(x;tupleContext.vds){
-				size_t len;
-				x.byteCompile(bld);
-			}
-			if(init&&!init.isExpTuple()){
-				init.byteCompile(bld);
-				size_t size=0, i=0;
-				foreach(Type x;tp){
-					auto bcs=getBCSizeof(x);
-					if(bcs == -1){
-						tupleContext.vds[i].emitUnsupportedError(bld);
-						return;
-					}
-					size+=bcs;
-					i++;
-				}
+			auto complexInit=init&&!init.isExpTuple();
+			foreach(x;tupleContext.vds) x.byteCompileOptionalInit(bld,!complexInit);
+			if(complexInit){
+				if(stc&STCref) UnaryExp!(Tok!"&").emitAddressOf(bld, init);
+				else init.byteCompile(bld);
+				size_t size=getBCSize();
 				bld.emitTmppush(size);
 				size_t off = 0;
 				foreach(x;tupleContext.vds){
@@ -5035,19 +5055,26 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		size_t off, len = getBCSize();
 		// dw(len," ",type);
 		if(len==-1) return emitUnsupportedError(bld);
-		if(auto ini=init?init.isStructConsExp():null){
+		if(initialize)if(auto ini=init?init.isStructConsExp():null){
 			assert(ini.tmpVarDecl is this,text(ini.tmpVarDecl));
 			ini.beginByteCompile(bld);
 		}
 
 		if(inHeapContext){
 			off = bld.getContextOffset();
-			bld.emit(Instruction.push);
-			bld.emitConstant(off);
 			setBCLoc(off, len);
 			bld.addContextOffset(len);
+		}else{
+			off = bld.getStackOffset();
+			setBCLoc(off, len);			
+			bld.addStackOffset(len);
 		}
 
+		if(!initialize) return;
+		if(inHeapContext){
+			bld.emit(Instruction.push);
+			bld.emitConstant(off);
+		}
 		if(stc&STCref){
 			assert(!!init);
 			UnaryExp!(Tok!"&").emitAddressOf(bld, init);
@@ -5062,13 +5089,10 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			bld.emitUnsafe(Instruction.popcn, this);
 			bld.emitConstant(len);
 		}else{
-			off = bld.getStackOffset();
 			if(len){
 				bld.emitPopp(len);
 				bld.emitConstant(off);
-				bld.addStackOffset(len);
 			}
-			setBCLoc(off, len);
 		}
 
 		if(auto ini=init?init.isStructConsExp():null){
