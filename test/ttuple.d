@@ -1,3 +1,102 @@
+
+struct DollarAndConstFolderExpansionTests{
+	alias Seq(T...)=T;
+	static:
+	enum e1=(()=>[1][(assert($==1),Seq!())])(); // ok
+	enum e2=(()=>[2,1][(assert($==3),Seq!())])(); // error
+	enum f1=[3,2,1][(assert($==3),Seq!())]; // ok
+	enum f2=[4,3,2,1][(assert($==3),Seq!())]; // error
+	enum g1=[3,2,1][(()=>(assert($==3),Seq!()))()]; // ok
+	enum g2=[4,3,2,1][(()=>(assert($==3),Seq!()))()]; // error
+
+	enum x1=[1,2,(assert(true),Seq!())]; // ok
+	enum x2=[1,2,(assert(false),Seq!())]; // error
+	enum y1=[1,2,(()=>(assert(true),Seq!()))()]; // ok
+	enum y2=[1,2,(()=>(assert(false),Seq!()))()]; // error
+
+	pragma(msg, assert(true,"fo",(assert(true),Seq!()))); // ok
+	pragma(msg, assert(true,"fo",(assert(false),Seq!()))); // error
+}
+
+struct TestSeqTemplateArgument{
+	alias Seq(T...)=T;
+	static:
+	struct Tuple(T...)if(T.length==2){
+		T expand;
+		this(T args){
+			expand[0]=args[0];
+			expand[1]=args[1];
+		}
+	}
+	int x=0;
+	alias y = Seq!(int,(x++,Seq!())); // error
+	enum tpl=Tuple!(int,int)(1,2);
+	enum w=Seq!(1,2,tpl.expand);
+	pragma(msg, [w],[tpl.expand]);
+	static assert([w]==[1,2,1,2]); // // TODO: comparing sequences
+	void foo(){
+		Seq!(int, int) bar(){ return Seq!(1,2); }//return Seq!(1,2); }
+		pragma(msg, bar());
+		enum z = Seq!(1,2,bar());
+		static assert([z]==[1,2,1,2]); // // TODO: comparing sequences
+		enum w=(()=>bar())();
+		static assert([w]==[1,2]); // // TODO: comparing sequences
+	}
+	struct S{
+		Seq!int x;
+		this(); // ok
+		this(int y,int z){ return x[0]=y; } // error
+		this(int y){ x[0]=y; }
+	}
+	static assert(S(2).x[0]==2);
+	static assert([S(3).x]==[3]);
+	// static assert(S(4).x==Seq!4); // TODO
+}
+
+struct ConstantFolderExpansionTests{
+	static assert(is(typeof(quz)==int));
+	static:
+	alias Seq(T...)=T;
+	auto bar(){ return Seq!(1,2); }
+	static assert([bar()]==[1,2]);
+
+	pragma(msg, (1,bar()));
+	auto foo(){ return (1,bar()); }
+	pragma(msg, foo());
+	
+	Seq!(bool, string) qux(){ return Seq!(false, "int quz;"); }
+	pragma(msg, assert(qux())); // error (but just one)
+	pragma(msg, (()=>assert(0))()); // error (but no note)
+	
+	mixin(Seq!(),qux()[1..2],Seq!());
+}
+
+struct SeqBehaviourWithBuiltInTypeConstructors{
+	static:
+	alias f=Seq!(int,double);
+	void foo(){
+		f* g; // error
+	}
+	
+	const(Seq!(int,double)) x=Seq!(1,2.0);
+	pragma(msg, typeof(x));
+	static assert(is(const(Seq!(int,double))[]==Seq!(const(int),const(double))));
+	static assert(is(immutable(typeof(x))[]==Seq!(immutable(int),immutable(double))));
+}
+
+struct TestExpansionForStaticConstructs{
+	static int x;
+	enum y=2;
+	static assert(true,(x++,Seq!())); // ok
+	static assert(Seq!(),Seq!(),Seq!(),Seq!(),true,Seq!()); // ok
+	static assert(Seq!(),Seq!(),Seq!(),Seq!(),true,Seq!(),Seq!()); // error
+	static assert(Seq!(),Seq!(),Seq!(),Seq!(),false,"false!"); // error
+	static assert(Seq!(),Seq!(),Seq!(),Seq!()); // error
+	mixin("",(x++,Seq!())); // error
+	mixin("",(y,Seq!())); // ok
+	static assert(Seq!((x++,Seq!()),true)); // error
+	static assert(Seq!((y,Seq!()),true));
+}
 struct Tuple(T...){
 	T expand;
 }
@@ -9,7 +108,6 @@ auto test0(){
 	return a[0];
 }
 
-/+ // TODO!
 auto test1(){
 	Tuple!(int,double) t;
 	Seq!(int,double) a=(()=>t.expand)();
@@ -18,7 +116,6 @@ auto test1(){
 }
 
 pragma(msg, test1());
-+/
 
 auto test2(){
 	Tuple!(int,double) t;
@@ -44,16 +141,16 @@ int testMemberTuple1(){
 int testZeroArgs(){
 	int x;
 	int foo(){ return x; }
-	return foo((x++,Seq!())); // TODO!
+	return foo((x++,Seq!()));
 }
-pragma(msg, testZeroArgs());
+pragma(msg, "za: ",testZeroArgs());
 
 
 auto seqret(int a, int b){auto x=Seq!(a,b);return x;}
 
 auto seqtak(){auto x = seqret(1,2); return x[0];}
 pragma(msg, "seqtak: ", seqtak());
-//pragma(msg, seqret(1,2)); // TODO!
+pragma(msg, "seqret: ", seqret(1,2)); // // TODO: show values instead
 
 auto compose(alias a, alias b,T...)(T args){
 	return a(b(args));
@@ -77,7 +174,7 @@ pragma(msg, "testmultirefret: ", testmultirefret());
 
 T seq(T...)(T args){ return args; }
 pragma(msg, (()=>[seq(1,2,3,4)])());
-pragma(msg, [seq(1,2,3,4)]); // TODO
+pragma(msg, [seq(1,2,3,4)]);
 
 
 
@@ -94,23 +191,23 @@ struct TupleExpand{
 	}
 }
 
-/+
-
 struct Tpl{
 	Seq!(int, double) foo;
 	int a,b;
 	alias Seq!(a,b) c;
 }
 
-void checkTpl(){
+auto checkTpl(){
 	void fun(int, double){ }
 	Tpl t;
-	fun(t.c);   // TODO!
-	t.c[0]=2;   // TODO!
-	t.foo[0]=2; // TODO!
+	fun(t.c);
+	t.c[0]=2;
+	t.foo[0]=2;
+	return t;
 }
+enum tpl=checkTpl();
+pragma(msg, tpl," ",tpl.a," ",tpl.b," ",tpl.c," ",tpl.foo); // // TODO: show values instead
 
-+/
 
 // alias Seq Seq;
 
