@@ -1,3 +1,7 @@
+struct TypeofThisConstraintQualifiers{
+	void foo()(int x)const if(is(typeof(this)==const(typeof(this)))){}
+	pragma(msg, TypeofThisConstraintQualifiers().foo(2)); // TODO
+}
 struct TestTypeConstructorMatching{
 	static foo(T)(const(T)[] a){
 		pragma(msg, T);

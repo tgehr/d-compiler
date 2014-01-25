@@ -22,7 +22,7 @@ struct OverloadAliasToMemberOfMember{
 	enum s=S();
 	pragma(msg, "foo: ",s.foo()," ",s.foo(1)); // TODO
 }
-/+
+
 struct TemplateFunctionLiteralAlias{
 	alias id = (a)=>a;
 	alias plus = (a,b)=>a+b;
@@ -149,7 +149,7 @@ void goooo(int){}
 alias goooo foooo; // TODO: fix
 //alias double foooo;
 
-pragma(msg, foooo); // error
+pragma(msg, foooo); // TODO: error
 
 
 
