@@ -139,6 +139,7 @@ abstract class Expression: Node{
 		CommaExp,
 		LengthExp,
 		CurrentExp,
+		ThisExp,
 		SuperExp,
 		TemplateInstanceExp,
 		IndexExp,
@@ -269,6 +270,8 @@ class ModuleIdentifier: LookupIdentifier{
 
 class ThisExp: CurrentExp{
 	override string toString(){ return "this"; }
+
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class SuperExp: CurrentExp{

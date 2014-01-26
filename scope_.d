@@ -397,6 +397,11 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return r;
 	}
 
+	final Scope cloneFunction(Scope parent, FunctionDef fun){
+		auto r = New!FunctionScope(parent, fun);
+		r.symtab=symtab.dup;
+		return r;
+	}
 protected:
 	bool canDeclareNested(Declaration decl){return true;} // for BlockScope
 private:

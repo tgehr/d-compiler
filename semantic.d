@@ -5960,6 +5960,7 @@ mixin template Semantic(T) if(is(T==ThisExp)){
 	protected override Dependent!Type determineType(Scope sc, AggregateDecl d){
 		return d.getType().independent!Type;
 	}
+	override bool tmplArgEquals(Expression rhs){ return rhs.isThisExp()&&rhs.type.equals(type); }
 }
 mixin template Semantic(T) if(is(T==SuperExp)){
 	protected override Dependent!Type determineType(Scope sc, AggregateDecl d){
@@ -5986,6 +5987,7 @@ mixin template Semantic(T) if(is(T==SuperExp)){
 		mixin(SetErr!q{});
 		return Dependee(this,null).dependent!Type;
 	}
+	override bool tmplArgEquals(Expression rhs){ return rhs.isSuperExp()&&rhs.type.equals(type); }
 }
 
 mixin template Semantic(T) if(is(T==FieldExp)){
@@ -6410,6 +6412,10 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 
 	// TemplateDecl needs this.
 	override bool tmplArgEquals(Expression rhs){
+		if(e1.isCurrentExp()){
+			if(auto sym = rhs.isSymbol())
+				return e2.tmplArgEquals(sym);
+		}
 		if(auto fld = rhs.isFieldExp())
 			return e2.tmplArgEquals(fld.e2) && e1.tmplArgEquals(fld.e1);
 		return false;
@@ -6417,6 +6423,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 
 	override size_t tmplArgToHash(){
 		import hashtable;
+		if(e1.isCurrentExp()) return e2.tmplArgToHash();
 		return FNV(e2.meaning.toHash(), e1.tmplArgToHash());
 	}
 }
