@@ -1,3 +1,11 @@
+void deduceparamtypeternary(bool x, bool y){
+	auto foo = [x=>x, x=>x, (int x)=>x];
+	auto bar = x?x=>x:y?x=>x:(int x)=>x;
+	auto baz = x?(int x)=>x:y?x=>x:x=>x;
+	static assert(is(typeof(foo)==typeof(bar)[]));
+	static assert(is(typeof(bar)==typeof(baz)));
+	static assert(is(typeof(baz): int function(int)));
+}
 
 void contextpointerqualimplconv(){
 
