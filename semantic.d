@@ -4156,21 +4156,22 @@ template Semantic(T) if(is(T==TernaryExp)){
 		e1=e1.convertTo(Type.get!bool());
 		mixin(SemChld!q{e1,e2,e3});
 		auto vd = Type.get!void();
-		if(e2.type.getHeadUnqual() is vd){
-			mixin(ConvertTo!q{e3,vd}); // TODO: implicit explicit conversion
-			type = vd;
-		}else if(e3.type.getHeadUnqual() is vd){
-			mixin(ConvertTo!q{e2,vd}); // TODO: implicit explicit conversion
-			type = vd;
-		}else{
-			mixin(TypeCombine!q{type; e2, e3});
-			if(!type){
+		mixin(TypeCombine!q{type; e2, e3});
+		if(!type){
+			if(e2.type.getHeadUnqual() is vd){
+				mixin(ConvertTo!q{e3,vd}); // TODO: implicit explicit conversion
+				type = vd;
+			}else if(e3.type.getHeadUnqual() is vd){
+				mixin(ConvertTo!q{e2,vd}); // TODO: implicit explicit conversion
+				type = vd;
+			}else{
+
 				sc.error(format("incompatible types for ternary operator: '%s' and '%s'",e2.type,e3.type),loc);
 				mixin(ErrEplg);
 			}
-			mixin(ImplConvertTo!q{e2,type});
-			mixin(ImplConvertTo!q{e3,type});
 		}
+		mixin(ImplConvertTo!q{e2,type});
+		mixin(ImplConvertTo!q{e3,type});
 		if(!isConstFoldable()){
 			mixin(ConstFold!q{e1});
 			mixin(ConstFold!q{e2});
