@@ -1,10 +1,23 @@
 
+/+
+struct ComparisonTests{
+	alias Seq(T...)=T;
+	static:
+	auto seq(T...)(T args)=>args;
+	enum a=1, b=2, c=3;
+	alias Foo(bool b)=Seq!(b?Seq!(a,b,c):seq(a,b,c));
+	static assert(Foo!false==Seq!(1,false,3));
+	static assert(Foo!true==Seq!(1,true,3));
+	static assert(!is(typeof({static assert(Foo!true!=Seq!(1,true,3));})));
+
+	bool cmptest(int a,int b){
+		return Seq!(a,b)!=seq(1,2);
+	}
+	//pragma(msg, cmptest(1,2));
+}
++/
+
 // ref void foo(){ return; } // // TODO: should this fail?
-/+void deducetype(bool x, bool y){
-	auto foo = [x=>x, x=>x, (int x)=>x]; // ok
-	auto bar = x?x=>x:y?x=>x:(int x)=>x; // TODO (the problem is conversion to void)
-	auto baz = x?(int x)=>x:y?x=>x:x=>x; // TODO (the problem is conversion to void)
-}+/
 
 /+alias Seq(T...)=T;
 enum ESeq{ foo=Seq!(1,2), bar=Seq!(2,3) } // TODO? (TODO: bug report against DMD?)
@@ -39,15 +52,6 @@ void main(){
 }
 
 immutable arr = [Foo.xxx]; // TODO+/
-
-
-/+auto foo(){
-	void[][] x = [["1","2","3"],cast(void[])[1,2,3]];
-	x[0]=x[1];
-	return x;
-}
-pragma(msg, foo());
-+/
 
 /+
 immutable int x=2;
