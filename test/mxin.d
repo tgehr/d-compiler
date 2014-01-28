@@ -1,3 +1,7 @@
+mixin(['i','n','t',' ','f','o','o','a','s','d','f',';']);
+static assert(is(typeof(fooasdf)==int));
+
+
 struct FOFOFO{
 	enum x = undef; // error
 	mixin(`float a11=`~foo1~";"); // error

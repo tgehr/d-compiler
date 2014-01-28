@@ -1639,7 +1639,7 @@ pragma(msg, "testimplconv2ptr: ",testimplconv2ptr());
 
 static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // should this be invalid?
 
-static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // TODO error: cast(char[])"123" currently creates an array literal, should it be invalid during ctfe instead?
+static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // error
 
 bool strchr(immutable(char)* haystack, immutable(char)* needle){
 	if(haystack is null) return needle is null;

@@ -1,5 +1,4 @@
 
-
 // // TODO: wait until semantics of the following is clarified by spec
 // // (I currently assume the spec is not implementable.)
 /+string bb(string x, string y){ return x~y; }
@@ -25,6 +24,10 @@ enum Weekdays{
 	Saturday,
 	Sunday,
 }
+
+enum testcast=((Weekdays x)=>cast(double)x)(Weekdays.Tuesday);
+pragma(msg, "testcast: ",testcast);
+static assert(testcast==1.0);
 
 pragma(msg, cast(Weekdays)2);
 pragma(msg, cast(int)Weekdays.Friday);

@@ -74,7 +74,7 @@ void main(){
 
 	//enum zz = cast(dchar[])"hello";
 	immutable xx = "hello";
-	enum zz = cast(char[])xx;
+	enum zz = cast(char[])xx; // error
 	enum zzz = "abc";
 	//pragma(msg, zz,zzz,zz>['a','b','c'],zz>zzz);
 	//enum xxx = ['h','e','l','l','o']<['a','b','c'];
@@ -97,7 +97,8 @@ void main(){
 	enum immutable(dchar)[] idc = "a"~"b"~"c"~"d"; // TODO!
 	pragma(msg, idc);
 
-	enum cic = cast(dchar[][])["test"];
+	enum cic_e = cast(dchar[][])["test"]; // error
+	enum cic = cast(immutable(dchar)[][])["test"]; // ok
 	pragma(msg, cic);
 
 	pragma(msg, []<[1]);

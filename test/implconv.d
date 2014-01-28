@@ -1,3 +1,6 @@
+auto castapp=cast(dchar[])['2','a']~";";
+static assert(is(typeof(castapp)==immutable(char)[])); // // TODO: DMD says dchar. what rules does it use?
+
 void deduceparamtypeternary(bool x, bool y){
 	auto foo = [x=>x, x=>x, (int x)=>x];
 	auto bar = x?x=>x:y?x=>x:(int x)=>x;

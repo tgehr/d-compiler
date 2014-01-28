@@ -295,6 +295,27 @@ int[] allocarr(){
 }
 pragma(msg, allocarr());
 
+struct VoidArrayTests{
+	static:
+	enum x1 = (x=>cast(const(void[])[])[[1,2,x]])(3); // ok
+	enum x2 = (x=>cast(const(void[])[])x)([[4,5,6]]); // TODO
+	auto test1(){
+		void[][] x = [["1","2","3"],cast(void[])[1,2,3]];
+		x[0]=x[1];
+		return x;
+	}
+	pragma(msg, "void array 1: ",test1());
+	enum x=test1();
+	static assert(is(typeof(x)==void[][]));
+	enum y=(()=>[["1","2","3"],cast(void[])[1,2,3]])();
+	static assert(is(typeof(y)==void[][]));
+	enum z=cast(immutable(char)[][])y[0];
+	pragma(msg, "void array 2: ",y," ",z);
+	enum v=(y[0][0],2); // ok
+	enum c=cast(int[])[1.0,2.0]; // ok
+	enum w=cast(int[])y[0]; // error
+}
+
 struct TestVoidArrayVoidPtr{
 	enum returnVoidArray = delegate void[](){return [2];}();
 
