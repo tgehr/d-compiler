@@ -1,3 +1,18 @@
+struct IFTIDelegateDeduction{
+	auto qux()(int[] delegate(int) dg){}
+	
+	void testqux(){ qux(x=>x); } // error // TODO: improve error message
+	
+	auto bar()(int[] delegate(int) dg){}
+	auto bar()(int[] delegate(int[]) dg){}
+	
+	void testbar(){ bar(x=>x); }
+	
+	auto foo(int[] delegate(int) dg){}
+	auto foo(int[] delegate(int[]) dg){}
+	
+	void testfoo(){ foo(x=>x); }
+}
 struct TypeofThisConstraintQualifiers{
 	void foo()(int x)const if(is(typeof(this)==const(typeof(this)))){}
 	pragma(msg, TypeofThisConstraintQualifiers().foo(2)); // TODO
@@ -193,8 +208,6 @@ bool instFooDgTODO(S,T,R=T)(S x, FooDg!(R,T,S) dg, T y){
 	return dg(x)(y);
 }
 pragma(msg, "instFooDgTODO: ", instFooDgTODO(2, a=>b=>b&&a==2,true)); // TODO!
-
-
 
 template ElementType(T){ alias typeof({T t; return t[0];}()) ElementType; } // display e
 

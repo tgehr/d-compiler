@@ -1637,7 +1637,7 @@ string testimplconv2ptr(){
 static assert(testimplconv2ptr()=="hello world");
 pragma(msg, "testimplconv2ptr: ",testimplconv2ptr());
 
-static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // should this be invalid?
+static assert({auto x="hello"; return cast(char[])x~cast(char[])x;}()=="hellohello"); // error
 
 static assert({char[] x = cast(char[])"123"; return x~=cast(char[])x;}()=="123123"); // error
 

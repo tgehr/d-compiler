@@ -1,3 +1,7 @@
+void inferfailimplicitconv(){
+	string delegate(string, double) dg = (n, int x){return "";}; // error
+	dg("2",2);
+}
 
 static assert(is(int delegate()auto==int delegate()));
 
