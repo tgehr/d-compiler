@@ -94,7 +94,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 		if(this is x) mixin(SemCheck);
 		else mixin(SemProp!q{x});
 		auto r = x.interpretV().toExpr();
-		r.dontConstFold();		
+		r.dontConstFold();
 		if(this is r) mixin(SemCheck);
 		fixupLocations(r);
 		assert(!isConstant() || !needRetry); // TODO: file bug, so that this can be 'out'
@@ -137,10 +137,32 @@ void copyLocations(ArrayLiteralExp r, ArrayLiteralExp a){
 
 mixin template Interpret(T) if(is(T==CastExp)){
 	override bool checkInterpret(Scope sc){
-		auto impld = e.type.implicitlyConvertsTo(type);
-		assert(!impld.dependee); // analysis has already determined this
-		if(impld.value) return e.checkInterpret(sc);
-		if(type.getHeadUnqual().isPointerTy()){
+		if(e.sstate != SemState.completed) return true;
+		bool sanityCheck(){
+			auto t1=e.type.getHeadUnqual(), t2=type.getHeadUnqual();
+			auto cvt1=t1, cvt2=t2;
+			if(auto e1=t1.isEnumTy()) cvt1=e1.decl.base;
+			if(auto e2=t2.isEnumTy()) cvt2=e2.decl.base;
+			assert(cvt1&&cvt2);
+			// TODO: comprehensive treatment of unique expressions
+			if(e.isUnique()) cvt1=t1.getUnqual(), cvt2=t2.getUnqual();
+			if(cvt1.equals(cvt2)) return true;
+			auto impld = cvt1.implicitlyConvertsTo(cvt2);
+			assert(!impld.dependee); // analysis has already determined this
+			if(impld.value||cvt1.isBasicType()&&cvt2.isBasicType()) return true;
+
+			auto t1u=t1.getUnqual();
+			if(t1u is Type.get!(void[])() && t2.isDynArrTy()||
+			   t1u is Type.get!(void*)() && t2.isPointerTy())
+				return true;
+				          
+			auto le=e.isLiteralExp();
+			auto el = type.getElementType();
+			if(el&&le&&le.isPolyString()&&el.getHeadUnqual() !is Type.get!void())
+				return !!type.getHeadUnqual().isSomeString();
+			return false;
+		}
+		if(!sanityCheck()){
 			sc.error(format("cannot interpret cast from '%s' to '%s' at compile time",e.type,type),loc);
 			return false;
 		}
@@ -149,7 +171,7 @@ mixin template Interpret(T) if(is(T==CastExp)){
 	override Variant interpretV(){
 		auto le=e.isLiteralExp(); // polysemous string literals might be cast
 		auto el = type.getElementType();
-		if(el&&le&&le.isPolyString()){
+		if(el&&le&&le.isPolyString()&&el.getHeadUnqual() !is Type.get!void()){
 			auto vle=e.interpretV();
 			auto typeu = type.getHeadUnqual();
 			if(typeu.isSomeString()) return vle.convertTo(type);
@@ -160,8 +182,37 @@ mixin template Interpret(T) if(is(T==CastExp)){
 		}else return e.interpretV().convertTo(type);
 	}
 
-	override void _interpretFunctionCalls(Scope sc){mixin(IntFCChld!q{e});}
+	override void _interpretFunctionCalls(Scope sc){
+		mixin(IntFCChldNoEplg!q{e});
+		if(!invokedSemantic){
+			sstate=SemState.begin;
+			needRetry=false;
+			semantic(sc);
+		}
+		if(needRetry){ sstate=SemState.completed; return; }
+		invokedSemantic=true;
+		mixin(IntChld!q{e});
+		auto t1u=e.type.getUnqual(), t2=type.getHeadUnqual();
+		if(t1u is Type.get!(void[])() && t2.isDynArrTy()||
+		   t1u is Type.get!(void*)() && t2.isPointerTy()){
+			auto cnt=e.interpretV().getContainer();
+			auto ty2=t2.isDynArrTy()?t2.getElementType():t2.isPointerTy().ty;
+			auto t1=null;
+			if(cnt.length){
+				auto ty1=cnt[0].getType();
+				mixin(RefConvertsTo!q{bool c; ty1, ty2, 0});
+				if(!c){
+					sc.error(format("cannot interpret cast from '%s' aliasing a '%s' to '%s' at compile time", e.type,t2.isDynArrTy()?ty1.getDynArr():ty1.getPointer(),type), loc); // TODO: 'an'
+					mixin(ErrEplg);
+				}
+			}
+		}
+		mixin(IntFCEplg);
+	}
+private:
+	bool invokedSemantic=false;
 }
+
 mixin template Interpret(T) if(is(T==Type)){
 	override bool checkInterpret(Scope sc){return true;}
 	override void interpret(Scope sc){return this;}
@@ -309,7 +360,14 @@ mixin template Interpret(T) if(is(T==LiteralExp)){
 		auto arr=value.get!(Variant[])();
 		// TODO: allocation ok?
 		Expression[] lit = new Expression[arr.length];
-		foreach(i,ref x;lit) x = arr[i].toExpr();
+		foreach(i,ref x;lit){
+			x = arr[i].toExpr();
+			if(x.type.getElementType()&&!x.type.isSomeString())
+				if(auto le=x.isLiteralExp()){
+					x=le.toArrayLiteral();
+					continue;
+				}
+		}
 		// TODO: this sometimes leaves implicit casts from typeof([]) in the AST...
 		auto r=New!ArrayLiteralExp(lit);
 		r.loc=loc;
@@ -366,6 +424,8 @@ mixin template Interpret(T) if(is(T==IndexExp)){
 	override Variant interpretV(){
 		if(a.length==0) return e.interpretV();
 		assert(a.length==1);
+		if(e.type.getUnqual() is Type.get!(void[])())
+			return Variant(null, Type.get!void());
 		auto lit = e.interpretV();
 		auto ind = a[0].interpretV();
 		return lit[ind];
@@ -555,11 +615,10 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 		}else static if(isRelationalOp(S)||isArithmeticOp(S)||isBitwiseOp(S)||isShiftOp(S)||isLogicalOp(S))
 			return e1.interpretV().opBinary!(TokChars!S)(e2.interpretV());
 		else static if(S==Tok!"~"){
-			if(e1.type.equals(e2.type)) return e1.interpretV().opBinary!"~"(e2.interpretV());
 			// TODO: this might be optimized. this gc allocates
 			// TODO: get rid of bulky string special casing code
 			if(auto ety = e1.type.getElementType()){
-				if(ety.equals(e2.type)){
+				if(ety.getUnqual().equals(e2.type.getUnqual())){
 					Variant rhs = e2.interpretV();
 					if(ety is Type.get!(immutable(char))())
 						rhs = Variant(""c~rhs.get!char(),type);
@@ -571,19 +630,21 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 					return e1.interpretV().opBinary!"~"(rhs);
 				}
 			}
-			assert(e2.type.getElementType() &&
-			       e2.type.getElementType().equals(e1.type),
-			       text(e2.type," ",e1.type));
-			auto ety = e1.type;
-			auto lhs = e1.interpretV();
-			if(ety is Type.get!(immutable(char))())
-				lhs = Variant(""c~lhs.get!char(),ety);
-			else if(ety is Type.get!(immutable(wchar))())
-				lhs = Variant(""w~lhs.get!wchar(),ety);
-			else if(ety is Type.get!(immutable(dchar))())
-				lhs = Variant(""d~lhs.get!dchar(),ety);
-			else{ auto l=[lhs];lhs = Variant(l,l,ety.getDynArr()); }
-			return lhs.opBinary!"~"(e2.interpretV());
+
+			if(auto ety = e2.type.getElementType()){
+				if(e1.type.getUnqual().equals(ety.getUnqual())){
+				   auto lhs = e1.interpretV();
+				   if(ety is Type.get!(immutable(char))())
+					   lhs = Variant(""c~lhs.get!char(),ety);
+				   else if(ety is Type.get!(immutable(wchar))())
+					   lhs = Variant(""w~lhs.get!wchar(),ety);
+				   else if(ety is Type.get!(immutable(dchar))())
+					   lhs = Variant(""d~lhs.get!dchar(),ety);
+				   else{ auto l=[lhs];lhs = Variant(l,l,ety.getDynArr()); }
+				   return lhs.opBinary!"~"(e2.interpretV());
+				}
+			}
+			return e1.interpretV().opBinary!"~"(e2.interpretV());
 		}else return super.interpretV();
 	}
 
@@ -1551,8 +1612,12 @@ class LVstorea: LValueStrategy{
 	static opCall(Type elty, ErrorInfo info){
 		return new LVstorea(elty, info, false);
 	}
+	static bool isArrElement(Type elty){
+		auto unq=elty.getHeadUnqual();
+		return unq.isDynArrTy()&&unq.getElementType().getHeadUnqual() !is Type.get!(void)();
+	}
 	private this(Type elty, ErrorInfo inf, bool ptr){
-		isarr = cast(bool)elty.getHeadUnqual().isDynArrTy();
+		isarr = isArrElement(elty);
 		if(!isarr) els = getCTSizeof(elty);
 		bcsiz = getBCSizeof(elty);
 		if(auto i=elty.isIntegral()){
@@ -2951,7 +3016,7 @@ mixin template CTFEInterpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 			bld.emitUnsafe(I.ptrtoa, this);
 			bld.emit(I.push);
 			bld.emitConstant(0);
-			if(type.getHeadUnqual().isDynArrTy()) bld.emitUnsafe(I.loadaa, this);
+			if(LVstorea.isArrElement(type)) bld.emitUnsafe(I.loadaa, this);
 			else{
 				bld.emitUnsafe(I.loada, this);
 				bld.emitConstant(getCTSizeof(type));
@@ -3116,7 +3181,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			bld.emitConstant(0);
 		}
 	Lload:
-		if(type.getHeadUnqual().isDynArrTy()){
+		if(LVstorea.isArrElement(type)){
 			bld.emitUnsafe(I.loadaa, this);
 			return;
 		}
@@ -3452,7 +3517,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 				if(!isLvalue){ strat.emitStoreKV(bld); return null; }
 				else{ strat.emitStoreKR(bld); return strat; }
 			 }
-	}else static if(S==Tok!"||"||S==Tok!"&&"){
+		}else static if(S==Tok!"||"||S==Tok!"&&"){
 			assert(e1.type is Type.get!bool());
 			e1.byteCompile(bld);
 			auto tu = type.getHeadUnqual();
@@ -3465,26 +3530,11 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			e2.byteCompile(bld);
 			end.here();
 		}else static if(S==Tok!"~"){
-			auto exp1=e1, exp2=e2;
-			// kludge: remove supposedly "unsafe" casts
-			// this only allows valid code, but maybe it will have to be changed
-			// eg. cast(char[])"hello"~cast(char[])"hello" is allowed by this
-			// but not by conservative treatment
-			void removeReinterpretCast(ref Expression exp, Expression other){
-				if(exp.type is other.type.getElementType()) return;
-				if(auto ce=exp.isCastExp()){
-					if(ce.type.getUnqual() is ce.e.type.getUnqual())
-						exp = ce.e;
-				}
-			}
-			removeReinterpretCast(exp1, exp2);
-			removeReinterpretCast(exp2, exp1);
-
-			exp1.byteCompile(bld);
-			if(e1.type is e2.type.getElementType())
+			e1.byteCompile(bld);
+			if(e1.type.getUnqual() is e2.type.getUnqual().getElementType())
 				emitMakeArray(bld,e2.type,1);
-			exp2.byteCompile(bld);
-			if(e2.type is e1.type.getElementType())
+			e2.byteCompile(bld);
+			if(e2.type.getUnqual() is e1.type.getUnqual().getElementType())
 				emitMakeArray(bld,e1.type,1);
 			bld.emit(I.concata);
 		}else static if(S==Tok!"~="){
@@ -4123,13 +4173,18 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 		import std.typetuple;
 		alias Instruction I;
 		auto t1 = e.type.getHeadUnqual(), t2 = type.getHeadUnqual();
-		if(t1.equals(t2)) return;
+		auto cvt1=t1, cvt2=t2;
+		if(auto e1=t1.isEnumTy()) cvt1=e1.decl.base;
+		if(auto e2=t2.isEnumTy()) cvt2=e2.decl.base;
+		assert(cvt1&&cvt2);
+		if(cvt1.equals(cvt2)) return;
+		if(e.isUnique()) cvt1=cvt1.getUnqual(), cvt2=cvt2.getUnqual();
 		if(t2.getHeadUnqual() is Type.get!void()){
 			bld.ignoreResult(getBCSizeof(t1));
 			return;
 		}
-		if(auto from=t1.isIntegral()){
-			if(auto to=t2.isIntegral()){
+		if(auto from=cvt1.isIntegral()){
+			if(auto to=cvt2.isIntegral()){
 				auto fb=from.bitSize(), tb=to.bitSize();
 				if(fb<tb && from.isSigned==to.isSigned()||tb==64) return;
 				if(to is Type.get!bool()){
@@ -4140,15 +4195,15 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 				bld.emitConstant(to.bitSize());
 				return;
 			}else foreach(T; TypeTuple!(float, double, real)){ // TODO: imaginary/complex
-				if(t2 is Type.get!T()){
+				if(cvt2 is Type.get!T()){
 					bld.emit(from.isSigned() ? I.int2real : I.uint2real);
 					static if(!is(T==real)) bld.emit(mixin(`I.real2`~T.stringof));
 					return;
 				}
 			}
 		}else foreach(T; TypeTuple!(float, double, real)){
-			if(t1 is Type.get!T()){
-				if(auto to=t2.isIntegral()){
+			if(cvt1 is Type.get!T()){
+				if(auto to=cvt2.isIntegral()){
 					static if(!is(T==real)) bld.emit(mixin(`I.`~T.stringof~`2real`));
 					if(to is Type.get!bool()){
 						bld.emit(I.real2bool);
@@ -4162,7 +4217,7 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 					}
 					return;
 				}else foreach(S; TypeTuple!(float, double, real)){
-					if(type is Type.get!S()){
+					if(cvt2 is Type.get!S()){
 						static if(is(S==T)) return;
 						else{
 							static if(!is(T==real)) bld.emit(mixin(`I.`~T.stringof~`2real`));
@@ -4175,8 +4230,6 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 			}
 		}
 
-		if(e.isDirectlyAllocated()) t1 = t1.getUnqual(), t2 = t2.getUnqual(); // TODO: this is not good.
-
 		void castToVoidPtrOrArray(Type tt){
 			auto siz=getBCSizeof(tt);
 			bld.emitTmppush(siz);
@@ -4187,12 +4240,13 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 
 		auto varr=Type.get!(void[])();
 		auto vptr=Type.get!(void*)();
-		auto t1u=t1.getUnqual(), t2u=t2.getUnqual();		
-		if(t2u is varr||t2u is vptr){
+		auto cvt1u=cvt1.getUnqual(), cvt2u=cvt2.getUnqual();		
+
+		if(cvt2u is varr||cvt2u is vptr){
 			castToVoidPtrOrArray(t1);
 			return;
 		}
-		if(t1u is varr||t1u is vptr){
+		if(cvt1u is varr||cvt1u is vptr){
 			bld.emitUnsafe(t1 is varr ? I.castfromvarr : I.castfromvptr, this);
 			static assert(Type.sizeof<=ulong.sizeof);
 			bld.emitConstant(cast(ulong)cast(void*)t2);
@@ -4201,18 +4255,30 @@ mixin template CTFEInterpret(T) if(is(T==CastExp)){
 
 		// TODO: sanity check for reinterpreted references
 		// TODO: sanity check for array cast alignment
-		auto rcd = t1.refConvertsTo(t2,0);
+		auto rcd = cvt1.refConvertsTo(cvt2,0);
 		assert(!rcd.dependee); // must have been determined to type check the expression
-		if(rcd.value) return;
+		if(rcd.value){
+			auto el1=t1.getElementType(), el2=t2.getElementType();
+			bool ok=true;
+			while(el1 && el2){
+				auto el1u=el1.getHeadUnqual(), el2u=el2.getHeadUnqual();
+				if(el2u is Type.get!void() && el1u !is Type.get!void())
+					ok=false;
+				el1=el1u.getElementType(), el2=el2u.getElementType();
+			}
+			if(ok) return;
+		}
 
 		if(auto dyn=t1.isDynArrTy()){
 			if(auto ptr=t2.isPointerTy()){
-				if(t2 is Type.get!(void*)()){
+				if(cvt2u is Type.get!(void*)()){
 					bld.emit(I.ptra);
 					castToVoidPtrOrArray(t1.getElementType().getPointer());
 					return;
 				}
-				auto rcd2 = dyn.refConvertsTo(ptr.ty.getDynArr(), 0);
+				cvt1=dyn, cvt2=ptr.ty.getDynArr();
+				// TODO: comprehensive treatment of unique expressions
+				auto rcd2 = cvt1.refConvertsTo(cvt2, 0);
 				assert(!rcd2.dependee);
 				if(rcd2.value){
 					bld.emit(I.ptra);
@@ -5113,7 +5179,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			assert(ini.tmpVarDecl is this,text(ini.tmpVarDecl));
 			ini.beginByteCompile(bld);
 		}
-
 		if(inHeapContext){
 			off = bld.getContextOffset();
 			setBCLoc(off, len);
@@ -5180,8 +5245,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		}else{
 			// TODO: nested functions
 			size_t len, off = getBCLoc(len);
-			// import std.stdio; writeln(vd," ",off," ",len);
-
 			if(!~off){
 				if(stc&(STCimmutable|STCconst)&&init){
 					// TODO: this should implicitly copy aggregates
@@ -5431,7 +5494,16 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		runAnalysis!HeapContextAnalysis(this);
 	}
 
-	int traverseHeapContext(scope int delegate(VarDecl) dg){
+	/+final int traverseHeapContext(scope int delegate(VarDecl) dg){
+		if(stc&STCstatic) return 0;
+		auto decl=scope_.getDeclaration();
+		if(!decl) return 0;
+		if(auto fd=decl.isFunctionDef()) return fd.traverseOwnHeapContext(dg);
+		else if(auto ad=decl.isAggregateDecl()) return ad.traverseFields(dg);
+		else assert(0);
+	}+/
+	
+	final int traverseHeapContext(scope int delegate(VarDecl) dg){
 		foreach(p;type.params.filter!(p=>p.inHeapContext))
 			if(auto r=dg(p)) return r;
 		// TODO: collect variables more efficiently
@@ -5919,7 +5991,7 @@ mixin template CTFEInterpret(T) if(is(T==DynArrTy)){
 		*cast(BCSlice*)mem.ptr=BCSlice(vcnt, vcnt[ctsize*start..ctsize*end]);		
 	}
 	override Variant variantFromMemory(void[] mem, Type type){
-		if(type is Type.get!(void[])()){
+		if(type.getUnqual() is Type.get!(void[])()){
 			assert(mem.length==getCTSizeof(Type.get!(void[])()));
 			return voidPointerOrArrayToVariant(mem,BCSlice.sizeof);
 		}
@@ -6187,9 +6259,9 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 				assert(mem.length>=BCPointer.sizeof);
 				auto ptr=*cast(BCPointer*)mem.ptr;
 				assert(ptr.ptr is ptr.container.ptr);
-				if(auto efd=decl.isFunctionDef())
+				if(auto efd=decl.isFunctionDef()){
 					r[outerContext]=Variant(parseContext(ptr.container, efd));
-				else if(auto agg=decl.isAggregateDecl()){
+				}else if(auto agg=decl.isAggregateDecl()){
 					auto ty=agg.getType().applySTC(fd.stc&STCtypeconstructor);
 					if(!decl.isReferenceAggregateDecl()) ty=ty.getPointer();
 					r[outerContext]=ty.variantFromMemory((cast(void*)&ptr)[0..BCPointer.sizeof],ty);
