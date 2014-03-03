@@ -30,21 +30,13 @@ class C{
 	auto _InsertAllBut(int v) {
 		int* node = null;
 		//enum mutable = is(typeof({node.value;}));
-		enum foo = {return ()=>node;};
+		enum foo = {return ()=>node;}; (DMD stores runtime context pointer in enum constant magically.)
 		return 2;//foo()();
 	}
 }
 
 pragma(msg, (()=>(new C())._InsertAllBut(2))());
 +/
-
-
-/+alias immutable(char)[] string;
-
-void main(){
-	string delegate(string, double) dg = (n, int x){return "";};
-	import std.stdio; writeln(dg("2",2));
-}+/
 
 
 /+enum Foo{

@@ -81,6 +81,11 @@ struct Closures{
 	static assert(is(typeof(add23):immutable(immutable(int) delegate(int)pure)));
 	pragma(msg, "add23: ",add23(3));
 	static assert(add23(3)==5);
+
+	static foo(int delegate(int delegate(int)) f)=>
+		(int delegate(int) k)=>(int r)=>f(k);
+	enum ff=foo(x=>x(2));
+	static assert(ff(x=>x)(2)==2);
 }
 
 
