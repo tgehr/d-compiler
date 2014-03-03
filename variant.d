@@ -180,7 +180,7 @@ struct Variant{
 		assert(cnt.ptr<=arr.ptr && arr.ptr+arr.length<=cnt.ptr+cnt.length); // TODO: relax?
 		assert(type.getElementType(),text(type));
 		auto tt=type.getElementType().getUnqual(); // TODO: more restrictive assertion desirable
-		if(tt !is Type.get!(void*)()&&tt!is Type.get!(void[])())
+		if(tt !is Type.get!(void*)()&&tt!is Type.get!(void[])()&&tt!is Type.get!void())
 			foreach(x;cnt) assert(tt is x.type.getUnqual(),text(cnt," ",tt," ",x.type," ",x));
 	}body{
 		this.type=type;
