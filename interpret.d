@@ -6175,15 +6175,18 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		if(!fun){ (cast(byte[])mem)[]=0; return; }
 		assert(cast(FunctionDef)fun.meaning);
 		auto fd = cast(FunctionDef)cast(void*)fun.meaning;
-		auto ctx = buildContext(value.getDelegateContext(), fd);
-		assert(ctx.length==bcPointerBCSize*ulong.sizeof);
-		auto ptr = *cast(BCPointer*)ctx.ptr;
+		auto ctx = buildContext(value.getDelegateContext(), fd, true);
+		auto ptr = BCPointer(null,null);
+		if(ctx.length){
+			assert(ctx.length==bcPointerBCSize*ulong.sizeof);
+			ptr = *cast(BCPointer*)ctx.ptr;
+		}
 		mem[0..BCPointer.sizeof]=(cast(void*)&ptr)[0..BCPointer.sizeof];
 		*cast(Symbol*)(mem.ptr+bcPointerBCSize*ulong.sizeof)=fun;
 	}
 
-	private static void[] buildContext(Variant[VarDecl] vars, FunctionDef fd){
-		if(vars.byid in vmtr.aggr_aliasing) return vmtr.aggr_aliasing[vars.byid];
+	private static void[] buildContext(Variant[VarDecl] vars, FunctionDef fd, bool first=false){
+		if(!first && vars.byid in vmtr.aggr_aliasing) return vmtr.aggr_aliasing[vars.byid];
 		size_t size=0;
 		foreach(vd,_;vars){
 			if(vd is outerContext){
@@ -6200,26 +6203,29 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		vmtr.aggr_aliasing_rev[tag]=Variant(vars);
 
 		if(!(fd.stc&STCstatic)){
-			assert(outerContext in vars);
-			auto ctx=vars[outerContext];
 			auto decl=fd.scope_.getDeclaration();
-			assert(!!decl);
-			if(auto efd=decl.isFunctionDef()){
-				auto emem = buildContext(ctx.get!(Variant[VarDecl])(), efd);
-				auto ptr = BCPointer(emem, emem.ptr);
-				assert(mem.length>=BCPointer.sizeof);
-				*cast(BCPointer*)mem.ptr=ptr;
-			}else if(auto agg=decl.isAggregateDecl()){
-				assert({
-					auto ty=agg.getType().applySTC(fd.stc&STCtypeconstructor);
-					if(!decl.isReferenceAggregateDecl()) ty=ty.getPointer();
-					return ty.getConst() is ctx.getType().getConst();
-				}());
-				auto ty=ctx.getType();
-				auto ctsiz=getCTSizeof(ty);
-				ty.variantToMemory(ctx, mem[0..ctsiz]);
+			if(decl){
+				assert(outerContext in vars);
+				auto ctx=vars[outerContext];
+
+				if(auto efd=decl.isFunctionDef()){
+					auto emem = buildContext(ctx.get!(Variant[VarDecl])(), efd);
+					auto ptr = BCPointer(emem, emem.ptr);
+					assert(mem.length>=BCPointer.sizeof);
+					*cast(BCPointer*)mem.ptr=ptr;
+				}else if(auto agg=decl.isAggregateDecl()){
+					assert({
+							auto ty=agg.getType().applySTC(fd.stc&STCtypeconstructor);
+							if(!decl.isReferenceAggregateDecl()) ty=ty.getPointer();
+							return ty.getConst() is ctx.getType().getConst();
+						}());
+					auto ty=ctx.getType();
+					auto ctsiz=getCTSizeof(ty);
+					ty.variantToMemory(ctx, mem[0..ctsiz]);
+				}
 			}
 		}
+		if(first) return mem;
 
 		foreach(vd;&fd.traverseHeapContext){
 			size_t len, off = vd.getBCLoc(len);
@@ -6240,10 +6246,10 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		return outer;
 	}
 
-	private static Variant[VarDecl] parseContext(void[] mem, FunctionDef fd, bool remember=true){
+	private static Variant[VarDecl] parseContext(void[] mem, FunctionDef fd, bool first=false){
 		auto tag=q(Type.init,mem.ptr);
 		// TODO: What about pointers with an offset?
-		if(remember&&tag in vmtr.aggr_aliasing_rev)
+		if(!first&&tag in vmtr.aggr_aliasing_rev)
 			return vmtr.aggr_aliasing_rev[tag].get!(Variant[VarDecl])();
 
 		Variant[VarDecl] r;
@@ -6252,7 +6258,7 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		r[cast(VarDecl)cast(void*)fd]=Variant(null);
 		r.remove(cast(VarDecl)cast(void*)fd);
 
-		if(remember) vmtr.aggr_aliasing_rev[tag]=Variant(r);
+		if(!first) vmtr.aggr_aliasing_rev[tag]=Variant(r);
 
 		if(!(fd.stc&STCstatic)){
 			if(auto decl=fd.scope_.getDeclaration()){
@@ -6268,6 +6274,7 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 				}else assert(0);
 			}
 		}
+		if(first) return r;
 		foreach(vd;&fd.traverseHeapContext){
 			size_t len, off = vd.getBCLoc(len);
 			auto tt=vd.type;
@@ -6286,7 +6293,7 @@ mixin template CTFEInterpret(T) if(is(T==DelegateTy)){
 		if(!fun) return Variant(fun, (Variant[VarDecl]).init, type);
 		assert(cast(FunctionDef)fun.meaning);
 		auto fd=cast(FunctionDef)cast(void*)fun.meaning;
-		auto vars = parseContext(mem[0..bcPointerBCSize*ulong.sizeof], fd, false);
+		auto vars = parseContext(mem[0..bcPointerBCSize*ulong.sizeof], fd, true);
 		return Variant(fun, vars, type);
 	}
 }
