@@ -494,7 +494,7 @@ private struct Parser{
 				TemplateParameter[] tparams = null;
 				if(ttype==Tok!","){
 					nextToken();
-					if(ident&&ttype!=Tok!")") tparams = parseTemplateParameterList();
+					if(ttype!=Tok!")") tparams = parseTemplateParameterList();
 				}
 				expect(Tok!")");
 				mixin(rule!(IsExp,Existing,q{which,type,ident,typespec,typespec2,tparams}));
