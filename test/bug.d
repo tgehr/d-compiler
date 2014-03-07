@@ -1,4 +1,9 @@
 
+
+/++struct S{
+	immutable f = function()pure immutable{}; // TODO: bail out for the correct reason
+}+/
+
 /+
 struct ComparisonTests{
 	alias Seq(T...)=T;

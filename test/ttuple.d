@@ -1,3 +1,11 @@
+auto testSeqAccessCheck(){
+	alias Seq(T...)=T;
+	Seq!(int) tp;
+	function(){return [tp];}(); // error
+	function(){return tp;}(); // error
+	return 0;
+}
+
 struct TestByRefSeq{
 	static:
 	ref Seq!(int, int) byrefseq(ref int x, ref int y){

@@ -73,7 +73,11 @@ struct TemplateAliasParamAccessCheck{
 		static struct S{
 			int foo(){
 				pragma(msg, typeof(a(2)));
-				static assert(is(typeof({return a(2);}))); // no access check inside typeof
+				 // // TODO: find out how access checks within typeof are _supposed_ to work
+				static assert(!is(typeof({return a(2);})));
+				return 2;
+			}
+			int bar(){
 				a(2); // error
 				return 2;
 			}

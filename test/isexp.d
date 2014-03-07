@@ -1,7 +1,7 @@
 //int a;
 void main(){
 	int a;
-	static assert(is(typeof(function{a=1;}))); 
+	static assert(!is(typeof(function{a=1;}))); // // TODO: dmd disagrees. who is right?
 	static assert(is(typeof(1)==int));
 	static assert(is(typeof(""): const(shared(char)[])));
 	int function(int) fp;

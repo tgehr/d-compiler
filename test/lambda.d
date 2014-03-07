@@ -1,3 +1,32 @@
+
+class MemberFuncLitAlias{
+	int x=2;
+	alias a=ID!(()=>x);
+	alias ID(alias a)=a;
+	this(int x){ this.x=x; }
+	int bar(){ return x; }
+	alias e = &bar;
+	enum foo = { return new MemberFuncLitAlias(5).a; }();
+	static assert(new MemberFuncLitAlias(3).a()==3);
+	enum eID(int function() dg)=dg;
+	alias b=ID!(function()=>x); // error
+	alias c=function()=>x; // error
+	alias d=eID!(function()=>x); // error
+	static int bb(){
+		return b()+
+			   c();
+	}
+}
+
+class MemberFuncLitDeduction{
+	int x=2;
+	this(int x){ this.x=x; }
+	auto b(){ return x; }
+	enum foo = { return &(new MemberFuncLitDeduction(5).b); }();
+	static assert(foo()==5);
+	static assert(is(typeof({ return new MemberFuncLitDeduction(0).b();}):int function()));
+}
+
 void inferfailimplicitconv(){
 	string delegate(string, double) dg = (n, int x){return "";}; // error
 	dg("2",2);
@@ -161,7 +190,7 @@ struct S{
 
 void testfunctiondeduction(){
 	immutable int x = 0;
-	static assert(is(typeof((){enum e=x;return e;}):immutable(int)function())); // TODO
+	static assert(is(typeof((){enum e=x;return e;}):immutable(int)function()));
 }
 
 void main(){

@@ -1,10 +1,9 @@
 
-struct DisplayDelegates{
-	static immutable foo=()=>1;
-	pragma(msg, foo);
-	pragma(msg, (delegate()=>foo)());
-	pragma(msg, (delegate()=>foo));
-}
+// display delegates:
+static immutable foo=()=>1;
+pragma(msg, foo);
+pragma(msg, (delegate()=>foo)());
+pragma(msg, (delegate()=>foo));
 
 struct ClassDelegates{
 	class A{
