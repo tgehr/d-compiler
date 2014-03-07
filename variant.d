@@ -623,6 +623,18 @@ struct Variant{
 			}
 		}
 
+		static if(op=="=="){
+			if(occupies == Occupies.fptr){
+				assert(rhs.occupies == Occupies.fptr);
+				return Variant(fptr is rhs.fptr, Type.get!bool);
+			}else if(occupies == Occupies.dg){
+				assert(rhs.occupies == Occupies.dg);
+				return Variant(dgfptr is rhs.dgfptr &&
+					           Variant(dgctx).opBinary!"=="(Variant(rhs.dgctx)),
+					           Type.get!bool());
+			}
+		}
+
 		assert(cast(BasicType)type.getHeadUnqual(),text(type));
 		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){

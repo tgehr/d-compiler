@@ -149,7 +149,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 					foreach(ref x;@(t)) mixin(_SemChldImpl!("x","@(op)","@(sc)"));
 					static if(is(typeof(@(t)): Expression[]) && (!is(typeof(this)==TemplateInstanceExp)||"@(t)"!="args")){
 						pragma(msg, typeof(this)," @(t)");
-						@(t)=mixin(`Tuple.expand(@(sc),@(t),@(t~"Leftover"))`);
+						@(t)=mixin(`Tuple.expand(@(sc),AccessCheck.all,@(t),@(t~"Leftover"))`);
 						if(mixin(`@(t~"Leftover")`)){
 							mixin(_SemChldImpl!("@(t)Leftover","@(op)","@(sc)"));
 						}
@@ -528,16 +528,14 @@ mixin template Semantic(T) if(is(T==Expression)){
 			assert(this.inContext.among(InContext.none, inContext), text(this," ",this.inContext," ",inContext));
 			this.inContext=inContext;
 		}
-		final void transferContext(Expression r)in{
-			assert(inContext != InContext.fieldExp);
-		}body{
+		final void transferContext(Expression r){
 			final switch(inContext) with(InContext){
 				case none: break;
 				case addressTaken: r.willTakeAddress(); break;
 				case called: r.willCall(); break;
 				case instantiated: r.willInstantiate(); break;
 				case passedToTemplateAndOrAliased: r.willPassToTemplateAndOrAlias(); break;
-				case fieldExp: assert(0);
+				case fieldExp: if(auto sym=isSymbol()) sym.inContext=InContext.fieldExp; break;
 			}
 		}
 	}
@@ -589,43 +587,52 @@ mixin template Semantic(T) if(is(T==Expression)){
 	}
 
 	final void weakenAccessCheck(AccessCheck check){
-		if(check == AccessCheck.memberFuns){
-			static struct WeakenCheckM{
-				enum check = AccessCheck.memberFuns;
-				void perform(Symbol self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
-				void perform(CurrentExp self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
-				/+void perform(CallExp self){
-					if(auto fl=self.e.isFunctionLiteralExp())
-						runAnalysis!WeakenCheckM(fl.bdy);
-				}+/
-				void perform(MixinExp self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
+		static struct WeakenCheck{
+			immutable AccessCheck check;
+			void perform(Symbol self){
+				self.accessCheck = min(self.accessCheck, check);
 			}
-			runAnalysis!WeakenCheckM(this);
-		}else{
-			static struct WeakenCheck{
-				immutable AccessCheck check;
-				void perform(Symbol self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
-				void perform(CurrentExp self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
-				void perform(FunctionLiteralExp self){
-					runAnalysis!WeakenCheck(self.bdy, check);
-				}
-				void perform(MixinExp self){
-					self.accessCheck = min(self.accessCheck, check);
-				}
+			void perform(CurrentExp self){
+				self.accessCheck = min(self.accessCheck, check);
 			}
-			runAnalysis!WeakenCheck(this,check);
+			void perform(MixinExp self){
+				self.accessCheck = min(self.accessCheck, check);
+			}
+		}
+		runAnalysis!WeakenCheck(this,check);
+	}
+
+	final void restoreAccessCheck(AccessCheck check){
+		// TODO: _perform_ access check
+		static struct RestoreCheck{
+			immutable AccessCheck check;
+			void perform(Symbol self){
+				self.accessCheck = check;
+			}
+			void perform(CurrentExp self){
+				self.accessCheck = check;
+			}
+			void perform(MixinExp self){
+				self.accessCheck = check;
+			}
+		}
+		runAnalysis!RestoreCheck(this,check);		
+	}
+
+	final void checkAccess(Scope sc,AccessCheck accessCheck){
+		if(accessCheck==AccessCheck.none) return;
+		if(auto s=AliasDecl.getAliasBase(this)){
+			if(s.accessCheck<accessCheck){
+				s.accessCheck = accessCheck;
+				static struct ResetSstate{
+					void perform(Expression e){ e.sstate = SemState.begin; }
+				}
+				runAnalysis!ResetSstate(this);
+				semantic(sc);
+			}
 		}
 	}
+
 
 	bool isConstant(){ return false; }
 	bool isConstFoldable(){ return false; }
@@ -1537,7 +1544,11 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		static if(S==Tok!"&") e.willTakeAddress();
+		static if(S==Tok!"&"){
+			auto sym = e.isSymbol();
+			if(!sym||sym.inContext==InContext.none)
+				e.willTakeAddress();
+		}
 		mixin(SemChldExp!q{e});
 
 		static if(S!=Tok!"&"&&S!=Tok!"!"){
@@ -1580,7 +1591,7 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 			}if(auto lv = e.isLvalue()){
 				// TODO: this is a hack, find solution for taking address of
 				// overloaded declaration
-
+		
 				FunctionDecl fd;
 				auto fe = e.isFieldExp();
 				if(auto s=fe?fe.e2:e.isSymbol()){
@@ -1661,6 +1672,16 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	}
 	static if(S==Tok!"&"){
 
+	override void isInContext(InContext inContext){
+		if(inContext == InContext.passedToTemplateAndOrAliased){
+			if(auto sym=e.isSymbol())
+				sym.accessCheck=AccessCheck.none;
+		}else if(inContext == InContext.fieldExp){
+			if(auto sym=e.isSymbol())
+				sym.inContext=InContext.fieldExp;
+		}
+	}
+
 	override bool isConstant(){
 		return !!e.isSymbol(); // TODO: correct?
 	}
@@ -1694,7 +1715,10 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	// this is necessary to make template delegate literals work correctly
 	// the scope of the symbol must be adjusted
 	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
-		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,InContext.addressTaken,loc));
+		auto ctx=InContext.addressTaken;
+		if(inContext==inContext.fieldExp) ctx=inContext;
+		else if(auto sym=e.isSymbol()) ctx=sym.inContext;
+		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,ctx,loc));
 		r.loc = loc;
 		r.semantic(sc);
 		return r;
@@ -2472,12 +2496,12 @@ interface Tuple{
 
 	int opApply(scope int delegate(Expression) dg);
 
-	static T expand(T,S...)(Scope sc,T a, ref Expression leftover, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,TemplArgInfo),X)){
+	static T expand(T,S...)(Scope sc,AccessCheck accessCheck,T a, ref Expression leftover, ref S replicate)if(is(T _:X[],X)||is(T _:Rope!(X,TemplArgInfo),X)){
 		T r;
 		S rep;
 		Expression oldLeftover=leftover;
 		leftover=null;
-		static if(is(T _:X[],X))enum isarray=true;else enum isarray=false;
+		static if(is(T _:X[],X))enum isarray=true;else enum isarray=false; // TODO: fix this ASAP
 		typeof(r.length) index = 0;
 		foreach(i,x;a){
 			if(!x) continue;
@@ -2486,7 +2510,10 @@ interface Tuple{
 				void spliceExpTuple(ExpTuple et){
 					static if(isarray){
 						auto exprs=et.exprs.array;
-						foreach(ref exp;exprs) exp=exp.clone(sc,InContext.passedToTemplateAndOrAliased,et.loc);
+						foreach(ref exp;exprs){
+							exp=exp.clone(sc,InContext.none,et.loc);
+							exp.checkAccess(sc, accessCheck);
+						}
 						static if(!rep.length){
 							if(exprs.length&&leftover){
 								auto ne=New!(BinaryExp!(Tok!","))(leftover, exprs[0]);
@@ -2496,7 +2523,10 @@ interface Tuple{
 								leftover=null;
 							}
 						}
-					}else auto exprs=et.exprs;
+					}else{
+						auto exprs=et.exprs;
+						assert(accessCheck==AccessCheck.none);
+					}
 					r~=a[index..i]~exprs;					
 				}
 				if(auto et=x.isExpTuple()){
@@ -2637,13 +2667,7 @@ class ExpTuple: Expression, Tuple{
 
 	private Expression indexImpl(Scope sc, InContext inContext, const ref Location loc, Expression exp){
 		auto r=exp.clone(sc,inContext,loc);
-
-		if(auto s=AliasDecl.getAliasBase(r)){
-			if(s.accessCheck<accessCheck){
-				s.accessCheck = accessCheck;
-				s.performAccessCheck();
-			}
-		}
+		r.checkAccess(sc, accessCheck);
 		return r;
 	}
 	Expression slice(const ref Location loc, ulong a,ulong b)in{
@@ -2667,7 +2691,7 @@ class ExpTuple: Expression, Tuple{
 
 		mixin(SemChld!q{exprs.unsafeByRef});
 		Expression dummyLeftover=null;
-		exprs=Tuple.expand(sc, exprs, dummyLeftover);
+		exprs=Tuple.expand(sc, AccessCheck.none, exprs, dummyLeftover);
 		assert(!dummyLeftover);
 
 		// the empty tuple is an expression except if a type is requested
@@ -3221,10 +3245,9 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		mixin(RevEpoLkup!q{e});
 		foreach(x; args){
 			x.willPassToTemplate();
-			if(x.sstate != SemState.completed && !x.isFunctionLiteralExp()){
+			if(x.sstate != SemState.completed && !x.isFunctionLiteralExp())
 				x.prepareInterpret();
-				x.weakenAccessCheck(AccessCheck.none);
-			}
+			x.weakenAccessCheck(AccessCheck.none);
 		}
 
 		e.willInstantiate();
@@ -3265,7 +3288,7 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 		if(!analyzedArgsInitialized){
 			analyzedArgs = args.captureTemplArgs();
 			Expression dummyLeftover=null;
-			analyzedArgs = Tuple.expand(sc,analyzedArgs,dummyLeftover);
+			analyzedArgs = Tuple.expand(sc,AccessCheck.none,analyzedArgs,dummyLeftover);
 			assert(!dummyLeftover);
 			argTypes = TypeTuple.expand(args.map!((a){
 				// TODO: this is hacky (the type passed is irrelevant), better approaches?
@@ -4618,8 +4641,14 @@ class Symbol: Expression{
 		}
 
 		needRetry = false;
-		performAccessCheck();
-		mixin(SemCheck);
+		if(inContext!=InContext.fieldExp &&
+		   (!isFunctionLiteral ||
+		    type !is Type.get!void() &&
+		    !meaning.isFunctionDef().canBeStatic)) // TODO: coerce?
+		{
+			performAccessCheck();
+			mixin(SemCheck);
+		}
 
 		if(inoutRes!=InoutRes.none){sstate=SemState.completed;resolveInout(inoutRes);}
 
@@ -4679,17 +4708,19 @@ class Symbol: Expression{
 		// it is necessary to perform the check in order to get
 		// the correct type deduction, even if we are not interested
 		// in the actual accessibility
-		mixin(IsDeclAccessible!q{auto b; Declaration, decl, meaning});
-		if(meaning.needsAccessCheck(accessCheck) && !b){
-			// TODO: better error message?
-			if(meaning.scope_.getDeclaration().isFunctionDef())
-				scope_.error(format("cannot access the frame in which '%s' is stored", loc.rep),loc);
-			else{
-				// error message duplicated in FieldExp.semantic
-				scope_.error(format("need 'this' to access %s '%s'",kind,loc.rep),loc);
+		if(meaning.needsAccessCheck(accessCheck)){
+			mixin(IsDeclAccessible!q{auto b; Declaration, decl, meaning});
+			if(!b){
+				// TODO: better error message?
+				if(meaning.scope_.getDeclaration().isFunctionDef())
+					scope_.error(format("cannot access the frame in which '%s' is stored", loc.rep),loc);
+				else{
+					// error message duplicated in FieldExp.semantic
+					scope_.error(format("need 'this' to access %s '%s'",kind,loc.rep),loc);
+				}
+				scope_.note(format("%s was declared here",kind),meaning.loc);
+				mixin(ErrEplg);
 			}
-			scope_.note(format("%s was declared here",kind),meaning.loc);
-			mixin(ErrEplg);
 		}
 	}
 
@@ -6052,6 +6083,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				ident.recursiveLookup = false;
 				//ident.lookup(msc);
 				if(ident.sstate != SemState.failed){
+					ident.inContext = InContext.fieldExp;
 					mixin(Lookup!q{_;ident,sc,msc});
 					if(auto nr=ident.needRetry) { needRetry=nr; return; }
 					mixin(PropErr!q{ident});
@@ -6073,12 +6105,21 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		mixin(SemProp!q{e2});
 		e2.rewrite=rew;
 		////
-		if(auto sym = res.isSymbol()){
+		if(auto ae = res.isAddressExp()){
+			if(auto sym=ae.e.isSymbol()){
+				auto b=New!(BinaryExp!(Tok!"."))(e1, sym);
+				b.loc=loc;
+				auto r=New!(UnaryExp!(Tok!"&"))(b);
+				r.loc=loc;
+				transferContext(r);
+				r.semantic(sc);
+				mixin(RewEplg!q{r});
+			}
+		}else if(auto sym = res.isSymbol()){
 			e2=sym;
 			type = e2.type;
 			Type thisType=sym.thisType();
 			bool needThis = !!thisType;
-
 			if(needThis){
 				if(this_)
 				if(sym.meaning.needsAccessCheck(AccessCheck.all))
@@ -6102,6 +6143,11 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 					needRetry=false;
 					thisCheck(sc, this_, thisType);
 					mixin(SemCheck);
+					if(!this_){
+						sym.accessCheck=accessCheck;
+						sym.performAccessCheck();
+						mixin(SemProp!q{sym});
+					}
 					goto Lok;
 				}
 			}else if(sym.meaning.needsAccessCheck(accessCheck)){
@@ -6164,7 +6210,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				transferContext(r);
 				r.semantic(sc);
 			}else r=res; // type or enum on instance. ignore side effects of e1
-			
+
 			mixin(RewEplg!q{r});
 			/*// TODO: do we rather want this:
 			// enum reference. we need to evaluate 'this', but it
@@ -6185,6 +6231,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				sym.sstate = SemState.begin;
 				sym.inContext = InContext.none;
 				transferContext(sym);
+				sym.accessCheck = accessCheck;
 				sym.semantic(sc);
 			}
 			mixin(RewEplg!q{r});
@@ -6548,28 +6595,23 @@ mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 		dg.scope_ = sc; // Symbol will use this scope to reason for analyzing DG
 		auto sym=New!Symbol(dg, true, true);
 		if(which==Kind.function_ || which!=Kind.delegate_ && !decl) dg.stc |= STCstatic;
-		else if(decl&&decl.isAggregateDecl()){
-			// TODO: remove limitation
-			sym.accessCheck=AccessCheck.none;
-			dg.stc |= STCstatic;
-			if(which==Kind.delegate_){
-				dg.deduceStatic=true;
-				dg.canBeStatic=false;
-			}
-		}
+		else if(decl&&decl.isReferenceAggregateDecl()) dg.stc |= STCfinal;
 		sym.loc=dg.loc=loc;
 		Expression e = New!(UnaryExp!(Tok!"&"))(sym);
 		e.brackets++;
 		e.loc=loc;
+		transferContext(e);
 		e.semantic(sc);
 
-		if(auto enc=sc.getDeclaration()) if(auto fd=enc.isFunctionDef()){
-			fd.nestedFunctionLiteral(dg);
-		}
+		if(auto enc=sc.getDeclaration())
+			enc.nestedFunctionLiteral(dg);
+
 		auto r = e;
 		mixin(PropErr!q{r});
 		mixin(RewEplg!q{r});
 	}
+
+	mixin ContextSensitive;
 }
 
 mixin template Semantic(T) if(is(T==ConditionDeclExp)){
@@ -8844,10 +8886,27 @@ mixin template Semantic(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==Default
 }
 
 mixin template Semantic(T) if(is(T==ReturnStm)){
+	bool performedAccessCheck=false;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 
-		if(e) mixin(SemChldExpPar!q{e});
+		if(e){
+			mixin(SemChldExpPar!q{e});
+			if(auto et=e.isExpTuple()){
+				if(!performedAccessCheck){
+					auto exps=new Expression[et.length];
+					size_t i=0;
+					foreach(Expression exp;et){
+						exps[i]=exp.clone(sc, InContext.none, e.loc);
+						exps[i].checkAccess(sc, AccessCheck.all);
+						i++;
+					}
+					performedAccessCheck=true;
+					e=New!ExpTuple(exps);
+					mixin(SemChldExpPar!q{e});
+				}
+			}
+		}
 
 		auto fun = sc.getFunction();
 		assert(fun && fun.type,text(fun," ",fun?fun.type:null," ",sc," ",this));
@@ -9684,7 +9743,7 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 			a[0].prepareInterpret();
 			a[0].prepareLazyConditionalSemantic();
 			mixin(SemChldExp!q{a[0]});
-			a=Tuple.expand(sc, a, a0Leftover);
+			a=Tuple.expand(sc, AccessCheck.none, a, a0Leftover);
 		}while(a.length<1||a[0].sstate!=SemState.completed);
 		if(a.length>2){
 		Ltoomany:
@@ -9709,7 +9768,7 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 			if(a.length == 1) printMessage();
 			else try{
 				mixin(SemChld!q{a[1]});
-				a=Tuple.expand(sc, a, a1Leftover);
+				a=Tuple.expand(sc, AccessCheck.none, a, a1Leftover);
 				if(a.length>2) goto Ltoomany;
 				if(a.length == 1) printMessage();
 				else if(!a[1].isType()){
@@ -9788,7 +9847,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 			static if(wantSymbol) return null;
 			else return false;
 		}
-		return go(aliasee);		
+		return go(aliasee);
 	}
 
 	static Symbol getAliasBase(Expression aliasee){
@@ -9827,7 +9886,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 	}body{
 		auto r=aliasee.clone(sc, inContext, loc);
 		if(auto et=r.isExpTuple()) et.accessCheck=check;
-		// templated delegate literal expressions
+		// r.restoreAccessCheck(check);
 		if(auto add=r.isAddressExp()){
 			if(auto sym=add.e.isSymbol())
 				sym.accessCheck = check;
@@ -10131,7 +10190,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			mixin(Rewrite!q{x});
 		}
 		Expression dummyLeftover=null;
-		parents = Tuple.expand(scope_, parents, dummyLeftover, rparents);
+		parents = Tuple.expand(scope_, AccessCheck.none, parents, dummyLeftover, rparents);
 		assert(!dummyLeftover);
 		auto knownBefore = knownParents;
 		updateKnownParents(); // valid because only prior unknown parents can cause expansion
@@ -11757,7 +11816,6 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 	}body{
 		assert(canBeStatic);
 		stc&=~STCstatic;
-		canBeStatic=false;
 	}
 
 	void rescope(Scope sc){
