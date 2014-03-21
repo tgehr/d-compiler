@@ -248,8 +248,7 @@ mixin template Interpret(T) if(is(T==FieldExp)){
 		if(e2.meaning.sstate == SemState.error) return false;
 		if(e2.isConstant()) return true;
 		auto this_=e1.extractThis();
-		if(this_&&this_.isConstant()) return true;
-		return super.checkInterpret(sc);
+		return this_&&this_.checkInterpret(sc);
 	}
 	
 	override Variant interpretV(){
@@ -260,6 +259,10 @@ mixin template Interpret(T) if(is(T==FieldExp)){
 		assert(cast(VarDecl)e2.meaning);
 		return aggr[cast(VarDecl)cast(void*)e2.meaning];
 	}
+
+	override void _interpretFunctionCalls(Scope sc){
+		mixin(IntFCChld!q{e1});
+	}	
 }
 mixin template Interpret(T) if(is(T==BinaryExp!(Tok!"."))){ } // (workaround for DMD bug)
 
@@ -2920,6 +2923,13 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 			mixin(Rewrite!q{dg});
 		}
 		dg.loc = loc;
+		// The following is here to make sure that inaccessible contexts are never compiled in
+		// TODO: is this correct?
+		static struct UpdateScopes{
+			Scope sc;
+			void perform(Symbol self){ self.scope_ = sc; }
+		}
+		runAnalysis!UpdateScopes(this,dg.fsc);
 		return dg;
 	}
 	final void callWrapper(Scope sc, ref FunctionDef ctfeCallWrapper, Expression e){
@@ -4307,14 +4317,24 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 		if(auto vd = meaning.isVarDecl()) return vd.byteCompileSymbol(bld, this, scope_);
 		else if(auto fd=meaning.isFunctionDef()){
 			static assert(this.sizeof<=(void*).sizeof&&(void*).sizeof<=ulong.sizeof);
-			if(!(meaning.stc&STCstatic) && !fd.isConstructor()){
-				assert(scope_.getFrameNesting() >=
-				       meaning.scope_.getFrameNesting());
+			if(!(fd.stc&STCstatic) && !fd.isConstructor()){
+				if(fd.canBeStatic){
+					bld.emitPushConstant(cast(void[BCPointer.sizeof])BCPointer.init);
+				}else{
+					auto fsc=scope_.getFrameScope();
+					auto mfsc=meaning.scope_.getFrameScope();
+					assert(!!mfsc);
+					if(fsc&&fsc.isNestedIn(mfsc)){
+						assert(scope_.getFrameNesting() >=
+						       meaning.scope_.getFrameNesting());
+						auto diff = scope_.getFrameNesting() - meaning.scope_.getFrameNesting();
 
-				auto diff = scope_.getFrameNesting() - meaning.scope_.getFrameNesting();
-
-				bld.emitUnsafe(Instruction.pushcontext, this);
-				bld.emitConstant(diff);
+						bld.emitUnsafe(Instruction.pushcontext, this);
+						bld.emitConstant(diff);
+					}else{
+						bld.error(accessError(), loc);
+					}
+				}
 			}
 			if(!isFunctionLiteral&&!(fd.stc&STCnonvirtual))
 			if(auto decl=fd.scope_.getDeclaration())
@@ -4364,8 +4384,8 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 			return e2.byteCompile(bld);
 		}
 		bool nonvirtual = false;
-		if(!this_){
-			this_ = New!ThisExp(); // TODO: would prefer not having this
+		if(!this_){ // TODO: would prefer not having this
+			this_ = New!ThisExp();
 			this_.loc = loc;
 			do this_.semantic(e2.scope_);
 			while(this_.sstate != SemState.completed);

@@ -384,6 +384,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 	// functionality handy for closures:
 	int getFrameNesting(){ return 0; }
+	Scope getFrameScope(){ return null; }
 
 	void error(lazy string err, Location loc){handler.error(err,loc);}
 	void note(lazy string err, Location loc){handler.note(err,loc);}
@@ -465,6 +466,7 @@ class NestedScope: Scope{
 	}
 
 	override int getFrameNesting(){ return parent.getFrameNesting(); }
+	override Scope getFrameScope(){ return parent.getFrameScope(); }
 
 	override VarDecl getDollar(){return parent.getDollar();}
 	override FunctionDef getFunction(){return parent.getFunction();}
@@ -500,10 +502,14 @@ class AggregateScope: NestedScope{
 		aggr = decl;
 	}
 
+	override bool isNestedIn(Scope rhs){
+		return this is rhs || !(aggr.stc&STCstatic) && parent.isNestedIn(rhs);
+	}
 	override AggregateDecl getAggregate(){ return aggr; }
 	override AggregateDecl getDeclaration(){ return aggr; }
 
 	override int getFrameNesting(){ return parent.getFrameNesting()+1; }
+	override Scope getFrameScope(){ return this; }
 private:
 	AggregateDecl aggr;
 }
@@ -614,6 +620,7 @@ class TemplateScope: NestedScope{
 	}
 
 	override int getFrameNesting(){ return iparent.getFrameNesting(); }
+	override Scope getFrameScope(){ return iparent.getFrameScope(); }
 
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
@@ -658,6 +665,9 @@ final class FunctionScope: OrderedScope{
 		this.fun=fun;
 	}
 
+	override bool isNestedIn(Scope rhs){
+		return this is rhs || !(fun.stc&STCstatic) && parent.isNestedIn(rhs);
+	}
 	override bool insertLabel(LabeledStm stm){
 		if(auto s = lstmsymtab.get(stm.l.ptr,null)){
 			error(format("redefinition of label '%s'",stm.l.toString()),stm.l.loc);
@@ -682,6 +692,7 @@ final class FunctionScope: OrderedScope{
 	}
 
 	override int getFrameNesting(){ return parent.getFrameNesting()+1; }
+	override Scope getFrameScope(){ return this; }
 
 	override FunctionDef getFunction(){return fun;}
 	override FunctionDef getDeclaration(){return fun;}

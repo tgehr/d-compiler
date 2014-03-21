@@ -602,21 +602,26 @@ mixin template Semantic(T) if(is(T==Expression)){
 		runAnalysis!WeakenCheck(this,check);
 	}
 
-	final void restoreAccessCheck(AccessCheck check){
+	final void restoreAccessCheck(Scope sc, AccessCheck check){
 		// TODO: _perform_ access check
 		static struct RestoreCheck{
 			immutable AccessCheck check;
-			void perform(Symbol self){
+			bool r=false;
+			enum b=q{
+				if(self.accessCheck<check) r=true;
 				self.accessCheck = check;
-			}
-			void perform(CurrentExp self){
-				self.accessCheck = check;
-			}
-			void perform(MixinExp self){
-				self.accessCheck = check;
-			}
+			};
+			void perform(Symbol self){ mixin(b); }
+			void perform(CurrentExp self){ mixin(b); }
+			void perform(MixinExp self){ mixin(b); }
 		}
-		runAnalysis!RestoreCheck(this,check);		
+		if(runAnalysis!RestoreCheck(this,check).r){
+			static struct Reset{
+				void perform(Expression e){ e.sstate = SemState.begin; }
+			}
+			runAnalysis!Reset(this);
+			semantic(sc);
+		}
 	}
 
 	final void checkAccess(Scope sc,AccessCheck accessCheck){
@@ -1717,7 +1722,6 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
 		auto ctx=InContext.addressTaken;
 		if(inContext==inContext.fieldExp) ctx=inContext;
-		else if(auto sym=e.isSymbol()) ctx=sym.inContext;
 		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,ctx,loc));
 		r.loc = loc;
 		r.semantic(sc);
@@ -1977,6 +1981,8 @@ class TemplateInstanceDecl: Declaration{
 	}body{
 		foreach(i,x;resolved){
 			// TODO: don't leak references
+			/+if(parent.params[i].which!=WhichTemplateParameter.alias_)
+				x.checkAccess(paramScope,AccessCheck.all);+/
 			auto al = New!AliasDecl(STC.init, New!VarDecl(STC.init, x, parent.params[i].name, null));
 			al.semantic(paramScope);
 			mixin(PropErr!q{al});
@@ -4703,6 +4709,16 @@ class Symbol: Expression{
 		return implcalldecl && (implicitCall || !ignoreProperty && meaning.stc&STCproperty);
 	}
 
+	string accessError(){
+		// TODO: better error message?
+		if(meaning.scope_.getDeclaration().isFunctionDef())
+			return format("cannot access the frame in which '%s' is stored", loc.rep);
+		else{
+			// error message duplicated in FieldExp.semantic
+			return format("need 'this' to access %s '%s'",kind,loc.rep);
+		}		
+	}
+
 	void performAccessCheck() in{assert(meaning && scope_);}body{
 		auto decl = scope_.getDeclaration();
 		// it is necessary to perform the check in order to get
@@ -4711,13 +4727,7 @@ class Symbol: Expression{
 		if(meaning.needsAccessCheck(accessCheck)){
 			mixin(IsDeclAccessible!q{auto b; Declaration, decl, meaning});
 			if(!b){
-				// TODO: better error message?
-				if(meaning.scope_.getDeclaration().isFunctionDef())
-					scope_.error(format("cannot access the frame in which '%s' is stored", loc.rep),loc);
-				else{
-					// error message duplicated in FieldExp.semantic
-					scope_.error(format("need 'this' to access %s '%s'",kind,loc.rep),loc);
-				}
+				scope_.error(accessError(), loc);
 				scope_.note(format("%s was declared here",kind),meaning.loc);
 				mixin(ErrEplg);
 			}
@@ -9886,11 +9896,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 	}body{
 		auto r=aliasee.clone(sc, inContext, loc);
 		if(auto et=r.isExpTuple()) et.accessCheck=check;
-		// r.restoreAccessCheck(check);
-		if(auto add=r.isAddressExp()){
-			if(auto sym=add.e.isSymbol())
-				sym.accessCheck = check;
-		}
+		else r.restoreAccessCheck(sc, check);
 		return r;
 	}
 
@@ -11736,6 +11742,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 }
 
 mixin template Semantic(T) if(is(T==FunctionDef)){
+	FunctionScope fsc;
 
 	override void analyzeType(){
 		assert(!!scope_);
@@ -11824,9 +11831,6 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 			if(fsc) fsc.parent=scope_;
 		}
 	}
-
-private:
-	FunctionScope fsc;
 }
 
 mixin template Semantic(T) if(is(T==UnittestDecl)){

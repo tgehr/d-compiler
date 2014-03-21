@@ -583,11 +583,12 @@ struct Variant{
 			}else assert(0);
 		}else if(occupies == Occupies.vars){
 			assert(rhs.occupies==Occupies.vars);
-			assert(!!type && type.getHeadUnqual().isAggregateTy());
-			auto decl=type.getHeadUnqual().isAggregateTy().decl;
+			assert(!type || type.getHeadUnqual().isAggregateTy());
+			// (if no type, we are looking at a delegate context)
+			auto decl=type?type.getHeadUnqual().isAggregateTy().decl:null;
 			static if(op=="is"||op=="!is"||op=="=="||op=="!="){
 				enum neq=op=="!is"||op=="!=";
-				if(decl.isReferenceAggregateDecl())
+				if(!decl || decl.isReferenceAggregateDecl())
 					return Variant(neq^(vars is rhs.vars),Type.get!bool());
 				else{
 					foreach(k,v;vars)
