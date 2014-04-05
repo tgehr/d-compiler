@@ -1968,6 +1968,7 @@ Ltailcall:
 				FunctionDef def = cast(FunctionDef)cast(void*)sym.meaning;
 
 				if(byteCode[ip] == I.ret){ // tail calls
+					dw("tail call!");
 					// clean up stack
 					stack.popFront(nargs);
 					byteCode = def.byteCode;
@@ -3321,6 +3322,13 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 	static if(isAssignOp(S) && S!=Tok!"=" || S==Tok!",")
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		return byteCompileHelper(bld, true);
+	}
+
+	static if(S==Tok!",")
+	override void byteCompileRet(ref ByteCodeBuilder bld, bool isRefReturn){
+		e1.byteCompile(bld);
+		bld.ignoreResult(getBCSizeof(e1.type));
+		return e2.byteCompileRet(bld, isRefReturn);
 	}
 
 	private LValueStrategy byteCompileHelper(ref ByteCodeBuilder bld, bool isLvalue) in{assert(!isLvalue || isAssignOp(S) && S!=Tok!"=" || S==Tok!",");}body{
