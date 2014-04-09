@@ -1,3 +1,18 @@
+struct TemplateConstraintAccessCheck{
+	int x;
+	static int bar()()if(is(typeof({return x;}))){ return x; } // TODO: ok
+	pragma(msg, bar()); // TODO: error
+}
+
+class CheckMemberFunctionAccess{
+	int x;
+	int foo(){ return 2; }
+	static assert(foo()==2); // ok
+	int bar();
+	pragma(msg, this.bar()); // error
+	int baz(){ return x; }
+	pragma(msg, baz()); // error
+}
 
 struct ReverseEpoLookupSkipScope{
 	template Test(int x) if(x>0){

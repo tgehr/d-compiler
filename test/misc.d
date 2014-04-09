@@ -27,6 +27,12 @@ auto testcallCC(){
 
 // ok now
 
+struct TestSeqReturn{
+	alias Seq(T...)=T;
+	Seq!(int, int) bar(){ return Seq!(1,2); }
+	enum w=bar();
+}
+
 struct GagIftiScope{
 	static:
 	struct Foo(_T) {

@@ -1,4 +1,62 @@
+struct S{
+	void foo(){ bar(); }
+	void bar(){ foo(); }
+}
 
+/+class C{
+	final int foo(){ return 1; }
+	int x;
+	void bar(){
+		enum e=this.foo();
+		//enum e=x; // TODO: improve error message
+	}
+}+/
+
+/+static void foo(){
+	static struct S{ S delegate() dg; }
+	S bar(){
+		S s;
+		s.dg=&bar;
+		return s;
+	}
+	pragma(msg, bar()); // error
+	struct T{ int x; }
+	T baz(){
+		T t;
+		t.x=2;
+		return T;
+	}
+	pragma(msg, baz()); // error
+	static struct U{ int x; }
+	U qux(){
+		U u;
+		u.x=2;
+		return u;
+	}
+	pragma(msg, qux().x); // ok
+}
+
+struct TemplateParameterAccessCheck{
+	enum ID1(alias e)=e;
+	enum ID2(int delegate() e)=e;
+	enum ID3(alias e)=&e; // error
+	
+	static void foo(){
+		static int sbar()=>2;
+		static int sbaz()=>ID1!(&sbar)();
+		static assert(sbaz()==2);
+		int kbar()=>3;
+		int kbaz()=>ID2!(&kbar)();
+		static assert(kbaz()==3);
+		enum e=&kbar, f=&sbar;
+		static assert(e()==3 && f()==2);
+		int x;
+		int kobar()=>x;
+		pragma(msg, kobar()); // error
+		enum g=&kobar; // error
+		int kobaz()=>ID3!kobar;
+	}
+}+/
 
 /++struct S{
 	immutable f = function()pure immutable{}; // TODO: bail out for the correct reason
