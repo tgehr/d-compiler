@@ -42,7 +42,7 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 
 	static Type get(T: const(U),U)()if(!is(T==U)){
 		if(uniqueType!T) return uniqueType!T;
-		return uniqueType!T=get!U().getConst();		
+		return uniqueType!T=get!U().getConst();
 	}
 	static Type get(T: immutable(T))(){
 		if(uniqueType!(immutable(T))) return uniqueType!(immutable(T));
@@ -60,7 +60,7 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 	static Type get(T)() if(!.isBasicType!T){
 		if(uniqueType!T) return uniqueType!T;
 		pragma(msg,"TODO: fix. do not know how to get type "~T.stringof);
-		return uniqueType!T=New!BasicType(Tok!"void"); // TODO: improve		
+		return uniqueType!T=New!BasicType(Tok!"void"); // TODO: improve
 	}
 
 	static Type get(T:typeof(null))(){
@@ -97,7 +97,7 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 		EnumTy,
 		MatcherTy,
 	);
-	
+
 	mixin Visitors;
 
 protected:
@@ -256,7 +256,7 @@ class PointerTy: Type{
 		return _brk(e.toString()~'*');
 	}
 	override PointerTy isPointerTy(){return this;}
-	
+
 	mixin Visitors;
 }
 
@@ -305,7 +305,7 @@ class ConstTy: QualifiedTy{
 	override string toString(){return _brk("const("~e.toString()~')');}
 	override ConstTy isConstTy(){return this;}
 
-	mixin Visitors;	
+	mixin Visitors;
 }
 
 class ImmutableTy: QualifiedTy{
@@ -313,7 +313,7 @@ class ImmutableTy: QualifiedTy{
 	override string toString(){return _brk("immutable("~e.toString()~')');}
 	override ImmutableTy isImmutableTy(){return this;}
 
-	mixin Visitors;	
+	mixin Visitors;
 }
 
 class SharedTy: QualifiedTy{
@@ -321,7 +321,7 @@ class SharedTy: QualifiedTy{
 	override string toString(){return _brk("shared("~e.toString()~')');}
 	override SharedTy isSharedTy(){return this;}
 
-	mixin Visitors;	
+	mixin Visitors;
 }
 
 class InoutTy: QualifiedTy{
@@ -329,7 +329,7 @@ class InoutTy: QualifiedTy{
 	override string toString(){return _brk("inout("~e.toString()~')');}
 	override InoutTy isInoutTy(){return this;}
 
-	mixin Visitors;	
+	mixin Visitors;
 }
 
 class AggregateTy: Type{
@@ -349,7 +349,7 @@ class EnumTy: Type{
 		this.decl = decl;
 		sstate = SemState.completed;
 	}
-	
+
 	mixin DownCastMethod;
 	mixin Visitors;
 }

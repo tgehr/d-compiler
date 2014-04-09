@@ -103,7 +103,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		assert(decl.name.ptr is prev.name.ptr);
 	}body{
 		error(format("redefinition of '%s'",decl.name), decl.name.loc);
-		note("previous definition was here",prev.name.loc);		
+		note("previous definition was here",prev.name.loc);
 	}
 
 	// lookup interface
@@ -118,7 +118,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		static DoesNotExistDecl inex;
 		return inex?inex:(inex=New!DoesNotExistDecl(null));
 	}
-	
+
 	final Dependent!Declaration lookup(Scope view, Identifier ident){
 		mixin(Setup);
 		return lookupImpl(view,ident);
@@ -150,7 +150,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			return t.independent;
 		return lookupImports(view, ident, onlyMixins, t);
 	}
-	
+
 	Declaration lookupExactlyHere(Scope view, Identifier ident){
 		auto r = symtabLookup(view, ident);
 		if(r) if(auto ov=r.isOverloadSet()) if(!ov.sealingLookup) return null;
@@ -239,7 +239,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			mixin(Setup);
 			return inexistentImpl(view, ident);
 		}
-			
+
 		bool inexistentImpl(Scope view, Identifier ident){
 			if(this in visited) return true;
 			visited[this]=true;
@@ -528,7 +528,7 @@ template AggregateParentsInOrderTraversal(string bdy,string raggr="raggr", strin
 					@(raggr).parents[i].needRetry = true;
 					return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
 				}
-				
+
 			}else{
 				if(@(raggr).parents[i].needRetry){
 					return Dependee(@(raggr).parents[i], @(raggr).scope_).dependent!R;
@@ -621,6 +621,7 @@ class TemplateScope: NestedScope{
 
 	override int getFrameNesting(){ return iparent.getFrameNesting(); }
 	override Scope getFrameScope(){ return iparent.getFrameScope(); }
+	override bool isNestedIn(Scope rhs){ return this is rhs || iparent.isNestedIn(rhs); }
 
 	override FunctionDef getFunction(){return iparent.getFunction();}
 	override AggregateDecl getAggregate(){return iparent.getAggregate();}
