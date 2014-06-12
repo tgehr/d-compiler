@@ -1,3 +1,16 @@
+struct MixinTemplateLookup{
+static:
+	mixin template M(){ int foo(){ return 2; } }
+	int main(){
+		int foo(){ return 1; }
+		{
+			mixin M m;
+			return foo();
+		}
+	}
+	static assert(main()==2);
+}
+
 struct NamedMixinTemplate2{
 	mixin template Foo(){
 		auto foo(){ return 123; }
