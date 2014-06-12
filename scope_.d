@@ -638,12 +638,12 @@ class OrderedScope: NestedScope{ // Forward references don't get resolved
 	// so methods relying on them need to be overridden)
 	protected override Dependent!Declaration lookupImpl(Scope view, Identifier ident){
 		mixin(LookupHereImpl!q{auto decl;this, view, ident, false});
-		if(decl) return decl.independent;
+		if(!decl||typeid(decl) !is typeid(DoesNotExistDecl)) return decl.independent;
 		return parent.lookupImpl(view, ident);
 	}
 	protected override Dependent!Declaration lookupHereImpl(Scope view, Identifier ident, bool onlyMixins){
 		if(auto t=lookupExactlyHere(view, ident)) return t.independent;
-		return lookupImports(view, ident, onlyMixins, null);
+		return lookupImports(view, ident, onlyMixins, inex);
 	}
 	override Declaration lookupExactlyHere(Scope view, Identifier ident){
 		return symtabLookup(view, ident);
