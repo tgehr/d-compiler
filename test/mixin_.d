@@ -13,7 +13,6 @@ struct NamedMixinTemplate{
 		S s;
 		assert(5 in s.m); // TODO
 		assert(s.m.foo()==2); // TODO
-		static assert(!is(typeof(s.foo()))); // TODO
 		return 0;
 	}
 	static assert(main()==0);

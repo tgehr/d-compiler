@@ -37,7 +37,7 @@ void contextpointerqualimplconv(){
 	c=i; // certainly const if only immutable data accessed
 	c=wc;// TODO: certainly const if only const inout data accessed
 	m=c; // just loses guarantees to caller
-	m=i; // TODO: ditto
+	m=i; // ditto
 	m=w; // TODO: ditto
 	m=wc;// TODO: ditto
 	w=wc;// m=c, c=c and i=i are valid

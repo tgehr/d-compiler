@@ -327,11 +327,11 @@ struct TestSeqTemplateArgument{
 		this(); // ok
 		this(int y,int z){ return x[0]=y; } // error
 		this(int y){ x[0]=y; }
-		this(int y,string z){ x=Seq!y; } // // TODO: just expand into individual assignments
+		this(int y,string z){ x=Seq!y; } // TODO: just expand into individual assignments
 	}
 	static assert(S(2).x[0]==2);
 	static assert([S(3).x]==[3]);
-	static assert([S(4,"").x]==[4]); // TODO
+	static assert([S(4,"").x]==[4]);
 	auto bar(){
 		Seq!int x=3;
 		void bar(int y){ x=Seq!y; } // // TODO: ditto

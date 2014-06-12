@@ -1,7 +1,67 @@
-struct S{
+
+/+
+class Infty{
+	int foo(){ return foo(); } // TODO: ok
+	pragma(msg, foo()); // TODO; error
+}
++/
+/+
+/+struct AGH{
+	void foo(){
+		bool[][] delegate(bool[][] delegate(int) dg)immutable nothrow pure @safe a;
+		bool[][] delegate(bool[][] delegate(int)) b=a;
+	}
+	
+	struct Tuple(T...){
+		int i=0;
+		T expand;
+		ref inc(){ i++; return this; }
+	}
+
+	auto test3(){
+		Tuple!(int,int,int) t;
+		auto u=t.inc();
+	}
+	auto fooa = [(int x)=>x,x=>x]; // ok
+	auto foob = [x=>x,(int x)=>x]; // ok
+	auto fooc = [x=>x]; // error
+
+	void food(T)(T arg){} // TODO: ok
+	void main(){
+		food(x=>x); // TODO: error
+	}
+}+/
+
+void circ1()(){ circ2(); }
+void circ2()(){ circ1(); }
+pragma(msg, typeof(&circ1!()));
+
+void foo()(){
+	//pragma(msg, typeof(&foo!()));
+	bar();
+	baz();
+}
+
+void bar()()pure @safe{
+	return foo();
+}
+void baz()pure @safe{}
+
+alias a=foo!();
+pragma(msg, typeof(&a));
+
+/+void foo(){
+	immutable int x=2;
+	pragma(msg, typeof(()=>x));
+}+/
+
+/+struct S(){
 	void foo(){ bar(); }
 	void bar(){ foo(); }
 }
+S!() s;
+
+pragma(msg, typeof(&s.bar));+/
 
 /+class C{
 	final int foo(){ return 1; }

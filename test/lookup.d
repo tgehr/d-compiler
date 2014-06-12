@@ -43,9 +43,9 @@ struct StructLevelDelegateAccessCheck{
 	int y;
 	static foo(int delegate(int) dg){return dg(2);}
 	static assert(foo((int x)=>x)==2);
-	static assert(is(typeof((int x)=>x)==int function(int)));
+	static assert(is(typeof((int x)=>x)==int function(int)pure nothrow @safe));
 	static assert(foo(delegate(int x)=>x)==2);
-	static assert(is(typeof(delegate(int x)=>x)==int delegate(int)));
+	static assert(is(typeof(delegate(int x)=>x)==int delegate(int)pure nothrow @safe));
 	pragma(msg, foo((int x)=>y)); // error
 	pragma(msg, foo(delegate(int x)=>y)); // error
 
@@ -115,7 +115,7 @@ struct TemplateFunctionInstanceAccessCheck{
 			x(42); // error
 			auto u=&x!(); // error
 			pragma(msg, typeof(&x!())); // ok
-			static assert(is(typeof(&x!())==void delegate(int)));
+			static assert(is(typeof(&x!())==void delegate(int)nothrow pure @safe));
 		}
 	}
 }
