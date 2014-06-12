@@ -1,3 +1,17 @@
+struct NamedMixinTemplate2{
+	mixin template Foo(){
+		auto foo(){ return 123; }
+	}
+	static foo(alias m)(){
+		return m.foo();
+	}
+	static main(){
+		mixin Foo m;
+		return NamedMixinTemplate2.foo!m;
+	}
+	static assert(main()==123);
+}
+
 struct NamedMixinTemplate{
 	static:
 	mixin template M(){
@@ -11,11 +25,49 @@ struct NamedMixinTemplate{
 	
 	int main(){
 		S s;
-		assert(5 in s.m); // TODO
-		assert(s.m.foo()==2); // TODO
+		assert(5 in s.m);
+		assert(s.m.foo()==2);
 		return 0;
 	}
 	static assert(main()==0);
+
+	mixin template Ambig(int x){
+		int foo(){ return x; }
+	}
+	mixin template AliasParam(alias m){
+		auto foo(){ return m.foo(); }
+	}
+
+	struct T{
+		mixin Ambig!1 m1;
+		mixin Ambig!2 m2;
+		mixin Ambig!3 m3;
+
+		alias m4=m1;
+
+		auto bar(){ return [m1.foo(), m2.foo(), m3.foo()]; }
+
+		mixin AliasParam!m1 n1;
+		mixin AliasParam!m2 n2;
+		mixin AliasParam!m3 n3;
+	}
+	void tmain1(){
+		T t;
+		t.foo(); // error
+	}
+	int tmain2(){
+		T t;
+		assert(t.m1.foo()==1);
+		assert(t.m2.foo()==2);
+		assert(t.m3.foo()==3);
+		assert(t.n1.foo()==1);
+		assert(t.n2.foo()==2);
+		assert(t.n3.foo()==3);
+		auto a=t.bar();
+		assert(a[0]==1&&a[1]==2&&a[2]==3);
+		return 0;
+	}
+	static assert(tmain2()==0);
 }
 
 mixin template Ambig(immutable(char)[] x){
