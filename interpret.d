@@ -2915,7 +2915,7 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 	final FunctionDef createCallWrapper(Scope sc){
 		auto bdy = New!BlockStm(cast(Statement[])[New!ReturnStm(this)]);
 		auto fty=New!FunctionTy(STC.init,cast(Expression)null,cast(Parameter[])null,VarArgs.none);
-		auto dg=New!FunctionDef(STCstatic,fty,New!Identifier("__ctfeCallWrapper"),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, false);
+		auto dg=New!FunctionDef(STCstatic,fty,New!Identifier("__ctfeCallWrapper"),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
 		dg.sstate = SemState.begin;
 		dg.scope_ = sc;
 		dg.semantic(sc);
@@ -2923,6 +2923,7 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 		while(dg.sstate!=SemState.completed){
 			dg.semantic(sc);
 			mixin(Rewrite!q{dg});
+			assert(dg.sstate!=SemState.error);
 		}
 		dg.loc = loc;
 		// The following is here to make sure that inaccessible contexts are never compiled in
@@ -4791,7 +4792,7 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 			mixin(_emitAll());
 
 			override void emitPointer(ref ByteCodeBuilder bld){
-				bld.error("taking address of union fields not yet supported in CTFE", loader.loc);
+				bld.error("taking address of union fields not yet supported at compile time", loader.loc);
 			}
 			override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info, VarDecl vd){
 				static bool isFullStore(VarDecl vd){
@@ -4832,7 +4833,7 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 						foreach(i,s;["emitStore", "emitStoreKR", "emitStoreKV"])
 							r~=mixin(X!q{ override void @(s)(ref ByteCodeBuilder bld){
 								bld.emitTmppush(size);
-								enum lderr="partial assignments to union fields not yet supported in CTFE";
+								enum lderr="partial assignments to union fields not yet supported at compile time";
 								if(fullstore) outer.storeUpdate(bld);
 								else outer.loadCheck(bld, lderr, info.loc);
 								auto lv=r();
@@ -4843,7 +4844,7 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 					}
 					mixin(_emitAll());
 					override void emitPointer(ref ByteCodeBuilder bld){
-						bld.error("taking address of members of union fields not yet supported in CTFE.", info.loc);
+						bld.error("taking address of members of union fields not yet supported at compile time", info.loc);
 					}
 					override LValueStrategy emitFieldLV(ref ByteCodeBuilder bld, size_t off, size_t len, size_t ctlen, ErrorInfo info2, VarDecl vd){
 						auto lv=()=>r().emitFieldLV(bld, off, len, ctlen, info2, vd);
@@ -5173,7 +5174,7 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 		foreach(Type t;tt) r+=getBCSizeof(t);
 		return r;
 	}
-	assert(0, "type "~type.toString~" not yet supported in CTFE");
+	assert(0, "type "~type.toString~" not yet supported at compile time");
 }
 
 mixin template CTFEInterpret(T) if(is(T==VarDecl)){

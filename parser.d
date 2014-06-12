@@ -42,6 +42,7 @@ enum STCmattersforparamoverride = (STCref|STCin|STClazy|STCout|STCscope);
 enum STCinvariantunderoverride = (STCref|STCsynchronized);
 enum STCtypeconstructor = (STCconst|STCimmutable|STCshared|STCinout);
 enum STCvisibility = (STCpackage|STCprivate|STCprotected|STCpublic);
+enum STCinferrable = (STCsafe|STCimmutable|STCnothrow|STCpure);
 static assert(storageClasses.length+attributeSTC.length<64);
 alias long STC;
 string STCtoString(STC stc){

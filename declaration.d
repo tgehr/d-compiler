@@ -460,9 +460,9 @@ class FunctionDecl: OverloadableDecl{
 
 class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 	CompoundStm bdy;
-	this(STC stc, FunctionTy type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody,bool deduceStatic=false){
+	this(STC stc, FunctionTy type,Identifier name, CompoundStm precondition,CompoundStm postcondition,Identifier pres,CompoundStm fbody){
 		super(stc, type, name, precondition, postcondition, pres); bdy=fbody;
-		this.deduceStatic = deduceStatic;
+		possibleSTCs=STCstatic|STCinferrable;
 	}
 	override string toString(){
 		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~

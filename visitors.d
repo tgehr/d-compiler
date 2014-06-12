@@ -59,7 +59,8 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 				static if(is(typeof(*mixin("&res."~x)) S) &&
 					     !is(S:immutable(S))){
 					static if(is(S:const(Node))){
-						mixin("if(res."~x~" !is null) res."~x~"=res."~x~".ddup();");
+						static if(!is(T==FunctionTy)||!is(S==FunctionTy))
+							mixin("if(res."~x~" !is null) res."~x~"=res."~x~".ddup();");
 					}else static if(is(typeof(*mixin("&res."~x)):const(Node)[])){
 						mixin("res."~x~"=res."~x~".dup;");
 						static if((!is(T==ReferenceAggregateDecl)||x!="parents"))

@@ -1603,23 +1603,20 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 				// TODO: this is a hack, find solution for taking address of
 				// overloaded declaration
 
-				FunctionDecl fd;
+				FunctionDecl fd=null;
 				auto fe = e.isFieldExp();
 				if(auto s=fe?fe.e2:e.isSymbol()){
-					if(auto ov=s.meaning.isOverloadSet()){
-						if(ov.decls.length==1)
-							if(auto fdo=ov.decls[0].isFunctionDecl()) fd = fdo;
-					}else if(auto fdd=s.meaning.isFunctionDecl()) fd = fdd;
+					fd=tryGetFunctionDecl(s);
 					if(fd){
 						if(s.type is Type.get!void()) // need deduction first
 							type = Type.get!void;
 						else{
 							if(auto fdef=fd.isFunctionDef()){
-							if(fdef.deduceStatic){ // TODO: || deduceQualifiers
-								s.makeStrong();
-								mixin(SemChld!q{e});
+							if(!fdef.finishedInference()){
+								needRetry=true;
+								Scheduler().await(this,fdef,fdef.scope_);
+								return;
 							}}
-
 							// resolve inout and check this pointer compatibility
 							InoutRes inoutRes;
 							if(fe)if(auto this_ = fe.e1.extractThis()){
@@ -1683,6 +1680,26 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 	}
 	static if(S==Tok!"&"){
 
+	override void noHope(Scope sc){
+		auto fe = e.isFieldExp();
+		if(auto s=fe?fe.e2:e.isSymbol()){
+			auto fd=tryGetFunctionDecl(s);
+			if(auto fdef=fd.isFunctionDef()){
+				if(!fdef.finishedInference())
+					fdef.cancelInference();
+			}
+		}
+	}
+
+	private static FunctionDecl tryGetFunctionDecl(Symbol s){
+		FunctionDecl fd=null;
+		if(auto ov=s.meaning.isOverloadSet()){
+			if(ov.decls.length==1)
+				if(auto fdo=ov.decls[0].isFunctionDecl()) fd = fdo;
+		}else if(auto fdd=s.meaning.isFunctionDecl()) fd = fdd;
+		return fd;
+	}
+
 	override void isInContext(InContext inContext){
 		if(inContext == InContext.passedToTemplateAndOrAliased){
 			if(auto sym=e.isSymbol())
@@ -1703,9 +1720,9 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 		if(auto fd  = sym.meaning.isFunctionDef()       ){
 			auto rhsu = rhs.getHeadUnqual();
 			if(auto dg  = rhsu.isDelegateTy()){
-				if(fd.deduceStatic){
+				if(fd.inferStatic){
 					assert(sym.isStrong);
-					return fd.type.getDelegate()
+					return fd.type.addQualifiers(STCimmutable).getDelegate()
 						.implicitlyConvertsTo(dg);
 				}
 			}else if(fd.canBeStatic)
@@ -1721,6 +1738,9 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
 		return e.matchCallHelper(sc, loc, this_, args, context);
+	}
+	override void matchError(Scope sc, Location loc, Type this_, Expression[] args){
+		e.matchError(sc,loc,this_,args);
 	}
 
 	// this is necessary to make template delegate literals work correctly
@@ -1855,7 +1875,7 @@ class TemplateInstanceDecl: Declaration{
 	TypeTemplArgs argTypes; // types of the template arguments
 	TemplArgs resolved;     // arguments as given to the template body
 
-	Match match = Match.exact; // match level. TODO: this is not a property of the returned instantiation...
+	Match match = Match.exact; // match level.
 
 	Expression constraint;
 	BlockDecl bdy;
@@ -2277,7 +2297,7 @@ class TemplateInstanceDecl: Declaration{
 				foreach(decl;&bdy.traverseInOrder){
 					decl.stc&=~STCstatic;
 					if(auto fd=decl.isFunctionDef())
-						fd.deduceStatic=true; // TODO: also deduce this for other declarations
+						fd.inferStatic=true; // TODO: also infer this for other declarations
 				}
 			}
 		}else bdy.stc&=~STCstatic;
@@ -2663,7 +2683,7 @@ class ExpTuple: Expression, Tuple{
 	Expression index(Scope sc, InContext inContext, const ref Location loc, ulong index){
 		assert(index<length); // TODO: get rid of this when DMD is fixed
 		assert(sstate == SemState.completed);
-	return indexImpl(sc,inContext,loc,exprs[cast(size_t)index]);
+		return indexImpl(sc,inContext,loc,exprs[cast(size_t)index]);
 	}
 
 	final allIndices(Scope sc, InContext inContext, const ref Location loc){
@@ -4630,7 +4650,7 @@ class Symbol: Expression{
 			if(ov.count==1 && ov.decls.length){
 				if(auto fd=ov.decls[0].isFunctionDecl()){
 					meaning = fd;
-					type = fd.type;
+					type = fd.type; // TODO: at this point, we do not necessarily know if this type is right
 				}
 			}else foreach(ref x;ov.tdecls){
 				x.semantic(x.scope_);
@@ -4685,7 +4705,6 @@ class Symbol: Expression{
 		// TODO: simple pointer-chain expression alias?
 		if(!inContext.among(InContext.fieldExp,InContext.passedToTemplateAndOrAliased) &&
 		   thisType() && maybeThisContext() &&
-		   meaning.needsAccessCheck(accessCheck) &&
 		   !meaning.isFunctionDecl().maybe!(a=>a.isConstructor()) &&
 		   !meaning.isOverloadSet().maybe!(a=>a.isConstructor())
 		){
@@ -4848,6 +4867,7 @@ class Symbol: Expression{
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
 		if(!scope_) scope_=sc;
 		assert(meaning && scope_);
+		if(meaning.isVarDecl()) return super.matchCallHelper(sc, loc, this_, args, context);
 		if(!this_) this_ = maybeThisContext();
 		mixin(MatchCall!q{auto m; meaning, sc, loc, this_, this, args, context});
 		if(m){
@@ -5337,7 +5357,7 @@ mixin template Semantic(T) if(is(T==CastExp)){
 				}
 			}
 			if(auto dg = type.getHeadUnqual().isDelegateTy()){
-				if(fd.stc&STCstatic && fd.deduceStatic){
+				if(fd.stc&STCstatic && fd.inferStatic){
 					assert(sym.isStrong && uexp.type.getFunctionTy());
 					mixin(ImplConvertsTo!q{
 						bool delegaterequested;
@@ -5983,7 +6003,7 @@ abstract class CurrentExp: Expression{
 	final FunctionDecl enclosingMemberFunction(){ return enclosingMemberFunction(scope_); }
 	static FunctionDecl enclosingMemberFunction(Scope scope_){
 		Declaration mfun=null;
-		for(Declaration dl=scope_.getDeclaration(); !dl.isAggregateDecl(); dl=dl.scope_.getDeclaration()){
+		for(Declaration dl=scope_.getDeclaration(); dl && !dl.isAggregateDecl(); dl=dl.scope_.getDeclaration()){
 			if(dl.stc&STCstatic) return null;
 			mfun=dl;
 		}
@@ -6614,7 +6634,9 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		auto dg=New!FunctionDef(STC.init,fty,New!Identifier(uniqueIdent("__dgliteral")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy, which==Kind.none);
+		auto dg=New!FunctionDef(STC.init,fty,New!Identifier(uniqueIdent("__dgliteral")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
+		if(which==Kind.none) dg.inferStatic=true;
+		dg.inferAttributes=true; // TODO: re-enable
 		auto decl=sc.getDeclaration();
 
 		dg.sstate = SemState.begin;
@@ -7282,40 +7304,49 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		return compareImpl(rhs);
 	}
 
-	private bool compareImpl(bool implconv=false)(Type rhs){
+	private template CIT(bool implconv){
+		static if(implconv) alias Dependent!bool CIT;
+		else alias bool CIT;
+	}
+	private CIT!implconv compareImpl(bool implconv=false)(Type rhs){
+		static if(implconv){ auto tt=true.independent, ff=false.independent; }
+		else{ auto tt=true, ff=false; }
 		// cannot access frame pointer to 'all'. TODO: file bug
 		if(auto ft = rhs.isFunctionTy()){
 			auto stc1 = stc, stc2 = ft.stc;
+			// STC's could be inferred (TODO: is this exactly right?)
+			if(hasUnresolvedParameters()) stc1&=~STCinferrable, stc2&=~STCinferrable;
 			static if(implconv){
 				stc1 &= ~STCproperty, stc2 &= ~STCproperty; // STCproperty does not matter
 				stc1 &= ~STCauto, stc2 &= ~STCauto; // STCauto does not matter
 				if(stc1 & STCsafe || stc1 & STCtrusted)
 					stc1 &= ~STCsafe & ~STCtrusted, stc2 &= ~STCsafe & ~STCtrusted & ~STCsystem;
-				// attributes that can be freely dropped:
-				if(stc1 & STCpure) stc1 &= ~STCpure, stc2 &= ~STCpure;
-				if(stc1 & STCnothrow) stc1 &= ~STCnothrow, stc2 &= ~STCnothrow;
-				if(stc1 & STCconst) stc1 &= ~STCconst, stc2 &= ~STCconst;
 				// immutable -> const is ok
 				if(stc1 & STCimmutable && stc2 & STCconst)
 					stc1 &= ~STCimmutable, stc2 &= ~STCconst;
-				if(stc2 & STCdisable) stc1 &= ~STCdisable, stc2 &= ~STCdisable;
+				// attributes that can be freely dropped:
+				static STC[] droppable=[STCconst,STCimmutable,STCpure,STCnothrow,STCsafe];
+				foreach(drop;droppable) if(stc1 & drop) stc1 &= ~drop, stc2 &= ~drop;
 				// TODO: more implicit conversion rules
-			}
-			if(!((stc1==stc2 && (!ret||ret.equals(ft.ret)) &&
-			     params.length == ft.params.length) &&
-			     vararg == ft.vararg)) return false;
+				if(ret){
+					mixin(RefConvertsTo!q{bool rc;ret, ft.ret, 0});
+					if(!rc) return ff;
+				}
+			}else if(ret && !ret.equals(ft.ret)) return ff;
+			if(!((stc1==stc2 && params.length == ft.params.length) && vararg == ft.vararg))
+				return ff;
 			//all!(_=>_[0].type.equals(_[1].type))(zip(params,ft.params)) &&
 			foreach(i,x; params)
 				if(x.type && !x.type.equals(ft.params[i].type)||
 				   (x.stc&(STCbyref|STClazy))!=(ft.params[i].stc&(STCbyref|STClazy)))
-					return false;
-			return true;
-		}else return false;
+					return ff;
+			return tt;
+		}else return ff;
 	}
 
 	// TODO: rename and don't implement them
 	override Dependent!bool refConvertsTo(Type rhs, int num){
-		if(num<2) return compareImpl!true(rhs).independent;
+		if(num<2) return compareImpl!true(rhs);
 		else return compareImpl!false(rhs).independent;
 	}
 
@@ -9153,7 +9184,7 @@ mixin template Semantic(T) if(is(T==Declaration)){
 			if(dl.stc & STCstatic) return false.independent;
 			if(auto fn=dl.isFunctionDef()){
 				if(auto fn2=decl.isFunctionDef()){
-					fn2.notifyIfNotStatic(fn);
+					fn2.notifyIfNot(STCstatic,fn);
 				}else fn.canBeStatic = false;
 			}
 			// TODO: infer whether a template instantiation needs to be local or not
@@ -9305,7 +9336,8 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			if(willInterpretInit()&&init.sstate==SemState.completed){
 				mixin(ImplConvertsTo!q{bool iconv;init, type});
 				// type deduction should finish before interpretation
-				if(!iconv) mixin(FinishDeductionProp!q{init});
+				// expressions with no deduced type have type 'void'
+				if(!iconv||type is Type.get!void()) mixin(FinishDeductionProp!q{init});
 				assert(init.sstate == SemState.completed, to!string(init));
 				init.interpret(sc);
 				mixin(PropRetry!q{init});
@@ -11367,9 +11399,11 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			r=t;
 			context = tcontext;
 			inst = r.extractTemplateInstance();
-			if(sc&&inst.isGagged) inst.ungag();
-			inst.startAnalysis();
-			inst.semantic(sc);
+			if(inst.sstate != SemState.completed && inst.sstate != SemState.started){
+				if(sc&&inst.isGagged) inst.ungag();
+				inst.startAnalysis();
+				inst.semantic(sc);
+			}
 
 			if(matchATemplate){mixin(RewEplg!q{inst});}
 		}
@@ -11537,12 +11571,13 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		mixin(SemEplg);
 	}
 	private bool isMemberFunction(){
+		if(stc&STCstatic) return false;
 		if(!isConstructor()){
 			if(auto decl=scope_.getDeclaration()) return !!decl.isAggregateDecl();
 		}else{
 			// constructors are logically members of the enclosing scope
 			auto decl=scope_.getDeclaration();
-			if(!decl||!decl.isAggregateDecl()) return false;
+			if(!decl||!decl.isAggregateDecl()||decl.stc&STCstatic) return false;
 			if(auto decl2=decl.scope_.getDeclaration)
 				return !!decl2.isAggregateDecl();
 		}
@@ -11560,7 +11595,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		//mixin(SemProp!q{type});
 		if(auto nr=type.needRetry) { needRetry = nr; mixin(SemRet); }
 		mixin(PropErr!q{type});
-		if(stc&STCstatic) this_ = null;
+		if(!isMemberFunction()&&!isConstructor()) this_ = null;
 		mixin(MatchCallHelper!q{auto r; type, sc, loc, this_, args, context});
 		return (r ? this : Declaration.init).independent;
 	}
@@ -11764,6 +11799,8 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		propagateSTC();
 		if(isConstructor()) type.ret=Type.get!void();
 		if(!fsc){
+			if(auto ti=scope_.getTemplateInstance())
+				if(!ti.isMixin) inferAttributes=true;
 			fsc = New!FunctionScope(scope_, this);
 			foreach(p; type.params){
 				if(p.sstate == SemState.pre) p.sstate = SemState.begin;
@@ -11816,24 +11853,46 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 
 		mixin(PropErr!q{});
 		mixin(PropErr!q{type, bdy});
-		if(deduceStatic){
-			if(canBeStatic) stc |= STCstatic;
-			else stc &= ~STCstatic; // struct/class member delegates
-		}
+		auto infer=possibleSTCs&inferredSTCs;
+		if(infer&STCstatic) infer&=~STCimmutable;
+		stc |= infer;
+		propagateSTC();
 		mixin(SemEplg);
 	}
 
 	mixin HandleNestedDeclarations;
 
-	/* specifies whether or not to deduce the 'static' qualifier
+	/* specifies whether or not to infer the 'static' qualifier
 	 */
 
-	bool deduceStatic;
-	bool canBeStatic = true;
+	bool inferStatic;
+	bool inferAttributes;
+	@property STC inferredSTCs(){
+		auto infer=(inferStatic?STCstatic:STC.init)|(inferAttributes?STCinferrable:STC.init);
+		if(isMemberFunction()||isConstructor()) infer&=~STCimmutable;
+		return infer;
+	}
+
+	bool finishedInference(){
+		return sstate==SemState.completed||!inferredSTCs();
+	}
+
+	void cancelInference(){
+		inferStatic=false;
+		inferAttributes=false;
+	}
+
+	private STC possibleSTCs; // DMD does not allow initialization here. TODO: fix this
+	@property bool canBeStatic(){
+		return !!(possibleSTCs&STCstatic);
+	}
+	@property void canBeStatic(bool b)in{assert(!b||canBeStatic);}body{
+		if(!b) impossibleSTCs(STCstatic);
+	}
 
 	final void addContextPointer() in{
 		assert(sstate == SemState.completed);
-		assert(deduceStatic);
+		assert(inferredSTCs()&STCstatic);
 		assert(stc&STCstatic);
 	}body{
 		assert(canBeStatic);
@@ -11847,12 +11906,16 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		}
 	}
 
-	void notifyIfNotStatic(FunctionDef other){
+	void notifyIfNot(STC stc,FunctionDef other){
 		if(other is this) return;
-		if(!canBeStatic){ other.canBeStatic=false; return; }
-		if(sstate == SemState.completed) return;
-		assert(0, text("TODO ",this));
+		other.possibleSTCs=other.possibleSTCs&(~stc|stc&possibleSTCs);
+		if(finishedInference()) return;
+		// assert(0, text("TODO ",this)); // TODO!
 	}
+	private void impossibleSTCs(STC stc){
+		possibleSTCs&=~stc;
+	}
+	
 }
 
 mixin template Semantic(T) if(is(T==UnittestDecl)){
@@ -12019,7 +12082,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 
 		else static if(is(T==MixinDecl)) r.pickupSTC(stc);
 		r.semantic(sc);
-		//ohan.note("mixed in here", loc);
+		// ohan.note("mixed in here", loc);
 		// TODO: do we want something like this?
 /+		sc.handler = ohan;
 		if(handler.errors.length){
