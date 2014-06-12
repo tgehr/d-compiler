@@ -32,6 +32,7 @@ abstract class Declaration: Statement{
 		TemplateDecl,
 		TemplateInstanceDecl,
 		TemplateMixinDecl,
+		NamespaceDecl,
 		OverloadableDecl,
 		OverloadSet,
 		CrossScopeOverloadSet,

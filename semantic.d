@@ -3235,6 +3235,8 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		potentialInsert(sc, this);
 	}
 
+	NamespaceDecl nspace = null;
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(sstate == SemState.pre) presemantic(sc);
@@ -3246,10 +3248,13 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		auto meaning=cast(TemplateInstanceDecl)cast(void*)sym.meaning;
 		meaning.bdy.pickupSTC(stc);
 		meaning.startAnalysis();
-		if(!sc.addImport(meaning.bdy.scope_,ImportKind.mixin_)) mixin(ErrEplg);
+		auto instsc=meaning.bdy.scope_;
+		if(!sc.addImport(instsc,ImportKind.mixin_)) mixin(ErrEplg);
 		potentialRemove(sc, this);
 		sym.makeStrong();
 		mixin(SemChld!q{inst});
+		if(name&&!nspace) nspace = New!NamespaceDecl(instsc,name);
+		if(nspace) mixin(SemChld!q{nspace});
 		mixin(SemEplg);
 	}
 
@@ -3262,6 +3267,18 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 		return 0;
 	}
 }
+
+class NamespaceDecl: Declaration{
+	Scope sc;
+	this(Scope sc,Identifier name){ super(STC.init,name); this.sc=sc; }
+	
+	override string toString(){ return name.toString(); }
+	override @property string kind(){ return "name space"; }
+
+	mixin Visitors;
+	mixin DownCastMethod;
+}
+mixin template Semantic(T) if(is(T==NamespaceDecl)){}
 
 mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 	TemplArgs analyzedArgs;
@@ -4786,6 +4803,7 @@ class Symbol: Expression{
 	// TODO: maybe refactor
 	override Scope getMemberScope(){
 		if(auto tmpl=meaning.isTemplateInstanceDecl()) return tmpl.bdy.scope_;
+		if(auto nspace=meaning.isNamespaceDecl()) return nspace.sc;
 		return super.getMemberScope();
 	}
 
@@ -4801,7 +4819,8 @@ class Symbol: Expression{
 	////
 
 	override Expression extractThis(){
-		if(meaning.isTemplateInstanceDecl()) return null;
+		if(meaning.isTemplateInstanceDecl()||meaning.isNamespaceDecl())
+			return null;
 		return this;
 	}
 
@@ -4823,7 +4842,8 @@ class Symbol: Expression{
 	}
 
 	override AccessCheck deferredAccessCheck(){
-		if(meaning.isTemplateInstanceDecl()) return accessCheck;
+		if(meaning.isTemplateInstanceDecl()||meaning.isNamespaceDecl())
+			return accessCheck;
 		return super.deferredAccessCheck();
 	}
 
@@ -6405,7 +6425,8 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	}
 	override Expression extractThis(){
 		if(isTuple()) return null;
-		if(e2.meaning.isTemplateInstanceDecl()) return e1.extractThis();
+		if(e2.meaning.isTemplateInstanceDecl()||e2.meaning.isNamespaceDecl())
+			return e1.extractThis();
 		return this;
 	}
 	override AccessCheck deferredAccessCheck(){
