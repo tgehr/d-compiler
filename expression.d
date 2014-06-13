@@ -67,6 +67,10 @@ auto indepvoid(){ return Dependent!void(Dependee()); }
 auto independent(T)(T value) if(!is(T==void)){ return Dependent!T(Dependee(), value); }
 auto dependent(T)(Dependee dependee){ return Dependent!T(dependee); }
 
+Dependent!(typeof(a(T.init))) depmap(alias a,T)(Dependent!T dep){
+	return dep.isIndependent()?independent(a(dep.value)):dependent!(typeof(a(T.init)))(dep.dependee);
+}
+
 struct Dependee{
 	Node node = null;
 	Scope scope_ = null;

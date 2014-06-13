@@ -9080,11 +9080,69 @@ private:
 	LabeledStm target;
 }
 
+class WithBaseScope: Scope{
+	Scope other;
+	Expression sym;
+	this(Scope other,Expression sym){ this.other=other; this.sym=sym; }
+	private AliasDecl createAliasToDecl(Declaration decl){
+		return New!AliasDecl(STC.init,New!VarDecl(STC.init,New!(BinaryExp!(Tok!"."))(sym,New!Symbol(decl)),New!Identifier(decl.name.name),Expression.init));
+	}
+	private Declaration getAlias(Declaration decl){
+		if(!decl||typeid(decl) is typeid(DoesNotExistDecl))
+			return decl;
+		if(auto odecl=symtabLookup(this,decl.name))
+			return odecl;
+		auto a = createAliasToDecl(decl);
+		a.semantic(this);
+		return a;
+	}
+	override @property ErrorHandler handler(){ return other.handler; }
+	override Dependent!Declaration lookupHereImpl(Scope view,Identifier name,bool onlyMixins){
+		return other.lookupHereImpl(view,name,onlyMixins).depmap!(a=>getAlias(a));
+	}
+	override Dependent!IncompleteScope getUnresolvedHereImpl(Scope view, Identifier ident, bool onlyMixins, bool noHope){
+		return other.getUnresolvedHereImpl(view,ident,onlyMixins,noHope);
+	}
+}
+
 mixin template Semantic(T) if(is(T==WithStm)){
+	BlockScope bsc;
+	Expression exp = null;
+	TmpVarExp tmp = null;
+	Expression sym = null;
+
+	private Expression createSymbol(Expression e,Expression this_){
+		if(!this_) return e;
+		if(e is this_) return tmp.sym;
+		if(auto fld=e.isFieldExp())
+			return New!(BinaryExp!(Tok!"."))(createSymbol(fld.e1,this_),fld.e2);
+		assert(0,text(e));
+	}
+	
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		sc.error("unimplemented feature WithStm",loc);
-		mixin(ErrEplg);
+		if(!exp) exp=e;
+		mixin(SemChld!q{exp}); // TODO: maybe do not ignore s if error, but only lookup failures within it
+		auto msc=exp.getMemberScope();
+		if(!msc){
+			// TODO: fix getMemberScope for built-in types
+			sc.error("invalid 'with' expression",e.loc);
+			mixin(ErrEplg);
+		}
+		auto this_=exp.extractThis();
+		if(exp.type !is Type.get!void()){ // silly special casing of 'void'
+			if(!tmp&&this_) tmp=New!TmpVarExp(this_);
+			if(tmp) mixin(SemChld!q{tmp});
+			if(!sym) sym=createSymbol(exp,this_);
+		}else if(!sym) sym=Type.get!void();
+		mixin(SemChld!q{sym});
+		if(!bsc){
+			bsc=New!BlockScope(sc);
+			if(tmp) msc=New!WithBaseScope(msc,sym);
+			if(!bsc.addImport(msc,ImportKind.mixin_)) mixin(ErrEplg);
+		}
+		mixin(SemChld!q{sc=bsc;s});
+		mixin(SemEplg);
 	}
 }
 
