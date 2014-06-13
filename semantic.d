@@ -9113,7 +9113,7 @@ mixin template Semantic(T) if(is(T==WithStm)){
 
 	private Expression createSymbol(Expression e,Expression this_){
 		if(!this_) return e;
-		if(e is this_) return tmp.sym;
+		if(e is this_) return tmp?tmp.sym:Type.get!void();
 		if(auto fld=e.isFieldExp())
 			return New!(BinaryExp!(Tok!"."))(createSymbol(fld.e1,this_),fld.e2);
 		assert(0,text(e));
@@ -9130,11 +9130,10 @@ mixin template Semantic(T) if(is(T==WithStm)){
 			mixin(ErrEplg);
 		}
 		auto this_=exp.extractThis();
-		if(exp.type !is Type.get!void()){ // silly special casing of 'void'
-			if(!tmp&&this_) tmp=New!TmpVarExp(this_);
-			if(tmp) mixin(SemChld!q{tmp});
-			if(!sym) sym=createSymbol(exp,this_);
-		}else if(!sym) sym=Type.get!void();
+		// silly special casing of void
+		if(!tmp&&this_&&this_.type !is Type.get!void()) tmp=New!TmpVarExp(this_);
+		if(tmp) mixin(SemChld!q{tmp});
+		if(!sym) sym=createSymbol(exp,this_);
 		mixin(SemChld!q{sym});
 		if(!bsc){
 			bsc=New!BlockScope(sc);
