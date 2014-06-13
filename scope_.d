@@ -699,7 +699,7 @@ final class FunctionScope: OrderedScope{
 	override FunctionDef getDeclaration(){return fun;}
 protected:
 	override bool canDeclareNested(Declaration decl){ // for BlockScope
-		return typeid(decl) is typeid(DoesNotExistDecl) || !(decl.name.ptr in symtab); // TODO: More complicated stuff.
+		return typeid(decl) is typeid(DoesNotExistDecl) || !(decl.name.ptr in symtab);
 	}
 private:
 	FunctionDef fun;
@@ -750,7 +750,9 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 
 protected:
 	override bool canDeclareNested(Declaration decl){
-		return super.canDeclareNested(decl) && parent.canDeclareNested(decl);
+		if(!(typeid(decl) is typeid(DoesNotExistDecl) || !(decl.name.ptr in symtab)))
+			return false;
+		return parent.canDeclareNested(decl);
 	}
 private:
 	BreakableStm brokenOne;
