@@ -159,9 +159,9 @@ abstract class Expression: Node{
 		TernaryExp,
 		CastExp,
 		Type,
-		Tuple,
+		.semantic.Tuple,
 		ExpTuple,
-		TypeTuple,
+		.semantic.TypeTuple,
 		ImportBindingsExp,
 	);
 
