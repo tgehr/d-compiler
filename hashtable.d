@@ -309,7 +309,7 @@ auto assocHashCombine(AssocHash a, AssocHash b){ return AssocHash(a.value+b.valu
 int i;
 auto assocHash(size_t data){ return AssocHash(data); }
 private enum assocb=assocHash(0);
-auto assocHashRed(R)(R i){ return reduce!assocCombine(assocb, i.map!assocHash); }
+auto assocHashRed(R)(R i){ return reduce!assocHashCombine(assocb, i.map!assocHash); }
 
 alias Seq!(identityHash0, identityHash1) identityHash;
 
