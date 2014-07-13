@@ -110,7 +110,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 	private static bool[Object] visited;
 	private enum Setup = q{
-		assert(visited is null);
+		assert(visited is null,text(visited));
 		scope(exit) visited=null;
 	};
 	// a dummy DoesNotExistDecl for circular lookups through imports
@@ -715,7 +715,7 @@ class BlockScope: OrderedScope{ // No shadowing of declarations in the enclosing
 	override bool insert(Declaration decl){
 		// TODO: get rid of !is DoesNotExistDecl?
 		if(!parent.canDeclareNested(decl)){
-			auto confl=parent.lookupImpl(this, decl.name).value;
+			auto confl=parent.lookup(this, decl.name).value;
 			assert(!!confl);
 			error(format("declaration '%s' shadows a %s%s",decl.name,confl.kind=="parameter"?"":"local ",confl.kind), decl.name.loc);
 			note("previous declaration is here",confl.name.loc);
