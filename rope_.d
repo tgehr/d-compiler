@@ -179,6 +179,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			}
 			invariant(){ assert(array.length==length); }
 		}
+		// TODO: use treap instead of random balancing
 		RopeImpl* opBinary(string op:"~")(RopeImpl* rhs){
 			if(tag==Tag.Array&&rhs.tag==Tag.Array){
 				// TODO: coalesce?
