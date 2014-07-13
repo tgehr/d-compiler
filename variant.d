@@ -154,7 +154,7 @@ struct Variant{
 						mixin("alias "~x~" T;"); // workaround DMD bug
 						return getOccupied!T;
 				}
-				default: assert(0);
+				default: assert(0,text(bt.op));
 			}
 		}
 		

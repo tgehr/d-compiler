@@ -74,7 +74,7 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 		}
 		return *cast(inout(T)*)&res;
 	}}~(!is(T==Node)?
-	q{@trusted inout(T) sdup()inout{
+	q{override @trusted inout(T) sdup()inout{
 		enum siz = __traits(classInstanceSize,T);
 		auto data = New!(void[])(siz);
 		import std.c.string;
