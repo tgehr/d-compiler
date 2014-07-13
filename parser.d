@@ -712,7 +712,7 @@ private struct Parser{
 			case Tok!"foreach":
 				nextToken();
 				expect(Tok!"(");
-				auto vars=appender!(Parameter[])();
+				auto vars=appender!(ForeachVarDecl[])();
 				do{
 					auto stc=STC.init;
 					if(ttype==Tok!"ref") stc=STCref;
@@ -722,7 +722,7 @@ private struct Parser{
 					Location loc=tok.loc;
 					if(ttype!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
 					auto name=parseIdentifier();
-					auto p=New!Parameter(stc,type,name,Expression.init); p.loc=loc.to(ptok.loc);
+					auto p=New!ForeachVarDecl(stc,type,name,Expression.init); p.loc=loc.to(ptok.loc);
 					vars.put(p);
 					if(ttype==Tok!",") nextToken();
 					else break;

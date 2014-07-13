@@ -416,6 +416,11 @@ class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach 
 	mixin Visitors;
 }
 
+class ForeachVarDecl: VarDecl{ // foreach variable
+	this(STC stc, Expression rtype, Identifier name, Expression init){super(stc,rtype,name,init);}
+	mixin Visitors;
+}
+
 class CArrayParam: Parameter{
 	Expression postfix; // reverse order until semantic
 	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{

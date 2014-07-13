@@ -104,21 +104,21 @@ class ForStm: LoopingStm{
 	mixin Visitors;
 }
 class ForeachStm: LoopingStm{
-	Parameter[] vars;
+	ForeachVarDecl[] vars;
 	Expression aggregate;
 	Statement bdy;
 	bool isReverse;
-	this(Parameter[] v,Expression a,Statement b, bool isr=false){ vars = v; aggregate = a; bdy = b; isReverse=isr; }
+	this(ForeachVarDecl[] v,Expression a,Statement b, bool isr=false){ vars = v; aggregate = a; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();}
 
 	mixin Visitors;
 }
 class ForeachRangeStm: Statement{
-	Parameter var;
+	ForeachVarDecl var;
 	Expression left,right;
 	Statement bdy;
 	bool isReverse;
-	this(Parameter v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
+	this(ForeachVarDecl v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~var.toString()~";"~left.toString()~".."~right.toString()~") "~bdy.toString();}
 
 	mixin Visitors;

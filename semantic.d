@@ -8627,11 +8627,54 @@ private:
 
 
 mixin template Semantic(T) if(is(T==ForeachRangeStm)){
+	ForStm lower;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		sc.error("unimplemented feature ForeachRangeStm",loc);
-		mixin(ErrEplg);
-		//mixin(SemEplg);
+		mixin(SemChld!q{left,right});
+		mixin(TypeCombine!q{auto type;left,right});
+		if(!type){
+			sc.error(format("incompatible types '%s' and '%s' for foreach range",left.type,right.type),left.loc.to(right.loc));
+			mixin(ErrEplg);
+		}
+		var.init=left;
+		if(!lower){
+			auto tmpl=New!ForeachVarDecl(STC.init, type, null, left);
+			tmpl.loc=left.loc;
+			tmpl.presemantic(sc);
+			auto tmpr=New!ForeachVarDecl(STC.init, type, null, right);
+			tmpr.loc=right.loc;
+			tmpr.presemantic(sc);
+			auto s1=New!CompoundStm([cast(Statement)tmpl,tmpr]);
+			s1.loc=var.loc.to(right.loc);
+			auto syml=New!Symbol(tmpl);
+			syml.loc=left.loc;
+			auto symr=New!Symbol(tmpr);
+			symr.loc=right.loc;
+			auto e1=type.isBasicType()? // DMD seems to do this. Is this documented?
+				New!(BinaryExp!(Tok!"<"))(syml,symr):
+				New!(BinaryExp!(Tok!"!="))(syml,symr);
+			e1.loc=syml.loc.to(symr.loc);
+			Expression e2=null;
+			Statement s2;
+			if(!isReverse){
+				e2=New!(UnaryExp!(Tok!"++"))(syml);
+				e2.loc=e1.loc;
+				var.init=syml;
+				s2=New!BlockStm([var,bdy]);
+			}else{
+				auto edec=New!(UnaryExp!(Tok!"--"))(symr);
+				edec.loc=e1.loc;
+				auto sdec=New!ExpressionStm(edec);
+				sdec.loc=edec.loc;
+				var.init=symr;
+				s2=New!BlockStm([sdec,var,bdy]);
+			}
+			s2.loc=bdy.loc;
+			lower=New!ForStm(s1,e1,e2,s2);
+			lower.loc=loc;
+		}
+		mixin(SemChld!q{lower});
+		mixin(SemEplg);
 	}
 }
 
@@ -9585,6 +9628,20 @@ mixin template Semantic(T) if(is(T==Parameter)){
 protected:
 	override Parameter newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
 		return New!Parameter(stc,rtype,name,initializer);
+	}
+}
+
+mixin template Semantic(T) if(is(T==ForeachVarDecl)){
+	override void presemantic(Scope sc){
+		if(!name){
+			scope_ = sc;
+			sstate = SemState.begin;
+		}else super.presemantic(sc);
+	}
+	override protected void handleRef(Scope sc){ return actuallyHandleRef(sc); }
+protected:
+	override ForeachVarDecl newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
+		return New!ForeachVarDecl(stc,rtype,name,initializer);
 	}
 }
 
