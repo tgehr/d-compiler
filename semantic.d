@@ -138,7 +138,7 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 			r~=mixin(X!q{
 				static if(is(typeof(@(t)): Node)){
 					@(Doit!t)
-					if(@(t).sstate != SemState.completed) mixin(PropRetryNoRew!q{@(t)});
+					if(@(t).sstate != SemState.completed) mixin(PropRetryNoRew!q{sc=@(sc);@(t)});
 					else{
 						static if(is(typeof(@(t)): Expression) && !is(typeof(@(t)):Type)
 						          &&(!is(typeof(this):Expression)||is(typeof(this):Type))){
@@ -153,7 +153,6 @@ private template _SemChldImpl(string s, string op, string sc){ // TODO: get rid 
 						if(mixin(`@(t~"Leftover")`)){
 							mixin(_SemChldImpl!("@(t)Leftover","@(op)","@(sc)"));
 						}
-						//foreach(ref x;@(t)) mixin(PropRetry!q{x});
 						mixin(PropErr!q{@(t)});
 					}
 				}
@@ -716,7 +715,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 		return type.equals(rhs);
 	}
 
-	final bool finishDeduction(Scope sc)in{assert(!!sc);}body{
+	final bool finishDeduction(Scope sc)in{assert(!!sc,text(this));}body{
 		static struct PropagateErrors{
 			void perform(CallExp exp){
 				// improve overload error messages
@@ -3271,7 +3270,7 @@ mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 class NamespaceDecl: Declaration{
 	Scope sc;
 	this(Scope sc,Identifier name){ super(STC.init,name); this.sc=sc; }
-	
+
 	override string toString(){ return name.toString(); }
 	override @property string kind(){ return "name space"; }
 
@@ -8563,6 +8562,9 @@ private:
 }
 
 mixin template Semantic(T) if(is(T==ForeachStm)){
+	Statement lower;
+	GaggingScope gsc=null;
+	Identifier[] checkMembership;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
@@ -8573,56 +8575,162 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		Type et = null;
 		if(auto tt = ty.isArrayTy()) et = tt.ty;
 		if(auto tt = ty.isDynArrTy()) et = tt.ty;
-		if(et){
-			if(vars.length>2){
-				sc.error("at most two loop variables allowed for array foreach",
-				         vars[0].loc.to(vars[$-1].loc));
-				mixin(ErrEplg);
-			}else{
-				assert(vars.length);
-				if(vars.length == 2 && !curparam){
-					auto s_t = Type.get!Size_t();
-					if(vars[0].rtype){
-						vars[0].type = vars[0].rtype.typeSemantic(lsc);
-						mixin(SemProp!q{sc=lsc;vars[0].rtype});
-						if(!vars[0].type.equals(s_t)){ // TODO: This is a stub
-							sc.error(format("invalid type '%s' for index variable '%s'", vars[0].rtype.loc.rep, vars[0].name.toString()), vars[0].rtype.loc);
-							sstate = SemState.error;
-						}
-					}else vars[0].type = s_t;
-					curparam++;
-				}
-				if(curparam < vars.length){
-					if(vars[curparam].rtype){
-						vars[curparam].type = vars[curparam].rtype.typeSemantic(lsc);
-						mixin(SemProp!q{sc=lsc;vars[curparam].rtype});
-						mixin(ImplConvertsTo!q{auto iconv; et, vars[curparam].type});
-						if(!iconv){
-							sc.error(format("cannot implicitly convert from element type '%s' to '%s'", et.toString(), vars[curparam].rtype.loc.rep),vars[curparam].rtype.loc);
-							sstate = SemState.error;
-						}
-					}else vars[curparam].type = ty;
-					curparam++;
-				}
-			}
+		if(!lower&&et){
+			lower=createArrayForeach(sc,ty,et);
+			mixin(SemCheck);
 		}
 		// TODO: foreach over string types with automatic decoding
 		// TODO: foreach over associative arrays
-		// TODO: foreach over ranges
-		// TODO: foreach with opApply
+		// TODO: finish: foreach with opApply
+		if(!gsc){
+			auto msc=aggregate.getMemberScope();
+			if(msc) gsc=New!GaggingScope(msc);
+		}
+		void createMembershipTest(string s){
+			checkMembership~=New!Identifier(s);
+			checkMembership[$-1].willAlias();
+			checkMembership[$-1].accessCheck=AccessCheck.none;
+			if(!gsc) checkMembership[$-1].sstate=SemState.error;
+		}
+		if(!checkMembership.length) createMembershipTest("opApply");
+		mixin(SemChldPar!q{sc=gsc;checkMembership[0]});
+		if(!lower&&checkMembership[0].sstate==SemState.completed){
+			lower=createOpApplyForeach(sc);
+			mixin(SemCheck);
+		}
+		// TODO: finish: foreach over ranges
+		if(checkMembership.length==1){
+			createMembershipTest(isReverse?"back":"front"); // 1
+			createMembershipTest("empty"); // 2
+			createMembershipTest(isReverse?"popBack":"popFront"); // 3
+		}
+		assert(checkMembership.length>=4);
+		foreach(i;1..4) mixin(SemChldPar!q{sc=gsc;checkMembership[i]});
+		alias util.all all;
+		if(!lower&&all!(a=>a.sstate==SemState.completed)(checkMembership[1..4])){
+			lower=createRangeForeach(sc);
+			mixin(SemCheck);
+		}
 		// TODO: foreach over delegates
 		// TODO: foreach over Tuples
-		foreach(var; vars) var.semantic(lsc); // TODO: fix?
-		//mixin(SemChld!q{scope=lsc, bdy}); // TODO: implement this
-		bdy.semantic(lsc); // TODO: get rid of direct call
-		mixin(SemProp!q{sc=lsc;bdy});
-		mixin(PropErr!q{vars, aggregate});
+		// TODO: EXTENSION: foreach using opApply/range primitives with UFCS
+		if(lower) mixin(SemChld!q{lower});
+		else{
+			// TODO: assert(lower) instead
+			foreach(var; vars) var.semantic(lsc); // TODO: fix?
+			//mixin(SemChld!q{scope=lsc, bdy}); // TODO: implement this
+			bdy.semantic(lsc); // TODO: get rid of direct call
+			mixin(SemProp!q{sc=lsc;bdy});
+			mixin(PropErr!q{vars, aggregate});
+		}
 		mixin(SemEplg);
+	}
+
+	private ForStm createArrayForeach(Scope sc,Type ty,Type et)in{
+		assert(ty is aggregate.type);
+		assert(et is ty.getElementType);
+	}body{
+		if(vars.length>2){
+			sc.error("at most two loop variables allowed for array foreach",
+					 vars[0].loc.to(vars[$-1].loc));
+			mixin(ErrEplg);
+		}
+		ForeachVarDecl var=null;
+		auto s_t = Type.get!Size_t();
+		if(vars.length == 2){
+			if(vars[0].rtype){
+				vars[0].type = vars[0].rtype.typeSemantic(lsc);
+				auto rtype=vars[0].rtype;
+				mixin(SemProp!q{sc=lsc;rtype});
+				if(!vars[0].type.equals(s_t)){ // TODO: This is a stub
+					sc.error(format("invalid type '%s' for index variable '%s'", vars[0].rtype.loc.rep, vars[0].name.toString()), vars[0].rtype.loc);
+					sstate = SemState.error;
+				}
+			}else vars[0].type = s_t;
+			var=vars[0];
+		}
+		assert(vars.length);
+		if(vars[$-1].rtype){
+			vars[$-1].type = vars[$-1].rtype.typeSemantic(lsc);
+			mixin(SemProp!q{sc=lsc;vars[$-1].rtype});
+			mixin(ImplConvertsTo!q{auto iconv; et, vars[$-1].type});
+			if(!iconv){
+				sc.error(format("cannot implicitly convert from element type '%s' to '%s'", et.toString(), vars[$-1].rtype.loc.rep),vars[$-1].rtype.loc);
+				sstate = SemState.error;
+			}
+		}else vars[$-1].type = et;
+
+		auto agvar=New!ForeachVarDecl(STC.init,ty,null,aggregate);
+		agvar.loc=aggregate.loc;
+		agvar.presemantic(sc);
+		scope Statement[] mdecls=[agvar];
+		scope Statement[] mups=[vars[$-1]];
+		import variant;
+		auto left=LiteralExp.factory(Variant(0,s_t));
+		left.loc=aggregate.loc;
+		auto agsym=New!Symbol(agvar);
+		agsym.loc=agvar.loc;
+		auto lenid=New!Identifier("length");
+		lenid.loc=agsym.loc;
+		auto right=New!(BinaryExp!(Tok!"."))(agsym,lenid);
+		right.loc=agsym.loc;
+		auto agsymi=New!Symbol(agvar);
+		agsymi.loc=vars[$-1].loc;
+		auto indexvar=New!ForeachVarDecl(STC.init,s_t,null,isReverse?right:left);
+		indexvar.loc=(vars.length==2?vars[0]:vars[$-1]).loc;
+		auto symidx=New!Symbol(indexvar);
+		symidx.loc=indexvar.loc;
+		auto index=New!IndexExp(agsymi,[cast(Expression)symidx]);
+		symidx.loc=agsym.loc;
+		vars[$-1].init=index;
+
+		auto f=ForeachRangeStm.createForStmForRange(sc,var,indexvar,s_t,isReverse,left,right,bdy,mdecls,mups);
+		f.loc=loc;
+		return f;
+	}
+
+	private Statement createOpApplyForeach(Scope sc){
+		sc.error("foreach with opApply not implemented",loc);
+		mixin(ErrEplg);
+	}
+
+	private ForStm createRangeForeach(Scope sc){
+		if(vars.length>1){
+			assert(vars.length);
+			sc.error("only one loop variable allowed for range foreach",vars[1].loc.to(vars[$-1].loc));
+			mixin(ErrEplg);
+		}
+		//for(auto =rng;!rng.empty;rng.popFront);
+		Expression init=aggregate;
+		auto s1=New!ForeachVarDecl(STC.init,null,null,init);
+		s1.presemantic(sc);
+		auto sym=New!Symbol(s1);
+		sym.loc=vars[0].loc;
+		auto iempty=New!Identifier("empty");
+		iempty.loc=aggregate.loc;
+		auto empty=New!(BinaryExp!(Tok!"."))(sym,iempty);
+		empty.loc=iempty.loc;
+		auto e1=New!(UnaryExp!(Tok!"!"))(empty);
+		e1.loc=empty.loc;
+		auto ipop=New!Identifier(isReverse?"popBack":"popFront");
+		ipop.loc=aggregate.loc;
+		auto pop=New!(BinaryExp!(Tok!"."))(sym,ipop);
+		pop.loc=ipop.loc;
+		auto e2=New!CallExp(pop,(Expression[]).init);
+		e2.loc=pop.loc;
+		auto ielem=New!Identifier(isReverse?"back":"front");
+		ielem.loc=vars[0].loc;
+		auto elem=New!(BinaryExp!(Tok!"."))(sym,ielem);
+		elem.loc=ielem.loc;
+		vars[0].init=elem;
+		auto s2=New!BlockStm([cast(Statement)vars[0],bdy]);
+		auto f=New!ForStm(s1,e1,e2,s2);
+		f.loc=loc;
+		return f;
 	}
 
 private:
 	BlockScope lsc;
-	size_t curparam=0;
 }
 
 
@@ -8636,45 +8744,53 @@ mixin template Semantic(T) if(is(T==ForeachRangeStm)){
 			sc.error(format("incompatible types '%s' and '%s' for foreach range",left.type,right.type),left.loc.to(right.loc));
 			mixin(ErrEplg);
 		}
-		var.init=left;
 		if(!lower){
-			auto tmpl=New!ForeachVarDecl(STC.init, type, null, left);
-			tmpl.loc=left.loc;
-			tmpl.presemantic(sc);
-			auto tmpr=New!ForeachVarDecl(STC.init, type, null, right);
-			tmpr.loc=right.loc;
-			tmpr.presemantic(sc);
-			auto s1=New!CompoundStm([cast(Statement)tmpl,tmpr]);
-			s1.loc=var.loc.to(right.loc);
-			auto syml=New!Symbol(tmpl);
-			syml.loc=left.loc;
-			auto symr=New!Symbol(tmpr);
-			symr.loc=right.loc;
-			auto e1=type.isBasicType()? // DMD seems to do this. Is this documented?
-				New!(BinaryExp!(Tok!"<"))(syml,symr):
-				New!(BinaryExp!(Tok!"!="))(syml,symr);
-			e1.loc=syml.loc.to(symr.loc);
-			Expression e2=null;
-			Statement s2;
-			if(!isReverse){
-				e2=New!(UnaryExp!(Tok!"++"))(syml);
-				e2.loc=e1.loc;
-				var.init=syml;
-				s2=New!BlockStm([var,bdy]);
-			}else{
-				auto edec=New!(UnaryExp!(Tok!"--"))(symr);
-				edec.loc=e1.loc;
-				auto sdec=New!ExpressionStm(edec);
-				sdec.loc=edec.loc;
-				var.init=symr;
-				s2=New!BlockStm([sdec,var,bdy]);
-			}
-			s2.loc=bdy.loc;
-			lower=New!ForStm(s1,e1,e2,s2);
+			lower=createForStmForRange(sc,var,null,type,isReverse,left,right,bdy);
 			lower.loc=loc;
 		}
 		mixin(SemChld!q{lower});
 		mixin(SemEplg);
+	}
+
+	static ForStm createForStmForRange(Scope sc,ForeachVarDecl var,ForeachVarDecl idxvar,Type type,bool isReverse,Expression left, Expression right, Statement bdy, scope Statement[] mdecls=[],scope Statement[] mups=[]){
+		if(var){ assert(!var.init); var.init=left; }
+		if(!idxvar){
+			idxvar=New!ForeachVarDecl(STC.init, type, null, isReverse?right:left);
+			idxvar.loc=idxvar.init.loc;
+		}
+		auto boundvar=New!ForeachVarDecl(STC.init, type, null, isReverse?left:right);
+		boundvar.loc=boundvar.init.loc;
+		auto tmpl=isReverse?boundvar:idxvar;
+		tmpl.presemantic(sc);
+		auto tmpr=isReverse?idxvar:boundvar;
+		tmpr.presemantic(sc);
+		auto s1=New!CompoundStm(mdecls~[cast(Statement)tmpl,tmpr]);
+		s1.loc=(var?var:left).loc.to(right.loc);
+		auto syml=New!Symbol(tmpl);
+		syml.loc=left.loc;
+		auto symr=New!Symbol(tmpr);
+		symr.loc=right.loc;
+		auto e1=type.isBasicType()? // DMD seems to do this. Is this documented?
+			New!(BinaryExp!(Tok!"<"))(syml,symr):
+			New!(BinaryExp!(Tok!"!="))(syml,symr);
+		e1.loc=syml.loc.to(symr.loc);
+		Expression e2=null;
+		Statement s2;
+		if(!isReverse){
+			e2=New!(UnaryExp!(Tok!"++"))(syml);
+			e2.loc=e1.loc;
+			if(var) var.init=syml;
+			s2=New!BlockStm((var?[cast(Statement)var]:[])~mups~[bdy]);
+		}else{
+			auto edec=New!(UnaryExp!(Tok!"--"))(symr);
+			edec.loc=e1.loc;
+			auto sdec=New!ExpressionStm(edec);
+			sdec.loc=edec.loc;
+			if(var) var.init=symr;
+			s2=New!BlockStm((var?[sdec,var]:[cast(Statement)sdec])~mups~[bdy]);
+		}
+		s2.loc=bdy.loc;
+		return New!ForStm(s1,e1,e2,s2);
 	}
 }
 
@@ -9161,7 +9277,7 @@ mixin template Semantic(T) if(is(T==WithStm)){
 			return New!(BinaryExp!(Tok!"."))(createSymbol(fld.e1,this_),fld.e2);
 		assert(0,text(e));
 	}
-	
+
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!exp) exp=e;
@@ -12050,7 +12166,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 	private void impossibleSTCs(STC stc){
 		possibleSTCs&=~stc;
 	}
-	
+
 }
 
 mixin template Semantic(T) if(is(T==UnittestDecl)){
