@@ -12071,7 +12071,7 @@ private:
 mixin template Semantic(T) if(is(T==FunctionDecl)){
 
 	final bool isConstructor(){
-		return name.name == "this";
+		return name && name.name == "this";
 	}
 
 	/* this is general enough to be in Declaration,
