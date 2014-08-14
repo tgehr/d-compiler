@@ -8647,7 +8647,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			checkMembership[$-1].accessCheck=AccessCheck.none;
 			if(!gsc) checkMembership[$-1].sstate=SemState.error;
 		}
-		if(!checkMembership.length) createMembershipTest("opApply");
+		if(!checkMembership.length) createMembershipTest(isReverse?"opApplyReverse":"opApply");
 		mixin(SemChldPar!q{sc=gsc;checkMembership[0]});
 		if(checkMembership[0].sstate==SemState.completed){
 			needRetry=false;
@@ -8771,7 +8771,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 	private Statement createOpApplyForeach(Scope sc){
 		enum SemRet=q{ return null; };
 		if(!opApplyExp){
-			auto be=New!(BinaryExp!(Tok!"."))(aggregate,New!Identifier("opApply"));
+			auto be=New!(BinaryExp!(Tok!"."))(aggregate,New!Identifier(isReverse?"opApplyReverse":"opApply"));
 			be.loc=aggregate.loc;
 			// GC:
 			auto fty=New!FunctionTy(STC.init,null,vars.map!(a=>cast(Parameter)a).array,VarArgs.none);
