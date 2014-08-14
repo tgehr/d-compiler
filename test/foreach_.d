@@ -8,7 +8,20 @@ static:
 			foreach(i;s..e) if(auto r=dg(i)){ return r; }
 			return 0;
 		}
+		int opApplyReverse(int delegate(int) dg){
+			foreach_reverse(i;s..e) if(auto r=dg(i)){ return r; }
+			return 0;
+		}
 	}
+
+	string testOpApplyReverse(){
+		string r;
+		foreach_reverse(i;Iota(0,10)){
+			r~=cast(char)('0'+i);
+		}
+		return r;
+	}
+	static assert(testOpApplyReverse()=="9876543210");
 
 	int bar(){
 		int r=0;
@@ -296,7 +309,7 @@ static assert(foo()==[1,1337,1,1,1,1,1337,1,1337,1,1,1,1,1,1,1337,1,1337,1,1,1,1
 pragma(msg, "foo: ",foo());
 
 alias size_t = typeof(int[].length);
-
+alias string = immutable(char)[];
 // +/
 // +/
 // +/
