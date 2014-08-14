@@ -3638,28 +3638,7 @@ mixin template CTFEInterpret(T) if(is(T==TernaryExp)){
 
 mixin template CTFEInterpret(T) if(is(T==CompoundStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		foreach(x; s){
-			if(x.sstate == SemState.completed){
-				x.byteCompile(bld);
-			}else{
-				bld.emit(Instruction.analyzeandfail);
-				static assert(x.sizeof <= (void*).sizeof && (void*).sizeof<=ulong.sizeof);
-				bld.emitConstant(cast(ulong)cast(void*)x);
-				static struct FindScope{
-					Scope result;
-					void perform(Symbol self){
-						if(self.meaning&&self.meaning.isFunctionDecl()&&self.meaning.sstate==SemState.started){
-							if(!result) result = self.scope_; // TODO: shortcut
-						}
-					}
-				}
-				auto sc = runAnalysis!FindScope(x).result;
-				assert(!!sc, x.toString());
-				static assert(sc.sizeof <= (void*).sizeof && (void*).sizeof<=ulong.sizeof);
-				bld.emitConstant(cast(ulong)cast(void*)sc);
-				break;
-			}
-		}
+		foreach(x; s) x.byteCompile(bld);
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==LabeledStm)){
@@ -3787,6 +3766,7 @@ mixin template CTFEInterpret(T) if(is(T==ForeachStm)||is(T==ForeachRangeStm)){
 
 mixin template CTFEInterpret(T) if(is(T==SwitchStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		mixin(doBCEnd);
 		// TODO: specialized byte code instructions for switching on a value?
 		tmpVarDecl.byteCompile(bld);
 
@@ -3831,6 +3811,7 @@ mixin template CTFEInterpret(T) if(is(T==SwitchStm)){
 			assert(f||theDefault);
 
 			void emitComparands(size_t i){
+				assert(tmpVarDecl&&tmpVarDecl.scope_);
 				tmpVarDecl.byteCompileSymbol(bld, e, tmpVarDecl.scope_);
 				LiteralExp.byteCompileValue(bld, exprs[i].exp);
 			}
@@ -4055,18 +4036,20 @@ mixin template CTFEInterpret(T) if(is(T==ReturnStm)){
 
 mixin template CTFEInterpret(T) if(is(T==ContinueStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		assert(sstate==SemState.completed,text(this," ",loc));
 		bld.emit(Instruction.jmp);
-		theLoop.emitBCContinueLabel(bld);
+		getLoweredEnclosingStatement().emitBCContinueLabel(bld);
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==BreakStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		bld.emit(Instruction.jmp);
-		brokenOne.emitBCEnd(bld);
+		getLoweredEnclosingStatement().emitBCEnd(bld);
 	}
 }
 mixin template CTFEInterpret(T) if(is(T==GotoStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
+		if(lower) return lower.byteCompile(bld);
 		bld.emit(Instruction.jmp);
 		bld.emitLabel(target.getBCLabel(bld));
 	}
@@ -4384,6 +4367,7 @@ mixin template CTFEInterpret(T) if(is(T==Symbol)){
 	}
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
+		assert(scope_);
 		if(auto vd = meaning.isVarDecl()) return vd.byteCompileSymbolLV(bld, this, scope_);
 		bld.error(format("cannot interpret symbol '%s' at compile time", toString()), loc);
 		return LVpopc(Type.get!void(), this); // dummy
@@ -5223,6 +5207,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 	private void byteCompileOptionalInit(ref ByteCodeBuilder bld, bool initialize){
+		if(init&&init.isVoidInitializerExp()) initialize=false; // TODO: catch use before write?
 		if(auto tp=type.isTypeTuple()){
 			assert(initialize);
 			assert(tupleContext && tupleContext.vds.length == tp.length);
@@ -5303,7 +5288,9 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	   (loads a pointer for STCbyref, loads a delegate for STClazy)
 	 */
 
-	private void load(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
+	private void load(ref ByteCodeBuilder bld, Expression loader, Scope loadersc)in{
+		assert(loader&&loadersc);
+	}body{
 		void accessError(){
 			if(name)
 				bld.error(format("cannot access variable '%s' at compile time", name.toString()), loader.loc);
@@ -5357,7 +5344,9 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 
-	final void byteCompileSymbol(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
+	final void byteCompileSymbol(ref ByteCodeBuilder bld, Expression loader, Scope loadersc)in{
+		assert(loader&&loadersc);
+	}body{
 		load(bld, loader, loadersc);
 		if(stc&STCbyref){
 			auto strat = LVpointer(type, loader);
@@ -5371,7 +5360,9 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 	// emit code and get the LValueStrategy to access the raw variable memory
-	final LValueStrategy byteCompileInitLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
+	final LValueStrategy byteCompileInitLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc)in{
+		assert(loader&&loadersc);
+	}body{
 		size_t len, off = getBCLoc(len);
 		if(!~off){
 			if(stc&(STCimmutable|STCconst)&&init){
@@ -5408,7 +5399,9 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		return diff?LVpopcc(type, loader):inHeapContext?LVpopc(type, loader):LVpopr(len);
 	}
 
-	final LValueStrategy byteCompileSymbolLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc){
+	final LValueStrategy byteCompileSymbolLV(ref ByteCodeBuilder bld, Expression loader, Scope loadersc)in{
+		assert(loader&&loadersc);
+	}body{
 		if(stc & STCbyref){
 			load(bld, loader, loadersc);
 			return LVpointer(type, this);

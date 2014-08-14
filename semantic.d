@@ -2173,7 +2173,6 @@ class TemplateInstanceDecl: Declaration{
 					if(ae.isUndeducedFunctionLiteral())
 						a=ae.ddup();
 		}
-
 		foreach(ref x;iftiArgs) mixin(SemChldPar!q{x});
 		// dw(iftiArgs," ",map!(_=>_.type)(iftiArgs));
 
@@ -6652,9 +6651,12 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 
 
 mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
+	protected FunctionDef createFunctionDef(FunctionTy fty,Identifier name, CompoundStm bdy){
+		return New!FunctionDef(STC.init,fty,name,cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
+	}
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		auto dg=New!FunctionDef(STC.init,fty,New!Identifier(uniqueIdent("__dgliteral")),cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
+		auto dg=createFunctionDef(fty,New!Identifier(uniqueIdent("__dgliteral")),bdy);
 		if(which==Kind.none) dg.inferStatic=true;
 		dg.inferAttributes=true; // TODO: re-enable
 		auto decl=sc.getDeclaration();
@@ -8561,12 +8563,63 @@ private:
 	BlockScope lsc;
 }
 
+// TODO: this OO approach for opApply is a little verbose. better options?
+class OpApplyFunctionLiteralExp: FunctionLiteralExp{
+	ForeachStm lstm;
+	this(FunctionTy ft, CompoundStm b, ForeachStm lstm)in{
+		assert(!!lstm.retVar);
+	}body{
+		super(ft,b);
+		this.lstm=lstm;
+	}
+	protected override FunctionDef createFunctionDef(FunctionTy fty,Identifier name, CompoundStm bdy){
+		return New!OpApplyFunctionDef(STC.init,fty,name,bdy,lstm);
+	}
+	
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+template Semantic(T) if(is(T==OpApplyFunctionLiteralExp)){ }
+class OpApplyFunctionDef: FunctionDef{
+	ForeachStm lstm;
+	this(STC stc, FunctionTy fty, Identifier name, CompoundStm bdy, ForeachStm lstm)in{
+		assert(!!lstm.retVar);
+	}body{
+		super(stc,fty,name,cast(BlockStm)null,cast(BlockStm)null,cast(Identifier)null,bdy);
+		this.lstm=lstm;
+		lstm.setOpApplyFunctionDef(this);
+	}
+
+	Statement[] gotos;
+	int addGoto(Statement gto){
+		gotos~=gto;
+		return ForeachStm.opApplyReturnCode+cast(int)gotos.length;
+	}
+	protected override FunctionScope buildFunctionScope(){
+		return New!FunctionScope(scope_, this);
+	}
+	protected override void undeclaredLabel(GotoStm gto){
+		assert(cast(Identifier)gto.e);
+		if(!gto.lower){
+			auto ngto=New!GotoStm(gto.t,gto.e);
+			ngto.loc=gto.loc;
+			gto.lower=ForeachStm.createOpApplyReturn(addGoto(ngto),gto.loc);
+		}
+		mixin(SemChld!q{sc=gto.scope_;gto.lower});
+	}
+	
+	mixin DownCastMethod;
+	mixin Visitors;
+}
+template Semantic(T) if(is(T==OpApplyFunctionDef)){ }
+
 mixin template Semantic(T) if(is(T==ForeachStm)){
 	Statement lower;
 	GaggingScope gsc=null;
 	Identifier[] checkMembership;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		if(lower) goto Llowered;
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
@@ -8575,9 +8628,11 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		Type et = null;
 		if(auto tt = ty.isArrayTy()) et = tt.ty;
 		if(auto tt = ty.isDynArrTy()) et = tt.ty;
-		if(!lower&&et){
+		if(et){
+			needRetry=false;
 			lower=createArrayForeach(sc,ty,et);
 			mixin(SemCheck);
+			goto Llowered;
 		}
 		// TODO: foreach over string types with automatic decoding
 		// TODO: foreach over associative arrays
@@ -8594,9 +8649,11 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		}
 		if(!checkMembership.length) createMembershipTest("opApply");
 		mixin(SemChldPar!q{sc=gsc;checkMembership[0]});
-		if(!lower&&checkMembership[0].sstate==SemState.completed){
+		if(checkMembership[0].sstate==SemState.completed){
+			needRetry=false;
 			lower=createOpApplyForeach(sc);
 			mixin(SemCheck);
+			goto Llowered;
 		}
 		// TODO: finish: foreach over ranges
 		if(checkMembership.length==1){
@@ -8607,13 +8664,16 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		assert(checkMembership.length>=4);
 		foreach(i;1..4) mixin(SemChldPar!q{sc=gsc;checkMembership[i]});
 		alias util.all all;
-		if(!lower&&all!(a=>a.sstate==SemState.completed)(checkMembership[1..4])){
+		if(all!(a=>a.sstate==SemState.completed)(checkMembership[1..4])){
+			needRetry=false;
 			lower=createRangeForeach(sc);
 			mixin(SemCheck);
+			goto Llowered;
 		}
 		// TODO: foreach over delegates
 		// TODO: foreach over Tuples
 		// TODO: EXTENSION: foreach using opApply/range primitives with UFCS
+	Llowered:
 		if(lower) mixin(SemChld!q{lower});
 		else{
 			// TODO: assert(lower) instead
@@ -8689,9 +8749,75 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		return f;
 	}
 
+	private{ // TODO: this uses space in every ForeachStm instance:
+		Expression opApplyExp=null;
+		OpApplyFunctionDef oafun=null;
+	}
+	VarDecl retVar=null;
+	void setOpApplyFunctionDef(OpApplyFunctionDef oafun)in{assert(!this.oafun);}body{
+		this.oafun=oafun;
+	}
+
+	bool isOpApplyForeach(){ return !!opApplyExp; }
+	enum opApplyReturnCode=2;
+	public static ReturnStm createOpApplyReturn(int returnCode, Location loc){
+		import variant;
+		auto val=LiteralExp.factory(Variant(returnCode,Type.get!int()));
+		auto ret=New!ReturnStm(val);
+		ret.loc=loc;
+		ret.isOpApplyReturn=true;
+		return ret;
+	}
 	private Statement createOpApplyForeach(Scope sc){
-		sc.error("foreach with opApply not implemented",loc);
-		mixin(ErrEplg);
+		enum SemRet=q{ return null; };
+		if(!opApplyExp){
+			auto be=New!(BinaryExp!(Tok!"."))(aggregate,New!Identifier("opApply"));
+			be.loc=aggregate.loc;
+			// GC:
+			auto fty=New!FunctionTy(STC.init,null,vars.map!(a=>cast(Parameter)a).array,VarArgs.none);
+			auto ret=createOpApplyReturn(0,loc);
+			auto cbdy=New!CompoundStm([bdy,ret]);
+			cbdy.loc=bdy.loc;
+			assert(!retVar);
+			retVar=New!VarDecl(STC.init,null,null,New!VoidInitializerExp());
+			retVar.presemantic(sc);
+			Expression lmb=New!OpApplyFunctionLiteralExp(fty,cbdy,this);
+			lmb.loc=loc; // TODO: fix diagnostics!
+			opApplyExp=New!CallExp(be,[lmb]);
+			opApplyExp.loc=aggregate.loc;
+		}
+		mixin(SemChld!q{opApplyExp});
+		mixin(ImplConvertsTo!q{auto conv;Type.get!byte(),opApplyExp.type});
+		if(!conv){
+			sc.error(format("opApply must return an integral type, not '%s'",opApplyExp.type),aggregate.loc);
+			mixin(ErrEplg);
+		}
+		assert(!retVar.type || retVar.sstate==SemState.completed);
+		// TODO: locations?
+		Statement[] cases;
+		import variant;
+		// default: break;
+		cases~=New!DefaultStm([cast(Statement)New!BreakStm(null)]);
+		if(retVar.type){
+			// case 2: return retVar;
+			cases~=New!CaseStm([cast(Expression)LiteralExp.factory(Variant(opApplyReturnCode,Type.get!int()))],
+							   [cast(Statement)New!ReturnStm(New!Symbol(retVar))]);
+		}
+		assert(!!oafun);
+		foreach(i,gto;oafun.gotos){
+			cases~=New!CaseStm([cast(Expression)LiteralExp.factory(Variant(opApplyReturnCode+1+i,Type.get!int()))],[gto]);
+		}
+		// TODO: more cases for goto and labelled break/continue
+		auto swbdy=New!CompoundStm(cases);
+		swbdy.loc=loc;
+		auto sw=New!SwitchStm(false,opApplyExp,swbdy);
+		sw.loc=loc;
+		Statement r=sw;
+		if(retVar.type){
+			r=New!CompoundStm([cast(Statement)retVar,sw]);
+			r.loc=loc;
+		}
+		return r;
 	}
 
 	private ForStm createRangeForeach(Scope sc){
@@ -8701,8 +8827,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			mixin(ErrEplg);
 		}
 		//for(auto =rng;!rng.empty;rng.popFront);
-		Expression init=aggregate;
-		auto s1=New!ForeachVarDecl(STC.init,null,null,init);
+		auto s1=New!ForeachVarDecl(STC.init,null,null,aggregate);
 		s1.presemantic(sc);
 		auto sym=New!Symbol(s1);
 		sym.loc=vars[0].loc;
@@ -8979,14 +9104,16 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 			sc.error(err, e.loc);
 			e.sstate = SemState.error;
 		}
+		Type etyu;
 		if(e.sstate==SemState.completed){
 			assert(!!e.type);
-			kind = determineStringKind(e.type);
+			etyu=e.type.getHeadUnqual();
+			kind = determineStringKind(etyu);
 			if(kind==Kind.invalid){
-				if(auto i=e.type.isIntegral()){
+				if(auto i=etyu.isIntegral()){
 					kind = i.isSigned()?kind.sintegral:kind.uintegral;
 				}else{
-					if(auto et=e.type.isEnumTy()){
+					if(auto et=etyu.isEnumTy()){
 						assert(!!et.decl);
 						Type base;
 						do{
@@ -9000,7 +9127,7 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 								if(auto i=base.isIntegral()){
 									kind = i.isSigned()?kind.sintegral:kind.uintegral;
 								}else{
-									expErr("enum base type of switch expression type should be a built-in string or integral type");
+									expErr("enum basetyu of switch expression type should be a built-in string or integral type");
 									e.sstate=SemState.error;
 								}
 							}
@@ -9012,15 +9139,15 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 				}
 			}
 		}
-		if(f&&e.sstate==SemState.completed&&!e.type.isEnumTy()){
+		if(f&&e.sstate==SemState.completed&&!etyu.isEnumTy()){
 			expErr(format("final switch expression should be of enumeration type instead of '%s'",e.type));
 		}
 		mixin(SemChldPar!q{sc=lsc;s});
 
 		bool err=false;
-		if(f){
-			assert(!!cast(EnumTy)e.type);
-			auto et=cast(EnumTy)cast(void*)e.type;
+		if(f&&e.sstate==SemState.completed){
+			assert(!!cast(EnumTy)etyu);
+			auto et=cast(EnumTy)cast(void*)etyu;
 			if(et.decl){
 				mixin(SemChld!q{et.decl});
 				foreach(m;et.decl.members){
@@ -9036,16 +9163,22 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 					}
 				}
 			}else err=true;
-		}else if(!theDefault){
+		}
+		if(!f&&!theDefault){
 			sc.error("non-final switch statement requires a default clause", loc);
 			err=true;
 		}
 		if(err) mixin(ErrEplg);
 		mixin(SemProp!q{e,s});
 		assert(!tmpVarDecl);
-		if(!tmpVarDecl) tmpVarDecl = New!TmpVarDecl(STC.init, null, null, e);
-		if(!tmpVarDeclStr && this.isString())
+		if(!tmpVarDecl){
+			tmpVarDecl = New!TmpVarDecl(STC.init, null, null, e);
+			tmpVarDecl.presemantic(sc);
+		}
+		if(!tmpVarDeclStr && this.isString()){
 			tmpVarDeclStr = New!TmpVarDecl(STC.init, null, null, New!LengthExp(e));
+			tmpVarDeclStr.presemantic(sc);
+		}
 		if(tmpVarDeclStr) mixin(SemChld!q{tmpVarDeclStr});
 	    mixin(SemChld!q{tmpVarDecl});
 		mixin(SemEplg);
@@ -9124,6 +9257,7 @@ mixin template Semantic(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==Default
 
 mixin template Semantic(T) if(is(T==ReturnStm)){
 	bool performedAccessCheck=false;
+	bool isOpApplyReturn=false;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 
@@ -9146,6 +9280,15 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 		}
 
 		auto fun = sc.getFunction();
+		VarDecl retVar=null;
+		if(!isOpApplyReturn) for(;;){
+			// TODO: this results in total runtime quadratic
+			//       in nesting depth of opApply foreach loops
+			if(auto oafun=fun.isOpApplyFunctionDef()){
+				if(!retVar) retVar=oafun.lstm.retVar;
+				fun=oafun.scope_.getFunction();
+			}else break;
+		}
 		assert(fun && fun.type,text(fun," ",fun?fun.type:null," ",sc," ",this));
 
 		if(fun.type.hasUnresolvedReturn()){
@@ -9178,6 +9321,26 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 		}
 
 		if(e&&!e.finishDeduction(sc)) mixin(ErrEplg);
+		if(retVar){
+			assert(!isOpApplyReturn);
+			assert(!!fun.type.ret);
+			if(!retVar.rtype) retVar.rtype=fun.type.ret;
+			mixin(SemChldPar!q{sc=retVar.scope_;retVar});
+			assert(retVar.sstate==SemState.completed);
+			auto sym=New!Symbol(retVar);
+			sym.loc=loc;
+			// TODO: make sure no destructor will be called on retVar once destructors are implemented
+			// TODO: make sure this will pass @safe-ty checks
+			auto asng=New!(BinaryExp!(Tok!"="))(sym,e);
+			asng.loc=loc;
+			Statement astm=New!ExpressionStm(asng);
+			astm.loc=loc;
+			auto ret=ForeachStm.createOpApplyReturn(ForeachStm.opApplyReturnCode,loc);
+			auto r=New!CompoundStm([astm,ret]);
+			r.loc=loc;
+			r.semantic(sc);
+			mixin(RewEplg!q{r});
+		}
 		mixin(SemEplg);
 	}
 
@@ -9201,16 +9364,53 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 			if(!mixin(_name)){
 				auto lstm = sc.lookupLabel(e);
 				if(!lstm) goto Lerr;
-				if(auto lp = mixin(`lstm.s.is`~_query)()) mixin(_name) = lp;
-				else goto Lerr;
-				if(!sc.isEnclosing(mixin(_name))) goto Lerr;
+				if(auto lp = mixin(`lstm.s.is`~_query)()){
+					mixin(_name) = lp;
+				}else goto Lerr;
+				if(!sc.isEnclosing(getLoweredEnclosingStatement())) goto Lerr;
 			}
 		}
+		auto fun=sc.getFunction();
+		if(auto oafun=fun.isOpApplyFunctionDef()){
+			if(oafun.lstm is mixin(_name)){
+				auto r=ForeachStm.createOpApplyReturn(is(T==BreakStm),loc);
+				r.semantic(sc);
+				mixin(RewEplg!q{r});
+			}else if(oafun.scope_.isEnclosing(mixin(_name))){
+				auto ngto=New!(typeof(this))(e);
+				ngto.loc=loc;
+				auto rcode=oafun.addGoto(ngto);
+				auto r=ForeachStm.createOpApplyReturn(rcode,loc);
+				r.semantic(sc);
+				mixin(RewEplg!q{r});
+			}
+		}
+		assert(!!mixin(_name));
 		mixin(SemEplg);
 	Lerr:
 		sc.error(format("enclosing label '%s' for "~_which~" statement not found",e.toString()),e.loc);
 		mixin(ErrEplg);
 	}
+
+	final getLoweredEnclosingStatement(){
+		auto enc=mixin(_name);
+		assert(!!enc);
+		typeof(enc) processLower(Statement lower){
+			if(auto l=lower.isLoopingStm())
+				return l;
+			return enc;
+		}
+		if(auto fr=enc.isForeachStm()){
+			if(fr.lower) return processLower(fr.lower);
+			assert(fr.isOpApplyForeach());
+			return enc;
+		}
+		if(auto fr=enc.isForeachRangeStm())
+			return processLower(fr.lower);
+
+		return enc;
+	}
+
 private:
 	static if(is(T==ContinueStm)) LoopingStm theLoop;
 	else static if(is(T==BreakStm)) BreakableStm brokenOne;
@@ -9220,6 +9420,7 @@ private:
 mixin template Semantic(T) if(is(T==GotoStm)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		if(!scope_) scope_=sc;
 		final switch(t) with(WhichGoto){
 			case identifier:
 				assert(cast(Identifier)e);
@@ -9228,13 +9429,17 @@ mixin template Semantic(T) if(is(T==GotoStm)){
 			case default_:
 			case case_:
 			case caseExp:
-				super.semantic(sc); // TODO
+				return super.semantic(sc); // TODO
 		}
 		mixin(SemEplg);
 	}
 	void resolveLabel(LabeledStm tgt)in{assert(t==WhichGoto.identifier);}body{
 		target = tgt;
 	}
+
+	// gotos may need to be rewritten when they have already been fully analyzed due to opApply:
+	Scope scope_;
+	Statement lower;
 private:
 	LabeledStm target;
 }
@@ -9464,7 +9669,10 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 
 	override void presemantic(Scope sc){
 		if(sstate != SemState.pre) return;
-		super.presemantic(sc);
+		if(!name){
+			scope_ = sc;
+			sstate = SemState.begin;
+		}else super.presemantic(sc);
 		if(sstate == SemState.error) type = null; // TODO: why is this here?
 		if(auto decl=sc.getDeclaration())
 			if(auto aggr = decl.isAggregateDecl())
@@ -9729,7 +9937,7 @@ mixin template Semantic(T) if(is(T==Parameter)){
 		// NOTE: cannot rely on being in a function
 		// parameters might be analyzed in the
 		// template constraint scope as well
-		if(!name.length) return;
+		if(name&&!name.length) return; // TODO: why is this here?
 		super.presemantic(sc);
 	}
 
@@ -9748,13 +9956,6 @@ protected:
 }
 
 mixin template Semantic(T) if(is(T==ForeachVarDecl)){
-	override void presemantic(Scope sc){
-		if(!name){
-			scope_ = sc;
-			sstate = SemState.begin;
-		}else super.presemantic(sc);
-	}
-	override protected void handleRef(Scope sc){ return actuallyHandleRef(sc); }
 protected:
 	override ForeachVarDecl newVarDecl(STC stc, Expression rtype, Identifier name, Expression initializer){
 		return New!ForeachVarDecl(stc,rtype,name,initializer);
@@ -12045,6 +12246,10 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 mixin template Semantic(T) if(is(T==FunctionDef)){
 	FunctionScope fsc;
 
+	protected FunctionScope buildFunctionScope(){
+		return New!FunctionScope(scope_, this);
+	}
+
 	override void analyzeType(){
 		assert(!!scope_);
 		propagateSTC();
@@ -12052,7 +12257,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		if(!fsc){
 			if(auto ti=scope_.getTemplateInstance())
 				if(!ti.isMixin) inferAttributes=true;
-			fsc = New!FunctionScope(scope_, this);
+			fsc = buildFunctionScope();
 			foreach(p; type.params){
 				if(p.sstate == SemState.pre) p.sstate = SemState.begin;
 				if(p.name) if(!fsc.insert(p)) p.sstate = SemState.error;
@@ -12092,17 +12297,9 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		if(type.hasUnresolvedReturn()){
 			type.resolveReturn(Type.get!void());
 		}
-		foreach(gto;&fsc.unresolvedLabels){
-			assert(cast(Identifier)gto.e);
-			if(auto lbl = fsc.lookupLabel(cast(Identifier)cast(void*)gto.e))
-				gto.resolveLabel(lbl);
-			else{
-				sc.error(format("use of undeclared label '%s'",gto.e.toString()), gto.e.loc);
-				sstate = SemState.error;
-			}
-		}
-
-		mixin(PropErr!q{});
+		needRetry=false;
+		resolveForwardReferencedLabels();
+		mixin(SemCheck);
 		mixin(PropErr!q{type, bdy});
 		auto infer=possibleSTCs&inferredSTCs;
 		if(infer&STCstatic) infer&=~STCimmutable;
@@ -12110,6 +12307,21 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 		propagateSTC();
 		mixin(SemEplg);
 	}
+
+	private void resolveForwardReferencedLabels(){
+		foreach(gto;&fsc.unresolvedLabels){
+			assert(cast(Identifier)gto.e);
+			if(auto lbl = fsc.lookupLabelHere(cast(Identifier)cast(void*)gto.e))
+				gto.resolveLabel(lbl);
+			else undeclaredLabel(gto);
+		}
+	}
+
+	protected void undeclaredLabel(GotoStm gto){
+		fsc.error(format("use of undeclared label '%s'",gto.e.toString()), gto.e.loc);
+		sstate = SemState.error;
+	}
+
 
 	mixin HandleNestedDeclarations;
 

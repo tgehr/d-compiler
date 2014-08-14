@@ -371,9 +371,7 @@ class TemplateFunctionDecl: OverloadableDecl{
 class VarDecl: Declaration{
 	Expression rtype;
 	Expression init;
-	this(STC stc, Expression rtype, Identifier name, Expression initializer)in{
-		assert(!!name||typeid(this) !is typeid(VarDecl));
-	}body{
+	this(STC stc, Expression rtype, Identifier name, Expression initializer){
 		this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);
 	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~(name?name.toString():"")~(init?"="~init.toString():"")~";";}
@@ -407,7 +405,7 @@ class Declarators: Declaration{
 	mixin Visitors;
 }
 
-class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach usage
+class Parameter: VarDecl{ // for functions, foreach etc
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
 	override string toString(){return (rtype?STCtoString(astStc)~(astStc?" ":"")~rtype.toString():type?STCtoString(stc)~(stc?" ":"")~type.toString()~" ":"")~
 			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
@@ -416,7 +414,7 @@ class Parameter: VarDecl{ // for functions, foreach etc // TODO: remove foreach 
 	mixin Visitors;
 }
 
-class ForeachVarDecl: VarDecl{ // foreach variable
+class ForeachVarDecl: Parameter{ // foreach variable
 	this(STC stc, Expression rtype, Identifier name, Expression init){super(stc,rtype,name,init);}
 	mixin Visitors;
 }
@@ -476,6 +474,7 @@ class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 	}
 
 	mixin DownCastMethod;
+	mixin DownCastMethods!OpApplyFunctionDef;
 	mixin Visitors;
 }
 

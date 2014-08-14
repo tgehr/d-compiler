@@ -243,6 +243,7 @@ class FunctionLiteralExp: Expression{
 	override string toString(){return _brk((which==Kind.function_?"function"~(fty&&fty.rret?" ":""):which==Kind.delegate_?fty&&fty.rret?"delegate ":"":"")~(fty?fty.toString():"")~bdy.toString());}
 
 	mixin DownCastMethod;
+	mixin DownCastMethods!OpApplyFunctionLiteralExp;
 	mixin Visitors;
 }
 
@@ -366,7 +367,8 @@ class UnaryExp(TokenType op): Expression{
 	Expression e;
 	this(Expression next){e = next;}
 	override string toString(){
-		if(auto s=e.isSymbol())if(s.isFunctionLiteral) return s.meaning.loc.rep;
+		//if(auto s=e.isSymbol())if(s.isFunctionLiteral) return s.meaning.loc.rep;
+		if(auto s=e.isSymbol())if(s.isFunctionLiteral) return s.meaning.toString();
 		return _brk(TokChars!op~e.toString());
 	}
 	static if(op==Tok!"&"){

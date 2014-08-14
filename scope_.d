@@ -678,9 +678,12 @@ final class FunctionScope: OrderedScope{
 		lstmsymtab[stm.l.ptr] = stm;
 		return true;
 	}
+	final LabeledStm lookupLabelHere(Identifier l){
+		return lstmsymtab.get(l.ptr,null);
+	}
 	override LabeledStm lookupLabel(Identifier l){
-		if(auto s = lstmsymtab.get(l.ptr,null)) return s;
-		return null;
+		if(auto s = lookupLabelHere(l)) return s;
+		return alternateLabelLookup(l);
 	}
 	override int unresolvedLabels(scope int delegate(GotoStm) dg){
 		foreach(x;_unresolvedLabels) if(auto r = dg(x)) return r;
@@ -688,7 +691,7 @@ final class FunctionScope: OrderedScope{
 	}
 	override void registerForLabel(GotoStm stm, Identifier l){
 		// rename to lbl to make DMDs hashtable fail
-		if(auto lbll = lookupLabel(l)) stm.resolveLabel(lbll);
+		if(auto lbll = lookupLabelHere(l)) stm.resolveLabel(lbll);
 		else _unresolvedLabels~=stm;
 	}
 
@@ -697,6 +700,33 @@ final class FunctionScope: OrderedScope{
 
 	override FunctionDef getFunction(){return fun;}
 	override FunctionDef getDeclaration(){return fun;}
+
+	private LoopingStm thisLoopingStm(){
+		if(auto oafun=fun.isOpApplyFunctionDef())
+			return oafun.lstm;
+		return null;
+	}
+
+	// functionality supporting opApply:
+	override BreakableStm getBreakableStm(){
+		if(auto r=thisLoopingStm()) return r;
+		return super.getBreakableStm();
+	}
+	override LoopingStm getLoopingStm(){
+		if(auto r=thisLoopingStm()) return r;
+		return super.getLoopingStm();
+	}
+	override bool isEnclosing(BreakableStm stm){
+		if(auto oafun=fun.isOpApplyFunctionDef()){
+			return stm is oafun.lstm || parent.isEnclosing(stm);
+		}
+		return super.isEnclosing(stm);
+	}
+	private LabeledStm alternateLabelLookup(Identifier l){
+		if(auto oafun=fun.isOpApplyFunctionDef()) return parent.lookupLabel(l);
+		return null;
+	}
+
 protected:
 	override bool canDeclareNested(Declaration decl){ // for BlockScope
 		return typeid(decl) is typeid(DoesNotExistDecl) || !(decl.name.ptr in symtab);

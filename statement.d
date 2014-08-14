@@ -14,6 +14,7 @@ abstract class Statement: Node{
 	mixin DownCastMethods!(
 		BreakableStm,
 		LoopingStm,
+		CompoundStm,
 	);
 
 	mixin Visitors;
@@ -37,6 +38,8 @@ class CompoundStm: Statement{
 	this(Statement[] ss){s=ss;}
 
 	override string toString(){return "{\n"~indent(join(map!(to!string)(s),"\n"))~"\n}";}
+
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
@@ -74,6 +77,7 @@ class IfStm: Statement{
 
 abstract class BreakableStm: Statement{
 	mixin DownCastMethod;
+	mixin DownCastMethods!(ForeachStm,ForeachRangeStm);
 	mixin Visitors;
 }
 abstract class LoopingStm: BreakableStm{
@@ -109,11 +113,15 @@ class ForeachStm: LoopingStm{
 	Statement bdy;
 	bool isReverse;
 	this(ForeachVarDecl[] v,Expression a,Statement b, bool isr=false){ vars = v; aggregate = a; bdy = b; isReverse=isr; }
-	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();}
+	override string toString(){
+		if(lower) return "/+lowered foreach+/ "~lower.toString();
+		return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();
+	}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
-class ForeachRangeStm: Statement{
+class ForeachRangeStm: LoopingStm{
 	ForeachVarDecl var;
 	Expression left,right;
 	Statement bdy;
@@ -121,6 +129,7 @@ class ForeachRangeStm: Statement{
 	this(ForeachVarDecl v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~var.toString()~";"~left.toString()~".."~right.toString()~") "~bdy.toString();}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 class SwitchStm: BreakableStm{
@@ -197,6 +206,7 @@ class GotoStm: Statement{
 	WhichGoto t; Expression e;
 	this(WhichGoto type,Expression exp){t=type; e=exp;}
 	override string toString(){
+		if(lower) return "/+lowered goto+/ "~lower.toString();
 		final switch(t){
 			case WhichGoto.identifier: return "goto "~e.toString()~";";
 			case WhichGoto.default_: return "goto default;";
