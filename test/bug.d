@@ -1,23 +1,3 @@
-struct Iota{
-	int s,e;
-	this(int s,int e){ this.s=s; this.e=e; }
-	int front(){ return s; }
-	bool empty(){ return s>=e; }
-	void popFront(){ s++; }
-}
-
-alias x=Iota.front;
-
-int foo(){
-	int r=0;
-	foreach(x;Iota(1,4)){
-		r+=x;
-	}
-	return r;
-}
-pragma(msg, foo());
-
-
 /+alias int[2] foo[]; 
 static assert(is(foo==int[2][])); // TODO
 +/

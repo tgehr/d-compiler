@@ -294,6 +294,17 @@ int[] testHugeStringSwitch(){
 
 pragma(msg, testHugeStringSwitch());
 
+int testSwitchWithBreak(int x){
+	int r=0;
+	switch(x){
+		case 0: r=2; break;
+		case 1: r=0; break;
+		default: r=3; break;
+	}
+	return r;
+}
+static assert(testSwitchWithBreak(3)==3);
+
 // +/
 // +/
 // +/
