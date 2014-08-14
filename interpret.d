@@ -2885,7 +2885,7 @@ Lhltstr:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==ForeachStm) && !is(T==ForeachRangeStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TupleAssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==WithStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==ILabeledStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==ForeachStm) && !is(T==ForeachRangeStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TupleAssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==WithStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -3641,18 +3641,23 @@ mixin template CTFEInterpret(T) if(is(T==CompoundStm)){
 		foreach(x; s) x.byteCompile(bld);
 	}
 }
+
+mixin template CTFEInterpret(T) if(is(T==ILabeledStm)){
+	ref ByteCodeBuilder.Label getBCLabel(ref ByteCodeBuilder bld);
+}
+
 mixin template CTFEInterpret(T) if(is(T==LabeledStm)){
+	ByteCodeBuilder.Label bcLabel;
+
 	override void byteCompile(ref ByteCodeBuilder bld){
-		if(!bclabel.initialized(bld)) bclabel = bld.getLabel();
-		bclabel.here();
+		if(!bcLabel.initialized(bld)) bcLabel = bld.getLabel();
+		bcLabel.here();
 		s.byteCompile(bld);
 	}
 	ref ByteCodeBuilder.Label getBCLabel(ref ByteCodeBuilder bld){
-		if(!bclabel.initialized(bld)) bclabel = bld.getLabel();
-		return bclabel;
+		if(!bcLabel.initialized(bld)) bcLabel = bld.getLabel();
+		return bcLabel;
 	}
-private:
-	ByteCodeBuilder.Label bclabel;
 }
 mixin template CTFEInterpret(T) if(is(T==ExpressionStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
@@ -4013,7 +4018,7 @@ mixin template CTFEInterpret(T) if(is(T==SwitchStm)){
 mixin template CTFEInterpret(T) if(is(T==SwitchLabelStm)){
 	ByteCodeBuilder.Label bcLabel;
 	final ref ByteCodeBuilder.Label getBCLabel(ref ByteCodeBuilder bld){
-		if(bcLabel.outer !is &bld) bcLabel=bld.getLabel();
+		if(!bcLabel.initialized(bld)) bcLabel=bld.getLabel();
 		return bcLabel;
 	}
 }
@@ -4022,7 +4027,6 @@ mixin template CTFEInterpret(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==De
 	override void byteCompile(ref ByteCodeBuilder bld){
 		assert(bcLabel.outer is &bld);
 		bcLabel.here();
-		bcLabel=ByteCodeBuilder.Label.init;
 		foreach(ss;s) ss.byteCompile(bld);
 	}
 }
@@ -5594,6 +5598,18 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 		_byteCode = null;
 	}
 
+	void resetLabels(){
+		static struct Resetter{
+			void perform(LabeledStm lbl){
+				lbl.bcLabel=ByteCodeBuilder.Label.init;
+			}
+			void perform(SwitchLabelStm swl){
+				swl.bcLabel=ByteCodeBuilder.Label.init;
+			}
+		}
+		runAnalysis!Resetter(bdy);
+	}
+
 	private{
 		ulong vers=0;
 		bool mayBeOutdated(){
@@ -5694,6 +5710,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			}
 
 			rememberVersion();
+			resetLabels();
 			subscribeForLayoutChanges();
 		}
 		return _byteCode;

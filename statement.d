@@ -48,8 +48,10 @@ class BlockStm: CompoundStm{
 
 	mixin Visitors;
 }
-
-class LabeledStm: Statement{
+interface ILabeledStm{
+	mixin CTFEInterpret!ILabeledStm;
+}
+class LabeledStm: Statement,ILabeledStm{
 	Identifier l;
 	Statement s;
 	this(Identifier label, Statement statement){l=label; s=statement; sstate = SemState.pre;}
@@ -141,7 +143,7 @@ class SwitchStm: BreakableStm{
 	mixin Visitors;
 }
 
-abstract class SwitchLabelStm: Statement{
+abstract class SwitchLabelStm: Statement,ILabeledStm{
 	mixin DownCastMethods!(
 		CaseStm,
 		CaseRangeStm,

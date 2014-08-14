@@ -9022,6 +9022,7 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 		}
 		if(err) return false;
 		cases ~= c;
+		resolveGotoCase(c);
 		return true;
 	}
 	bool addCaseRange(CaseRangeStm c, Scope sc){
@@ -9038,7 +9039,7 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 		CaseRange pr;
 		casesInOrder.insertOrIntersect(cr, {}, (CaseRange p){ pr=p; });
 		auto prev = pr.stm;
-		if(!prev){cases ~= c; return true; }
+		if(!prev){cases ~= c; resolveGotoCase(c); return true; }
 		if(auto p=prev.isCaseStm()){
 			sc.error(format("case range '%s..%s' includes duplicate case '%s'", c.e1, c.e2, p.e[pr.index]), c.e1.loc.to(c.e2.loc));
 			sc.note("previous case is here",p.e[0].loc);
@@ -9074,6 +9075,62 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 			sc.note("previous default branch is here", theDefault.loc);
 		}
 		return false;
+	}
+	GotoStm[][] switchGotos;
+
+	private bool tryResolveGoto(GotoStm gto){
+		if(gto.t == WhichGoto.caseExp){
+			auto cv=ComparisonValue(gto.e.interpretV());
+			auto cr=CaseRange(cv,cv);
+			ILabeledStm target;
+			casesInOrder.tryIntersect(cr, (CaseRange x){ target=x.stm; }, (){});
+			if(target){ gto.resolveLabel(target); return true; }
+		}else if(gto.t == WhichGoto.default_){
+			if(theDefault){ gto.resolveLabel(theDefault); return true; }
+		}
+		return false;
+	}
+	private void resolveGotoCase(SwitchLabelStm stm){
+		if(!switchGotos.length) return;
+		assert(switchGotos.length==2);
+		foreach(gto;switchGotos[1]){
+			assert(gto.t == WhichGoto.case_);
+			gto.resolveLabel(stm);
+		}
+		switchGotos[1]=[];
+	}
+
+	private bool resolveAllGotos(Scope sc){
+		if(!switchGotos.length) return false;
+		assert(switchGotos.length==2);
+		bool err=false;
+		dw(this);
+		foreach(gto;switchGotos[1]){
+			sc.error("no further case statements after 'goto case'",gto.loc);
+			err=true;
+		}
+		foreach(gto;switchGotos[0]){
+			if(tryResolveGoto(gto)) continue;
+			err=true;
+			if(gto.t==WhichGoto.caseExp)
+				sc.error(format("case '%s' cannot be found in switch statement",gto.e),gto.loc);
+			else{
+				assert(gto.t==WhichGoto.default_);
+				if(f) sc.error("no default case in final switch statement",gto.loc);
+			}
+		}
+		switchGotos=[];
+		return err;
+	}
+
+	void addGoto(GotoStm gto)in{
+		with(WhichGoto){
+			assert(gto.t.among(caseExp,case_,default_));
+			assert(gto.t !is caseExp||gto.e&&gto.e.sstate==SemState.completed&&gto.e.isConstant());
+		}
+	}body{
+		if(!switchGotos.length) switchGotos.length=2; // GC allocations
+		if(!tryResolveGoto(gto)) switchGotos[gto.t==WhichGoto.case_]~=gto;
 	}
 
 	enum Kind{
@@ -9168,6 +9225,7 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 			sc.error("non-final switch statement requires a default clause", loc);
 			err=true;
 		}
+		err|=resolveAllGotos(sc);
 		if(err) mixin(ErrEplg);
 		mixin(SemProp!q{e,s});
 		assert(!tmpVarDecl);
@@ -9241,18 +9299,33 @@ mixin template Semantic(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==Default
 				}else static assert(0);
 			}
 		}
+		bool shouldInsert=true;
+		static if(is(T==CaseStm)) shouldInsert&=util.all!(a=>a.sstate==SemState.completed)(e);
+		static if(is(T==CaseRangeStm)){
+			if(e1.sstate==SemState.completed&&e2.sstate==SemState.completed){
+				if(e1.interpretV().opBinary!">"(e2.interpretV())){
+					sc.error(format("lower bound '%s' exceeds upper bound '%s' in case range", e1, e2), e1.loc.to(e2.loc));
+					mixin(SetErr!q{e1});
+					shouldInsert=false;
+				}				
+			}else shouldInsert=false;
+		}
+		if(shouldInsert&&addedToSwitch==SwInsState.notAdded)
+			addedToSwitch=mixin(`sw.add`~__traits(identifier,T)[0..$-3])(this,sc)?
+				SwInsState.added:SwInsState.error;
 		mixin(SemChld!q{s});
 		static if(is(T==CaseStm)) mixin(PropErr!q{e});
-		static if(is(T==CaseRangeStm)){
-			mixin(PropErr!q{e1,e2});
-			if(e1.interpretV().opBinary!">"(e2.interpretV())){
-				sc.error(format("lower bound '%s' exceeds upper bound '%s' in case range", e1, e2), e1.loc.to(e2.loc));
-				mixin(ErrEplg);
-			}
-		}
-		if(!mixin(`sw.add`~__traits(identifier,T)[0..$-3])(this,sc)) mixin(ErrEplg);
+		static if(is(T==CaseRangeStm)) mixin(PropErr!q{e1,e2});
+		if(SwInsState.added==SwInsState.error) mixin(ErrEplg);
 		mixin(SemEplg);
 	}
+private:
+	enum SwInsState{
+		notAdded,
+		added,
+		error,
+	}
+	auto addedToSwitch=SwInsState.notAdded;
 }
 
 mixin template Semantic(T) if(is(T==ReturnStm)){
@@ -9379,8 +9452,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 			}else if(oafun.scope_.isEnclosing(mixin(_name))){
 				auto ngto=New!(typeof(this))(e);
 				ngto.loc=loc;
-				auto rcode=oafun.addGoto(ngto);
-				auto r=ForeachStm.createOpApplyReturn(rcode,loc);
+				auto r=ForeachStm.createOpApplyReturn(oafun.addGoto(ngto),loc);
 				r.semantic(sc);
 				mixin(RewEplg!q{r});
 			}
@@ -9426,14 +9498,37 @@ mixin template Semantic(T) if(is(T==GotoStm)){
 				assert(cast(Identifier)e);
 				sc.registerForLabel(this, cast(Identifier)cast(void*)e);
 				break;
-			case default_:
-			case case_:
 			case caseExp:
-				return super.semantic(sc); // TODO
+			case case_:
+			case default_:
+				if(e){
+					assert(t==caseExp);
+					mixin(SemChld!q{e});
+					mixin(IntChld!q{e});
+				}
+				if(!theSwitch) theSwitch=sc.getSwitchStm();
+				if(theSwitch){
+					if(!lower) theSwitch.addGoto(this);
+					auto fun=sc.getFunction();
+					if(auto oafun=fun.isOpApplyFunctionDef()){
+						if(oafun.scope_.isEnclosing(theSwitch)){
+							if(!lower){
+								auto ngto=New!(typeof(this))(t,e);
+								ngto.loc=loc;
+								ngto.theSwitch=theSwitch;
+								lower=ForeachStm.createOpApplyReturn(oafun.addGoto(ngto),loc);
+							}
+							mixin(SemChld!q{lower});
+						}
+					}
+					break;
+				}
+				sc.error(format("'%s' outside switch statement",this),loc);
+				mixin(ErrEplg);
 		}
 		mixin(SemEplg);
 	}
-	void resolveLabel(LabeledStm tgt)in{assert(t==WhichGoto.identifier);}body{
+	void resolveLabel(ILabeledStm tgt){
 		target = tgt;
 	}
 
@@ -9441,7 +9536,8 @@ mixin template Semantic(T) if(is(T==GotoStm)){
 	Scope scope_;
 	Statement lower;
 private:
-	LabeledStm target;
+	ILabeledStm target;
+	SwitchStm theSwitch; // used for lowering opApply, there is no surface syntax
 }
 
 class WithBaseScope: Scope{

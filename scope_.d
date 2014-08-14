@@ -716,6 +716,10 @@ final class FunctionScope: OrderedScope{
 		if(auto r=thisLoopingStm()) return r;
 		return super.getLoopingStm();
 	}
+	override SwitchStm getSwitchStm(){
+		if(thisLoopingStm()) return parent.getSwitchStm();
+		return super.getSwitchStm();
+	}
 	override bool isEnclosing(BreakableStm stm){
 		if(auto oafun=fun.isOpApplyFunctionDef()){
 			return stm is oafun.lstm || parent.isEnclosing(stm);
