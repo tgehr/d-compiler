@@ -480,7 +480,7 @@ class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 
 class UnittestDecl: FunctionDef{
 	this(STC stc,CompoundStm b)in{assert(b!is null);}body{
-		super(stc,New!FunctionTy(STC.init, Type.get!void(),(Parameter[]).init, VarArgs.none), null, null, null,null,b);
+		super(stc|STCstatic,New!FunctionTy(STC.init, Type.get!void(),(Parameter[]).init, VarArgs.none), null, null, null,null,b);
 	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"unittest"~bdy.toString();}
 
