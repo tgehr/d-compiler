@@ -1,4 +1,56 @@
 
+int testGotoCase(int x){
+	switch(x){
+	case 0:
+		goto case;
+		return 0;
+	case 1:
+		return 1;
+	case 2:
+		goto default;
+		return 2;
+	default:
+		return 3;
+	}
+}
+static assert(testGotoCase(0)==1&&testGotoCase(1)==1&&testGotoCase(2)==3&&testGotoCase(-1)==3);
+
+int testGotoCase2(int x){
+	switch(x){
+	Lstart:
+		goto case;
+		return 0;
+	case 0: .. case 2:
+		return 1;
+	case 3:
+		goto Lstart;
+		goto default;
+	default: return -1;
+	}
+}
+static assert(testGotoCase2(0)==1&&testGotoCase2(1)==1&&testGotoCase2(2)==1&&testGotoCase2(3)==1&&testGotoCase2(4)==-1);
+
+void testGotoCaseErr(){
+	goto case; // error
+	switch(0){
+	case 0:
+		goto case; // error
+	default:
+		break;
+	}
+	switch(0){ case 0: goto case; default: } // error
+	switch(0){ goto case; case 0: default: }
+	switch(0){ // error
+		goto default;
+	}
+	enum E{e}
+	E e;
+	final switch(e){
+		case E.e:
+			goto default; // error
+	}
+}
+
 int unsigned(int x){
 	switch(cast(uint)x){
 		case 0:..case -1: return 1;

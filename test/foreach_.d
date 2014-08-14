@@ -114,32 +114,32 @@ static:
 		switch(z){
 		case -1:
 			foreach(i;Iota(0,x)){	
-				goto case; // TODO
+				goto case;
 			}
 			return -1;
 		case 0:
 			y++;
 			foreach(i;Iota(0,x)){
 				y++;
-				if(i>2) goto case 2; // TODO
+				if(i>2) goto case 2;
 			}
-			goto case; // TODO
+			goto case;
 		case 2:
 			foreach(i;Iota(0,x)){
 				y++;
-				if(i>1) goto default; // TODO
+				if(i>1) goto default;
 			}
 		default:
 			return x+y;
 		}
 	}
-	int[] iota(int x,int y){ int[] r; foreach(i;x..y) r~=i; return r; }
-	int[] fmap(alias a)(int[] b){ int[] r; foreach(x;b) r~=a(x); return r; }
-	pragma(msg, iota(-1,8).fmap!(i=>iota(-1,8).fmap!(j=>testGotoCaseGotoDefault(i,j)))); // TODO
-	static assert(iota(-1,8).fmap!(i=>iota(-1,8).fmap!(j=>testGotoCaseGotoDefault(i,j)))==[-1,1,0,0,0,0,0,0,0,-1,2,1,1,1,1,1,1,1,5,5,2,3,2,2,2,2,2,8,8,3,5,3,3,3,3,3,11,11,4,7,4,4,4,4,4,13,13,5,8,5,5,5,5,5,14,14,6,9,6,6,6,6,6,15,15,7,10,7,7,7,7,7,16,16,8,11,8,8,8,8,8]); // TODO
-
+	pragma(msg, iota(-1,8).fmap!(function(i)=>iota(-1,8).fmap!(j=>testGotoCaseGotoDefault(i,j))));
+	static assert(iota(-1,8).fmap!(function(i)=>iota(-1,8).fmap!(j=>testGotoCaseGotoDefault(i,j)))==[-1,1,0,0,0,0,0,0,0,-1,2,1,1,1,1,1,1,1,5,5,2,3,2,2,2,2,2,8,8,3,5,3,3,3,3,3,11,11,4,7,4,4,4,4,4,13,13,5,8,5,5,5,5,5,14,14,6,9,6,6,6,6,6,15,15,7,10,7,7,7,7,7,16,16,8,11,8,8,8,8,8]);
+	pragma(msg, iota(-1,8).fmap!(i=>iota(-1,8).fmap!(j=>testGotoCaseGotoDefault(i,j))));
 
 }
+int[] iota(int x,int y){ int[] r; foreach(i;x..y) r~=i; return r; }
+int[] fmap(alias a)(int[] b){ int[] r; foreach(x;b) r~=a(x); return r; } // TODO: fix 'cannot access this at nesting level' issue.
 
 bool checkSaveCall(){
 	static struct S{
