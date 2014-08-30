@@ -1,4 +1,3 @@
-
 // // TODO: wait until semantics of the following is clarified by spec
 // // (I currently assume the spec is not implementable.)
 /+string bb(string x, string y){ return x~y; }
@@ -14,6 +13,15 @@ enum Incompat { foo = qux, bar = 1, baz = "12", qux=bar+baz }
 
 enum Test{ foo = ((int b)=>"hello")(cast(int)bar), bar=2 }
 pragma(msg, typeof(Test.foo));+/
+
+struct ShowE{
+static:
+	enum E{
+		A, B
+	}
+	enum x=[E.A,E.B];
+	pragma(msg, x);
+}
 
 enum Weekdays{
 	Monday,
