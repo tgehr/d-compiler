@@ -204,7 +204,7 @@ class LiteralExp: Expression{
 	//override string toString(){return _brk(lit.toString());}
 	override string toString(){
 		//if(loc.rep.length) return loc.rep;
-		if(type) if(auto et=type.getHeadUnqual().isEnumTy()) return EnumTy.valueToString(type, value);
+		if(type) if(auto et=type.getHeadUnqual().isEnumTy()) return et.valueToString(value);
 		return _brk(value.toString());
 	}
 

@@ -8378,23 +8378,16 @@ mixin template Semantic(T) if(is(T==EnumTy)){
 		return base.convertsTo(to);
 	}
 
-	static string valueToString(Type type, Variant value)in{
-		assert(cast(EnumTy)type.getHeadUnqual());
-	}body{
-		auto et=cast(EnumTy)cast(void*)type.getHeadUnqual();
-		string r;
-		foreach(m;et.decl.members){
+	string valueToString(Variant value){
+		foreach(m;decl.members){
 			if(m.sstate!=SemState.completed) continue;
 			assert(m.rinit&&m.rinit.isConstant());
-			if(m.rinit.interpretV().opBinary!"is"(value)){
-				return m.name.name;
-/+				r=et.toString()~"."~m.name.name;
-				if(type.isEnumTy()) return r;
-				goto Laddcast;+/
-			}
+			if(m.rinit.interpretV().opBinary!"is"(value))
+				return toString()~"."~m.name.name;
 		}
-		r=value.toString();
-		Laddcast: return "cast("~type.toString()~")"~r;
+		assert(!!decl.base);
+		auto rv=value.convertTo(decl.base);
+		return "cast("~type.toString()~")"~rv.toString();
 	}
 }
 

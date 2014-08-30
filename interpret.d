@@ -4072,7 +4072,10 @@ mixin template CTFEInterpret(T) if(is(T==LiteralExp)){
 	}
 	static void byteCompileValue(ref ByteCodeBuilder bld, ref Variant value){
 		auto tu = value.getType().getHeadUnqual();
-		assert(!tu.isEnumTy());
+		if(auto et=tu.isEnumTy()){
+			assert(!!et.decl.base);
+			tu=et.decl.base.getHeadUnqual();
+		}
 		if(auto bt = tu.isBasicType()){
 			if(bt.isIntegral()){
 				bld.emit(Instruction.push);

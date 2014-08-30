@@ -57,7 +57,7 @@ template getOccupied(T){
 		enum getOccupied = Occupies.int64;
 	else static if(isFloatingPoint!T){
 		static assert(T.sizeof<=typeof(Variant.flt80).sizeof);
-		enum getOccupied = Occupies.flt80;	
+		enum getOccupied = Occupies.flt80;
 	}else static if(is(T==ifloat)||is(T==idouble)||is(T==ireal))
 		enum getOccupied = Occupies.fli80;
 	else static if(is(T==cfloat)||is(T==cdouble)||is(T==creal))
@@ -134,32 +134,37 @@ struct Variant{
 	private @property Occupies occupies(){
 		// TODO: this is probably too slow
 		// TODO: cache inside type?
-		if(!type) return Occupies.vars;		
-		if(type.isTypeTuple()) return Occupies.tpl;
-		auto tu=type.getHeadUnqual();
-		if(tu.isAggregateTy()) return Occupies.vars;
-		if(tu is Type.get!string()) return Occupies.str;
-		if(tu is Type.get!wstring()) return Occupies.wstr;
-		if(tu is Type.get!dstring()) return Occupies.dstr;
-		if(tu.getElementType()) return Occupies.arr;
-		if(auto ptr=tu.isPointerTy())
-			return ptr.ty.isFunctionTy()?Occupies.fptr:Occupies.ptr_;
-		if(tu.isDelegateTy()) return Occupies.dg;
+		Occupies occupies(Type type){
+			if(!type) return Occupies.vars;
+			if(type.isTypeTuple()) return Occupies.tpl;
+			auto tu=type.getHeadUnqual();
+			if(tu.isAggregateTy()) return Occupies.vars;
+			if(tu is Type.get!string()) return Occupies.str;
+			if(tu is Type.get!wstring()) return Occupies.wstr;
+			if(tu is Type.get!dstring()) return Occupies.dstr;
+			if(tu.getElementType()) return Occupies.arr;
+			if(auto ptr=tu.isPointerTy())
+				return ptr.ty.isFunctionTy()?Occupies.fptr:Occupies.ptr_;
+			if(tu.isDelegateTy()) return Occupies.dg;
 
-		if(auto bt=tu.isBasicType()){
-			switch(bt.op){
-				foreach(x;ToTuple!basicTypes){
-					static if(x!="void")
-					case Tok!x:
-						mixin("alias "~x~" T;"); // workaround DMD bug
+			if(auto bt=tu.isBasicType()){
+				switch(bt.op){
+					foreach(x;ToTuple!basicTypes){
+						static if(x!="void")
+						case Tok!x:
+							mixin("alias "~x~" T;"); // workaround DMD bug
 						return getOccupied!T;
+					}
+					default: assert(0,text(bt.op));
 				}
-				default: assert(0,text(bt.op));
+			}else if(auto et=tu.isEnumTy()){
+				assert(et.decl.base);
+				return occupies(et.decl.base);
 			}
+			assert(tu is Type.get!(typeof(null)), tu.text);
+			return Occupies.none;
 		}
-		
-		assert(tu is Type.get!(typeof(null)), tu.text);
-		return Occupies.none;
+		return occupies(type);
 	}
 
 	this(T)(T value, Type type)if(!is(T==Variant[])&&!is(T==Variant[VarDecl])&&!is(T==Symbol))in{
@@ -206,7 +211,7 @@ struct Variant{
 		this.type=type;
 		this.vars=vars;
 	}
-	
+
 	this()(Symbol fptr, Type type)in{
 		auto tu=type.getHeadUnqual();
 		assert(tu.isPointerTy()&&tu.getFunctionTy());
@@ -373,12 +378,12 @@ struct Variant{
 						// remove redundant "i" from imaginary literals
 						enum oc1 = getOccupied!T;
 						enum occ = oc1==Occupies.fli80?Occupies.flt80:oc1;
-						
+
 						string rlsfx = ""; // TODO: extract into its own function?
 						string res = to!string(mixin(`cast(T)this.`~to!string(occ)));
 						static if(occ==Occupies.flt80)
 							if(this.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
-						return left~res~right~rlsfx~sfx;						
+						return left~res~right~rlsfx~sfx;
 				}
 				default: assert(0);
 			}
@@ -403,6 +408,8 @@ struct Variant{
 			if(this.vars is null) return "null";
 			return this.type.toString(); // TODO: pick up toString?
 		}
+		if(auto et=type.getHeadUnqual().isEnumTy())
+			return et.valueToString(this);
 		assert(0,"cannot get string");
 	}
 
@@ -483,6 +490,12 @@ struct Variant{
 			return Variant((Variant[]).init,(Variant[]).init,to);
 		}else if(type.isPointerTy()){
 			if(tou is Type.get!bool()) return Variant(cnt !is null,to); // TODO: fix?
+		}
+		if(auto et=tou.isEnumTy()){
+			assert(!!et.decl.base);
+			auto rv=convertTo(et.decl.base);
+			rv.type=to;
+			return rv;
 		}
 		return this;
 	}
@@ -615,7 +628,7 @@ struct Variant{
 				enum code = to!string(occ)~` `~op~` rhs.`~to!string(occ);
 				static if(op!="-" && op!="+" && op!="<>=" && op!="!<>=") // DMD bug
 				static if(is(typeof(mixin(code)))){
-					if(type.getHeadUnqual() is Type.get!(typeof(mixin(x)))()){ 
+					if(type.getHeadUnqual() is Type.get!(typeof(mixin(x)))()){
 						if(rhs.occupies == occupies)
 							return Variant(mixin(code),Type.get!(typeof(mixin(code)))());
 						else return strToArr().opBinary!op(rhs);
@@ -636,6 +649,11 @@ struct Variant{
 			}
 		}
 
+		auto type=type;
+		if(auto et=type.getHeadUnqual().isEnumTy()){
+			assert(!!et.decl.base);
+			type=et.decl.base;
+		}
 		assert(cast(BasicType)type.getHeadUnqual(),text(type));
 		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
@@ -663,6 +681,11 @@ struct Variant{
 		assert(0, "no binary '"~op~"' support for "~type.toString());
 	}
 	Variant opUnary(string op)(){
+		auto type=type;
+		if(auto et=type.getHeadUnqual().isEnumTy()){
+			assert(!!et.decl.base);
+			type=et.decl.base;
+		}
 		assert(cast(BasicType)type.getHeadUnqual());
 		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
@@ -670,8 +693,11 @@ struct Variant{
 					alias typeof(mixin(x~`.init`)) T;
 					alias getOccupied!T occ;
 					enum code = q{ mixin(op~`cast(T)`~to!string(occ)) };
-					static if(is(typeof(mixin(code))==T))
+					static if(is(typeof(mixin(code))==T)){
 					case Tok!x: return Variant(mixin(code), Type.get!T());
+					}else static if(is(typeof(mixin(code))==bool)){
+					case Tok!x: return Variant(mixin(code), Type.get!bool());
+					}
 				}
 			}
 			default: assert(0, "no unary '"~op~"' support for "~type.toString());
