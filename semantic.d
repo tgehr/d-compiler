@@ -10052,13 +10052,15 @@ protected:
 }
 
 mixin template Semantic(T) if(is(T==CArrayDecl)||is(T==CArrayParam)){
-
-	override void semantic(Scope sc){
+	final void computeRtype(){
 		for(;;)if(auto id=postfix.isIndexExp()){
 			postfix = id.e;
 			id.e = rtype;
 			rtype = id;
-		}else break;
+		}else break;		
+	}
+	override void semantic(Scope sc){
+		computeRtype();
 		super.semantic(sc);
 	}
 }
@@ -10394,6 +10396,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 				sc.error("alias declarations cannot have initializers",loc);
 				mixin(ErrEplg);
 			}
+			if(auto cad=vd.isCArrayDecl()) cad.computeRtype();
 			aliasee = vd.rtype;
 		}else if(auto fd = decl.isFunctionDecl()){
 			aliasee = fd.type;

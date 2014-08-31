@@ -378,6 +378,7 @@ class VarDecl: Declaration{
 
 	override VarDecl isVarDecl(){return this;}
 
+	mixin DownCastMethods!CArrayDecl;
 	mixin Visitors;
 }
 
@@ -388,6 +389,7 @@ class CArrayDecl: VarDecl{
 	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
 
+	mixin DownCastMethod;
 	mixin Visitors;
 }
 
