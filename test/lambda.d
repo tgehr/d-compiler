@@ -1,4 +1,17 @@
+struct AGH{
+	void foo(){
+		bool[][] delegate(bool[][] delegate(int) dg)immutable nothrow pure @safe a;
+		bool[][] delegate(bool[][] delegate(int)) b=a;
+	}
+	auto fooa = [(int x)=>x,x=>x]; // ok
+	auto foob = [x=>x,(int x)=>x]; // ok
+	auto fooc = [x=>x]; // error
 
+	void food(T)(T arg){} // ok
+	void main(){
+		food(x=>x); // error
+	}
+}
 class MemberFuncLitAlias{
 	int x=2;
 	alias a=ID!(()=>x);
