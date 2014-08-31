@@ -2215,10 +2215,12 @@ class TemplateInstanceDecl: Declaration{
 			if(iftiType is Type.get!void()){
 				if(auto ae = iftiArgs[j].isAddressExp()){
 					if(ae.isUndeducedFunctionLiteral()){
-						auto sym = cast(Symbol)cast(void*)ae.e;
-						assert(!!cast(FunctionDef)sym.meaning);
-						auto fd  = cast(FunctionDef)cast(void*)sym.meaning;
-						iftiType = fd.type;
+						if(!a.type.isMatcherTy()){
+							auto sym = cast(Symbol)cast(void*)ae.e;
+							assert(!!cast(FunctionDef)sym.meaning);
+							auto fd  = cast(FunctionDef)cast(void*)sym.meaning;
+							iftiType = fd.type;
+						}else{ i++; j++; continue; }
 					}
 				}
 			}
