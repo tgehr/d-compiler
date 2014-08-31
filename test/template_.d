@@ -1,4 +1,13 @@
 
+struct TestLocalInstantiation{
+static:
+	int f1(alias A)() { return 0; }
+	struct S1 { int x; enum y = f1!x(); }
+	
+	int f2(alias A)() { return A; }
+	struct S2 { int x; enum y = f2!x(); } // error
+}
+
 struct TemplateParameterMatchLevel{
 	static:
 	auto foo(int x)(int y){ return 1; }

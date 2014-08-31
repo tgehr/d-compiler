@@ -1,11 +1,5 @@
 //int x(){ if(foo){ } // TODO: show unmatched paren
 
-/+int f(alias A)() { return 0; }
-struct S { int x; enum y = f!x(); }+/
-/+
-int f(alias A)() { return A; }
-struct S { int x; enum y = f!x(); }
-+/
 /+
 class Infty{
 	int foo(){ return foo(); } // TODO: ok
