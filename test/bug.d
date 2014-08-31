@@ -1,10 +1,5 @@
+//int x(){ if(foo){ } // TODO: show unmatched paren
 
-
-// int x(){ if(foo){ } // TODO: show unmatched paren
-
-/+alias int[2] foo[]; 
-static assert(is(foo==int[2][])); // TODO
-+/
 /+int f(alias A)() { return 0; }
 struct S { int x; enum y = f!x(); }+/
 /+

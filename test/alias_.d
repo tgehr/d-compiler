@@ -1,4 +1,9 @@
 
+struct AliasToCArrayDecl{
+	alias int[2] foo[]; 
+	static assert(is(foo==int[2][]));
+}
+
 struct AliasToNonOverloadable{
 	static:
 	int x;
