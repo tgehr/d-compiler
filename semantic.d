@@ -8618,11 +8618,12 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
-		auto ty = aggregate.type.getHeadUnqual();
+		auto ty = aggregate.type;
+		auto tyu = aggregate.type.getHeadUnqual();
 		// foreach over built-in arrays
 		Type et = null;
-		if(auto tt = ty.isArrayTy()) et = tt.ty;
-		if(auto tt = ty.isDynArrTy()) et = tt.ty;
+		if(auto tt = tyu.isArrayTy()) et = tt.ty;
+		if(auto tt = tyu.isDynArrTy()) et = tt.ty;
 		if(et){
 			needRetry=false;
 			lower=createArrayForeach(sc,ty,et);
