@@ -554,6 +554,31 @@ struct Variant{
 			       to!string(rhs)~" in binary '"~op~"' expression");
 		}
 	}body{
+		static Variant compareMultiple(bool areArrays)(Variant[] al, Variant[] ar){
+			// TODO: create these as templates instead
+			auto l1 = al.length, l2=ar.length;
+			static if(op=="=="){if(l1!=l2) return Variant(false,Type.get!bool());}
+			else static if(op=="!=") if(l1!=l2) return Variant(true,Type.get!bool());
+			if(l1&&l2){
+				auto tyd = al[0].type.combine(ar[0].type);
+				assert(!tyd.dependee);// should still be ok though.
+				Type ty = tyd.value;
+				foreach(i,v; al[0..l1<l2?l1:l2]){
+					static if(areArrays) auto l = v.convertTo(ty), r = ar[i].convertTo(ty);
+					else{ alias v l; auto r=ar[i]; }
+					if(l.opBinary!"=="(r)) continue;
+					else{
+						static if(op=="==") return Variant(false,Type.get!bool());
+						else static if(op=="!=") return Variant(true,Type.get!bool());
+						else return l.opBinary!op(r);
+					}
+				}
+			}
+			// for ==, != we know that the lengths must be equal
+			static if(op=="==") return Variant(true,Type.get!bool());
+			else static if(op=="!=") return Variant(false,Type.get!bool());
+			else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
+		}
 		if(occupies == Occupies.arr){
 			if(rhs.occupies != Occupies.arr) rhs=rhs.strToArr();
 			static if(op=="~"){
@@ -565,28 +590,7 @@ struct Variant{
 				// TODO: implement this
 				assert(0,"TODO");
 			}else static if(isRelationalOp(Tok!op)){
-				// TODO: create these as templates instead
-				auto l1 = length, l2=rhs.length;
-				static if(op=="=="){if(l1!=l2) return Variant(false,Type.get!bool());}
-				else static if(op=="!=") if(l1!=l2) return Variant(true,Type.get!bool());
-				if(l1&&l2){
-					auto tyd = arr[0].type.combine(rhs.arr[0].type);
-					assert(!tyd.dependee);// should still be ok though.
-					Type ty = tyd.value;
-					foreach(i,v; arr[0..l1<l2?l1:l2]){
-						auto l = v.convertTo(ty), r = rhs.arr[i].convertTo(ty);
-						if(l.opBinary!"=="(r)) continue;
-						else{
-							static if(op=="==") return Variant(false,Type.get!bool());
-							else static if(op=="!=") return Variant(true,Type.get!bool());
-							else return l.opBinary!op(r);
-						}
-					}
-				}
-				// for ==, != we know that the lengths must be equal
-				static if(op=="==") return Variant(true,Type.get!bool());
-				else static if(op=="!=") return Variant(false,Type.get!bool());
-				else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
+				return compareMultiple!true(arr,rhs.arr);
 			}
 		}else if(occupies == Occupies.ptr_){
 			assert(rhs.occupies==Occupies.ptr_);
@@ -618,6 +622,13 @@ struct Variant{
 				return Variant(mixin(`null `~op~` null`),
 				         Type.get!(typeof(mixin(`null `~op~` null`)))());
 			else assert(0);
+		}
+
+		static if(isRelationalOp(Tok!op)&&op!="in"&&op!="!in"&&op!="is"&&op!="!is"){
+			if(occupies==Occupies.tpl){
+				assert(rhs.occupies==occupies.tpl);
+				return compareMultiple!false(tpl,rhs.tpl);
+			}
 		}
 
 		if(type.getHeadUnqual().isSomeString()){

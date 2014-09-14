@@ -3411,7 +3411,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 				}
 			}else{
 				assert(type.getHeadUnqual().isBasicType(), text(type," ",this));
-				static if(S!=Tok!"<<"&&S!=Tok!">>"&&S!=Tok!">>>") assert(e1.type is e2.type);
+				static if(S!=Tok!"<<"&&S!=Tok!">>"&&S!=Tok!">>>") assert(e1.type is e2.type,text(this," ",loc));
 			}
 
 			static if(isAssignOp(S)){
