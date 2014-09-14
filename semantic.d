@@ -7153,7 +7153,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 						p=p.ddup();
 						p.type = p.type.resolveInout(res);
 						p.rtype=null;
-						p.stc = STC.init;
+						p.stc=(p.stc&~STCinout)|p.type.getHeadSTC();
 					}
 					foreach(xx;M[1..$]) mixin("r.cache_inoutres_"~xx)=r;
 					r.ret = r.ret.resolveInout(res);
