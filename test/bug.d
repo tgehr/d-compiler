@@ -1,3 +1,4 @@
+
 //int x(){ if(foo){ } // TODO: show unmatched paren
 
 /+class Infty{
@@ -79,9 +80,8 @@ struct ComparisonTests{
 	bool cmptest(int a,int b){
 		return Seq!(a,b)!=seq(1,2);
 	}
-	//pragma(msg, cmptest(1,2));
-}
-+/
+	pragma(msg, cmptest(1,2));
+}+/
 
 // ref void foo(){ return; } // // TODO: should this fail?
 

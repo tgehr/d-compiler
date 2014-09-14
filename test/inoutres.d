@@ -1,3 +1,27 @@
+struct InoutOpApply{
+	struct S{
+		int[] a;
+		int opApply(scope int delegate(ref inout int) dg)inout{
+			foreach(ref x;a) if(auto r=dg(x)) return r;
+			return 0;
+		}
+	}
+	
+	int[] testInoutOpApply(){
+		int[] r;
+		//auto s=S([1,2,3]); // TODO
+		S s; s.a=[1,2,3];
+		foreach(ref x;s) x++;
+		const s2=s;
+		foreach(ref x;s2){
+			r~=x;
+			static assert(!is(typeof(x++)));
+		}
+		return r;
+	}
+	pragma(msg, testInoutOpApply());
+}
+
 struct HeadUnqualMatching{
 	inout(int*) foo(inout int* a){ return a; }
 	inout(int*) bar(inout(int*) a){ return a; }
