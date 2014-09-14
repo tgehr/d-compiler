@@ -5550,7 +5550,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				if(self.type) // alias declarations can contain such expressions (TODO: should they?)
 				if(self.type.getHeadUnqual().getFunctionTy())
 				if(auto this_=self.e1.extractThis())
-				if(auto aggrty=this_.type.isAggregateTy())
+				if(auto aggrty=this_.type.getHeadUnqual().isAggregateTy())
 				if(aggrty.decl.isValueAggregateDecl()){
 					runAnalysis!MarkHeapContext(this_);
 				}
