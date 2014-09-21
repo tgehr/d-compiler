@@ -307,7 +307,7 @@ struct NOPP{
 	}
 }
 
-/+
+
 
 class D{
 	int x;
@@ -477,7 +477,7 @@ struct Foo{
 		pragma(msg, "x: ",typeof(x)," y: ",typeof(y));
 	}
 }
-
+/+
 struct Test{
 	static inout(int) foo(inout(int)){return 1;}
 	double foo(int){return 1.0;}
@@ -487,7 +487,7 @@ struct Test{
 
 		Test.foo(2); // TODO: should work (?)
 	}
-}
+}+/
 
 alias S.t st;
 struct S{

@@ -1,4 +1,24 @@
 
+/+
+
+struct S {
+	int delegate(dchar) dg = cast(void delegate(dchar))(dchar) { return 2; };
+	// test.d(2): Error: delegate test.S.__lambda2 cannot be class members
+}
+pragma(msg, S().dg('a'));
+
+import std.stdio;
+template log(T...){
+	void log(T args);
+	int x;
+	static if(true) void logf(T args,int x=2){ }
+	/+static if(true)+/ 
+}
+
+void main(){ log(1,2,3); }
++/
+
+
 //int x(){ if(foo){ } // TODO: show unmatched paren
 
 /+class Infty{
