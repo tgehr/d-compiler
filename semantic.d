@@ -9100,7 +9100,6 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 		if(!switchGotos.length) return false;
 		assert(switchGotos.length==2);
 		bool err=false;
-		dw(this);
 		foreach(gto;switchGotos[1]){
 			sc.error("no further case statements after 'goto case'",gto.loc);
 			err=true;
