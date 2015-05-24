@@ -3332,7 +3332,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 		byteCompileHelper(bld, false);
 	}
 
-	static if(isAssignOp(S) && S!=Tok!"=" || S==Tok!",")
+	static if(isAssignOp(S) || S==Tok!",")
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		return byteCompileHelper(bld, true);
 	}
@@ -3344,14 +3344,16 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 		return e2.byteCompileRet(bld, isRefReturn);
 	}
 
-	private LValueStrategy byteCompileHelper(ref ByteCodeBuilder bld, bool isLvalue) in{assert(!isLvalue || isAssignOp(S) && S!=Tok!"=" || S==Tok!",");}body{
+	private LValueStrategy byteCompileHelper(ref ByteCodeBuilder bld, bool isLvalue) in{assert(!isLvalue || isAssignOp(S) || S==Tok!",");}body{
 		import std.typetuple;
 		alias Instruction I;
 		static if(S==Tok!"="){
-			assert(!isLvalue);
 			auto strat = e1.byteCompileLV(bld);
 			e2.byteCompile(bld);
-			strat.emitStoreKV(bld);
+			if(isLvalue){
+				strat.emitStoreKR(bld);
+				return strat;
+			}else strat.emitStoreKV(bld);
 		}else static if(S==Tok!","){
 			e1.byteCompile(bld);
 			bld.ignoreResult(getBCSizeof(e1.type));

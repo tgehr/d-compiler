@@ -4097,7 +4097,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 		}
 	}
 
-	static if(isAssignOp(S) && S!=Tok!"=")
+	static if(isAssignOp(S))
 		override bool isLvalue(){
 			return true;
 		}
