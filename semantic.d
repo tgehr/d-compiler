@@ -1065,6 +1065,10 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
 	static if(is(T _==PostfixExp!S,TokenType S)):
 	static assert(S==Tok!"++" || S==Tok!"--");
+	///
+	mixin OpOverloadMembers;
+	TmpVarExp tmp1,tmp2;
+	///
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChldExp!q{e});
@@ -1076,13 +1080,33 @@ mixin template Semantic(T) if(is(T _==PostfixExp!S,TokenType S)){
 				mixin(SemEplg);
 			}
 		}else mixin(ErrEplg);
-		// TODO: (complicated) operator overloading
+		if(!tmp1){
+			assert(!tmp2);
+			tmp1=New!TmpVarExp(e);
+			tmp1.loc=loc;
+			tmp1.semantic(sc);
+			assert(!!tmp1.sym);
+			tmp2=New!TmpVarExp(tmp1.sym);
+			tmp2.loc=loc;
+			tmp2.initTmpVarDecl(sc,true);
+			tmp2.semantic(sc);
+			assert(!!tmp2.sym);
+		}
+		mixin(OpOverload!("opUnary",q{[LiteralExp.polyStringFactory(TokChars!S)]},
+		q{(Expression[]).init},"tmp1.sym","sc",q{
+			auto tmpe=New!(BinaryExp!(Tok!","))(tmp1,tmp2);
+			tmpe.loc=loc;
+			r=New!(BinaryExp!(Tok!","))(tmpe,r);
+			r.loc=loc;
+			r=New!(BinaryExp!(Tok!","))(r,tmp2.sym);
+			r.loc=loc;
+		}));
 		sc.error(format("type '%s' does not support postfix "~TokChars!op,e.type),loc);
 		mixin(ErrEplg);
 	}
 }
 
-mixin template OpOverloadMembers(int alternatives=1){
+mixin template OpOverloadMembers(){ // TODO: this bloats the AST, find a better way?
 	Expression opoverload=null;
 	Expression oofun=null;
 	GaggingScope oosc=null;
@@ -1107,7 +1131,7 @@ template BuildOpOver(string opover,string e, string name, string tmargs){
 	});
 }
 
-template OpOverload(string name, string tmargs="", string args="", string e="e", string sc="sc"){
+template OpOverload(string name, string tmargs="", string args="", string e="e", string sc="sc", string post=""){
 	enum OpOverload = mixin(X!q{
 		@(BuildOpOver!("opoverload",e,name,tmargs));
 		if(!oosc) oosc=New!GaggingScope(@(sc));
@@ -1121,8 +1145,9 @@ template OpOverload(string name, string tmargs="", string args="", string e="e",
 		if(oofun){
 			mixin(SemChldPar!q{sc=oosc;oofun});
 			oosc=null;
-			auto r=New!CallExp(oofun,args);
+			Expression r=New!CallExp(oofun,args);
 			r.loc=loc;
+			@(post)
 			r.semantic(sc);
 			mixin(RewEplg!q{r});
 		}
@@ -5598,16 +5623,17 @@ class TmpVarExp: Expression{
 	TmpVarDecl tmpVarDecl;
 	Expression sym;
 	this(Expression e)in{assert(e&&e.sstate==SemState.completed);}body{ this.e=e; }
+	void initTmpVarDecl(Scope sc,bool forceRvalue)in{assert(!tmpVarDecl);}body{
+		assert(e&&!sym);
+		tmpVarDecl = New!TmpVarDecl(!forceRvalue&&e.isLvalue()?STCref:STC.init,null,null,e);
+		tmpVarDecl.presemantic(sc);
+		sym = New!Symbol(tmpVarDecl);
+		sym.loc = loc;
+		e = null;
+	}
 	void semantic(Scope sc){
 		mixin(SemPrlg);
-		if(!tmpVarDecl){
-			assert(e&&!sym);
-			tmpVarDecl = New!TmpVarDecl(e.isLvalue()?STCref:STC.init,null,null,e);
-			tmpVarDecl.presemantic(sc);
-			sym = New!Symbol(tmpVarDecl);
-			sym.loc = loc;
-			e = null;
-		}
+		if(!tmpVarDecl) initTmpVarDecl(sc,false);
 		mixin(SemChld!q{tmpVarDecl, sym});
 		type = Type.get!void();
 		mixin(SemEplg);
@@ -8574,7 +8600,7 @@ class OpApplyFunctionLiteralExp: FunctionLiteralExp{
 	protected override FunctionDef createFunctionDef(FunctionTy fty,Identifier name, CompoundStm bdy){
 		return New!OpApplyFunctionDef(STC.init,fty,name,bdy,lstm);
 	}
-	
+
 	mixin DownCastMethod;
 	mixin Visitors;
 }
@@ -8606,7 +8632,7 @@ class OpApplyFunctionDef: FunctionDef{
 		}
 		mixin(SemChld!q{sc=gto.scope_;gto.lower});
 	}
-	
+
 	mixin DownCastMethod;
 	mixin Visitors;
 }
@@ -9306,7 +9332,7 @@ mixin template Semantic(T) if(is(T==CaseStm)||is(T==CaseRangeStm)||is(T==Default
 					sc.error(format("lower bound '%s' exceeds upper bound '%s' in case range", e1, e2), e1.loc.to(e2.loc));
 					mixin(SetErr!q{e1});
 					shouldInsert=false;
-				}				
+				}
 			}else shouldInsert=false;
 		}
 		if(shouldInsert&&addedToSwitch==SwInsState.notAdded)
@@ -10063,7 +10089,7 @@ mixin template Semantic(T) if(is(T==CArrayDecl)||is(T==CArrayParam)){
 			postfix = id.e;
 			id.e = rtype;
 			rtype = id;
-		}else break;		
+		}else break;
 	}
 	override void semantic(Scope sc){
 		computeRtype();

@@ -3426,15 +3426,6 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 			}
 			e2.byteCompile(bld);
 
-			if(S==Tok!"is"||S==Tok!"!is"){
-				if(auto at=e1.type.isAggregateTy()){
-					assert(at.decl.isClassDecl(),"TODO: is for interfaces and value types");
-					assert(!!e2.type.isAggregateTy());
-					static if(S==Tok!"is") bld.emit(I.cmpep);
-					else bld.emit(I.cmpnep);
-				}
-			}
-
 			assert(!isShiftOp(Tok!op) && !isBitwiseOp(Tok!op) || type.isIntegral());
 			if(auto bt=e1.type.getHeadUnqual().isIntegral()){
 				auto size = bt.bitSize(), signed = bt.isSigned();
@@ -3490,61 +3481,71 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 						}
 					}
 				}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());}	// TODO: operators for all built-in types
-			}else static if(isRelationalOp(S) && S!=Tok!"in"){
-
+			}else static if(isRelationalOp(S)&&S!=Tok!"in"&&S!=Tok!"!in"){
 				assert(!e1.type.getElementType()," CTFE array relational operators not implemented yet");
-
-				if(auto bt0=e1.type.getHeadUnqual.isBasicType())
+				if(auto bt0=e1.type.getHeadUnqual.isBasicType()){
 					if(auto bt=bt0.isFloating()){
-
-					foreach(tt; ToTuple!(["float","double","real"])){
-						enum s = tt[0];
-						mixin("alias "~tt~" T;");
-						if(bt is Type.get!T()){
-							static if(op=="is") bld.emit(mixin(`I.cmpis`~s));
-							else static if(op=="!is"){
-								bld.emit(mixin(`I.cmpis`~s));
-								bld.emit(I.notb);
-							}else static if(op=="==") bld.emit(mixin(`I.cmpe`~s));
-							else static if(op=="!=") bld.emit(mixin(`I.cmpne`~s));
-							else static if(op=="<") bld.emit(mixin(`I.cmpl`~s));
-							else static if(op=="<=") bld.emit(mixin(`I.cmple`~s));
-							else static if(op==">") bld.emit(mixin(`I.cmpg`~s));
-							else static if(op==">=") bld.emit(mixin(`I.cmpge`~s));
-							else static if(op=="<>"||op=="!<>"){
-								bld.emitDup(2*getBCSizeof(bt));
-								bld.emit(mixin(`I.cmpl`~s));
-								bld.emit(I.tmppush);
-								bld.emit(mixin(`I.cmpg`~s));
-								bld.emit(I.tmppop);
-								bld.emit(I.or);
-								static if(op=="!<>") bld.emit(I.notb);
-							}else static if(op=="<>="||op=="!<>="){
-								auto sz = getBCSizeof(bt);
-								bld.emitDup(sz);
-								bld.emit(mixin(`I.cmpe`~s));
-								bld.emit(I.tmppush);
-								bld.emitDup(sz);
-								bld.emit(mixin(`I.cmpe`~s));
-								bld.emit(I.tmppop);
-								bld.emit(I.and);
-								static if(op == "!<>=") bld.emit(I.notb);
-							}else static if(op=="!<"){
-								bld.emit(mixin(`I.cmpl`~s));
-								bld.emit(I.notb);
-							}else static if(op=="!<="){
-								bld.emit(mixin(`I.cmpl`~s));
-								bld.emit(I.notb);
-							}else static if(op=="!>="){
-								bld.emit(mixin(`I.cmpge`~s));
-								bld.emit(I.notb);
-							}else static if(op=="!>"){
-								bld.emit(mixin(`I.cmpg`~s));
-								bld.emit(I.notb);
-							}else static assert(0);
+						foreach(tt; ToTuple!(["float","double","real"])){
+							enum s = tt[0];
+							mixin("alias "~tt~" T;");
+							if(bt is Type.get!T()){
+								static if(op=="is") bld.emit(mixin(`I.cmpis`~s));
+								else static if(op=="!is"){
+									bld.emit(mixin(`I.cmpis`~s));
+									bld.emit(I.notb);
+								}else static if(op=="==") bld.emit(mixin(`I.cmpe`~s));
+								else static if(op=="!=") bld.emit(mixin(`I.cmpne`~s));
+								else static if(op=="<") bld.emit(mixin(`I.cmpl`~s));
+								else static if(op=="<=") bld.emit(mixin(`I.cmple`~s));
+								else static if(op==">") bld.emit(mixin(`I.cmpg`~s));
+								else static if(op==">=") bld.emit(mixin(`I.cmpge`~s));
+								else static if(op=="<>"||op=="!<>"){
+									bld.emitDup(2*getBCSizeof(bt));
+									bld.emit(mixin(`I.cmpl`~s));
+									bld.emit(I.tmppush);
+									bld.emit(mixin(`I.cmpg`~s));
+									bld.emit(I.tmppop);
+									bld.emit(I.or);
+									static if(op=="!<>") bld.emit(I.notb);
+								}else static if(op=="<>="||op=="!<>="){
+									auto sz = getBCSizeof(bt);
+									bld.emitDup(sz);
+									bld.emit(mixin(`I.cmpe`~s));
+									bld.emit(I.tmppush);
+									bld.emitDup(sz);
+									bld.emit(mixin(`I.cmpe`~s));
+									bld.emit(I.tmppop);
+									bld.emit(I.and);
+									static if(op == "!<>=") bld.emit(I.notb);
+								}else static if(op=="!<"){
+									bld.emit(mixin(`I.cmpl`~s));
+									bld.emit(I.notb);
+								}else static if(op=="!<="){
+									bld.emit(mixin(`I.cmpl`~s));
+									bld.emit(I.notb);
+								}else static if(op=="!>="){
+									bld.emit(mixin(`I.cmpge`~s));
+									bld.emit(I.notb);
+								}else static if(op=="!>"){
+									bld.emit(mixin(`I.cmpg`~s));
+									bld.emit(I.notb);
+								}else static assert(0);
+								assert(!isLvalue);
+								return null;
+							}
 						}
 					}
+				}else static if(S==Tok!"is"||S==Tok!"!is"){
+					if(auto at=e1.type.isAggregateTy()){
+						assert(at.decl.isClassDecl(),"TODO: is for interfaces and value types");
+						assert(!!e2.type.isAggregateTy());
+						static if(S==Tok!"is") bld.emit(I.cmpep);
+						else bld.emit(I.cmpnep);
+						assert(!isLvalue);
+						return null;
+					}
 				}
+				assert(0, "TODO: '"~op~"' for "~e1.type.toString());
 			}else assert(0, "TODO: '"~op~"' for "~e1.type.toString());	// TODO: operators for all built-in types
 			static if(isAssignOp(S)){
 				if(!isLvalue){ strat.emitStoreKV(bld); return null; }
