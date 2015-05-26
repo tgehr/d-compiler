@@ -1,3 +1,27 @@
+void testPostFix2(){
+	static struct S{
+		S opUnary(string op)(){ return this; }
+	}
+	S s;
+	s++--; // TODO: better message
+}
+
+int testPostFix(){
+	static struct S{
+		int x;
+		this(int x){ this.x=x; } // // TODO: default construction
+		S opUnary(string op)(){mixin(op~"x;");return this;}
+	}
+	auto s=S(1);
+	auto t=s++;
+	assert(s.x==2&&t.x==1);
+	auto u=s--;
+	assert(s.x==1&&u.x==2);
+	return s++.x;
+}
+pragma(msg,"testPostFix: ",testPostFix());
+static assert(testPostFix()==1);
+
 struct BinOpUFCS{
 }
 auto opBinary(string op)(BinOpUFCS lhs,BinOpUFCS rhs){
