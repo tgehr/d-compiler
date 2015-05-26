@@ -4004,7 +4004,6 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 
 			// operator overloading with opBinary and opBinaryRight
 			static if(overloadableBinary.canFind(TokChars!S)){
-				// TODO: this allocates on every iteration
 				mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
 				      q{[LiteralExp.polyStringFactory(TokChars!S)]}));
 				mixin(BuildOpOver!("opoverload","e1","opBinary",
@@ -4056,8 +4055,13 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						opoverloadR=null;
 						mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
 						      q{[LiteralExp.polyStringFactory(TokChars!S)]}));
-						r=New!CallExp(opoverloadR,[e1]);
-						r.loc=loc;
+						auto tmpe=New!TmpVarExp(e1);
+						tmpe.loc=loc;
+						tmpe.semantic(sc);
+						assert(!!tmpe.sym);
+						auto c=New!CallExp(opoverloadR,[tmpe.sym]);
+						r=New!(BinaryExp!(Tok!","))(tmpe,c);
+						r.loc=c.loc=loc;
 					}else{
 						r=New!CallExp(oofun,[e2]);
 						r.loc=loc;
