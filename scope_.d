@@ -40,7 +40,7 @@ auto importKindFromSTC(STC stc){
 	return ImportKind.private_;
 }
 
-enum suspiciousDeclDesc = "smells suspicously fishy"; // "stinks" ? "is suspicous" ?
+enum suspiciousDeclDesc = "smells suspiciously fishy"; // "stinks" ? "is suspicious" ?
 
 abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
