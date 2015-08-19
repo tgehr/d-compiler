@@ -1355,10 +1355,10 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 	}
 
 	override bool isLvalue(){
-		return true;
+		return !!a.length; // slice expression is no lvalue
 	}
 
-	override @property string kind(){ return e.kind; }
+	override @property string kind(){ return a.length?"index expression":"slice"; }
 
 /+ // TODO (?)
 	static string __dgliteralRng(){
