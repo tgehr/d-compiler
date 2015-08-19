@@ -36,6 +36,10 @@ class SimpleErrorHandler: ErrorHandler{
 	}
 }
 
+enum underlineArrow  = "^";
+enum underlineStroke = "─";
+
+
 // TODO: remove code duplication
 
 class VerboseErrorHandler: ErrorHandler{
@@ -71,9 +75,9 @@ protected:
 	}
 	void highlight(int column, string rep){
 		foreach(i;0..column-1) stderr.write(" ");
-		stderr.write("^");
+		stderr.write(underlineArrow);
 		rep.popFront();
-		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");}
+		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write(underlineStroke);}
 		stderr.writeln();		
 	}
 }
@@ -91,9 +95,9 @@ protected:
 		if(isATTy(stderr)){
 			foreach(i;0..column-1) stderr.write(" ");
 			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
-			stderr.write(BOLD,GREEN,"^");
+			stderr.write(BOLD,GREEN,underlineArrow);
 			rep.popFront();
-			foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write("~");}
+			foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write(underlineStroke);}
 			stderr.writeln(RESET);
 		}else super.highlight(column, rep);
 	}
