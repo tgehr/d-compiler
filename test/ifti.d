@@ -175,10 +175,16 @@ struct TestMatchTemplateInstantiations{
 struct DefaultParamsNo{
 	auto exec(T)(T arg){
 		pragma(msg, T);
-		return arg(); // TODO: strip default params
+		return arg(); // error: strip default arguments
 	}
 	pragma(msg, exec((int x=2)=>x));
 	pragma(msg, exec((int x=3)=>x));
+
+	auto exec2(T,S)(T arg,S brg){
+		pragma(msg, T);
+		return arg[0](); // error: default arguments stripped
+	}
+	pragma(msg, exec2(cast(shared)cast(const)[(int x=2)=>x],2));
 }
 
 
