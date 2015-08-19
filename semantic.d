@@ -2286,6 +2286,14 @@ class TemplateInstanceDecl: Declaration{
 		if(tuplepos < params.length && !resolved[tuplepos])
 			resolved[tuplepos]=New!ExpTuple((Expression[]).init);
 
+		// strip default arguments from function types
+		foreach(i;0..params.length){
+			if(auto cur=resolved[i].maybe!(a=>a.isType())){
+				auto ncur=cur.stripDefaultArguments();
+				if(cur !is ncur) resolved[i]=ncur;
+			}
+		}
+		
 		alias util.any any;
 		if(any!(_=>_ is null)(resolved)) return false;
 
@@ -5201,8 +5209,8 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		type = tt.ret;
 
 		if(tt.params.length > args.length){
-			// //  TODO: this allocates rather heavily
-			// args ~= array(map!(_=>_.init.dup)(tt.params[args.length..$]);
+			// // TODO: this allocates rather heavily
+			// args ~= array(map!(_=>_.init.ddup)(tt.params[args.length..$]));
 			sc.error("default parameters not implemented yet",loc);
 			mixin(ErrEplg);
 		}
@@ -6908,6 +6916,7 @@ mixin template Semantic(T) if(is(T==Type)){
 	*/
 
 	Dependent!bool refConvertsTo(Type rhs, int num){
+		assert(rhs);
 		if(this is rhs) return true.independent;
 		if(num < 2){
 			if(auto d=rhs.isConstTy()) return refConvertsTo(d.ty.getTailConst(), 0);
@@ -6967,6 +6976,8 @@ mixin template Semantic(T) if(is(T==Type)){
 		if(rhs.isQualifiedTy()) return rhs.unify(this);
 		return combine(rhs);
 	}
+
+	Type stripDefaultArguments(){ return this; }
 
 	/* members
 	 */
@@ -7077,16 +7088,20 @@ mixin template Semantic(T) if(is(T==DelegateTy)){
 		foreach(x;["const","immutable","inout","shared"]){
 			r~= mixin(X!q{
 				override Type getTail@(upperf(x))(){
-					return ft.addQualifiers(STC@(x)).getDelegate(); // TODO: cache?
+					return ft.addQualifiers(STC@(x)).getDelegate();
 				}
 				override Type in@(upperf(x))Context(){
-					return ft.in@(upperf(x))Context().getDelegate(); // TODO: cache?
+					return ft.in@(upperf(x))Context().getDelegate();
 				}
 			});
 		}
 		return r;
 	}
 	mixin(__dgliteralQual());
+
+	override Type stripDefaultArguments(){
+		return ft.stripDefaultArguments().getDelegate();
+	}
 }
 mixin template Semantic(T) if(is(T==FunctionTy)){
 	Scope scope_;
@@ -7457,6 +7472,36 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		return modifyQualifiers!false(qual);
 	}
 
+	override FunctionTy stripDefaultArguments(){
+		if(strippedDefaultArguments) return strippedDefaultArguments;
+		// TODO: get rid of the allocation in the common case
+		Parameter stripParam(Parameter param){
+			assert(param.sstate==SemState.completed);
+			auto ntype=param.type.stripDefaultArguments();
+			assert(ntype.sstate==SemState.completed);
+			if(ntype!=param.type||param.init){
+				auto nparam=New!Parameter(param.stc,ntype,param.name,null);
+				nparam.type=ntype;
+				nparam.sstate=SemState.completed;
+				return nparam;
+			}
+			return param;
+		}
+		auto nret=ret.stripDefaultArguments();
+		auto nparams=params.map!stripParam.array; // TODO: allocation
+		import util: any;
+		if(nret !is ret || any!(a=>a[0]!is a[1])(zip(nparams,params))){
+			// (this should be a precondition, but with broken overriding semantics, why bother:)
+			assert(sstate==SemState.completed);
+			strippedDefaultArguments=New!FunctionTy(stc,nret,nparams,vararg);
+			strippedDefaultArguments.ret=nret;
+			strippedDefaultArguments.sstate=SemState.completed;
+			strippedDefaultArguments.strippedDefaultArguments=strippedDefaultArguments;
+		}else strippedDefaultArguments=this;
+		return strippedDefaultArguments;
+	}
+
+
 	// TODO: does this duplicate all that is relevant?
 	FunctionTy dup(){
 		auto res=New!FunctionTy(stc,rret,params,vararg);
@@ -7503,6 +7548,7 @@ private:
 	}
 
 	DelegateTy dgtype;
+	FunctionTy strippedDefaultArguments;
 
 	enum qualifiers = ["const","immutable","inout","nothrow","pure","shared",
 	                   "safe","trusted","system"];
@@ -7511,7 +7557,9 @@ private:
 		foreach(x; qualifiers) r~="FunctionTy cache_"~x~", cache_"~x~"_no;\n";
 		foreach(x; __traits(allMembers,InoutRes)[1..$])  r~="FunctionTy cache_inoutres_"~x~";";
 
-		r~="public void clearCaches(){ dgtype=null;"; // TODO: these are not all caches!
+		r~="public void clearCaches(){"; // TODO: these are not all caches!
+		r~="dgtype=null;";
+		r~="strippedDefaultArguments=null;";
 		foreach(x; qualifiers) r~="cache_"~x~"=null;cache_"~x~"_no=null;";
 		foreach(x; __traits(allMembers,InoutRes)[1..$]) r~="cache_inoutres_"~x~"=null;";
 		r~="}";
@@ -8018,6 +8066,10 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 		else return mixin(`ty.inInoutContext().get`~qual)();
 	}
 
+	override Type stripDefaultArguments(){
+		return mixin(`ty.stripDefaultArguments().get`~qual);
+	}
+
 private:
 	Type hunqualType;
 	Type unqualType;
@@ -8224,6 +8276,10 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 
 	override Type getUnqual(){
 		return mixin(`ty.getUnqual().`~puthead);
+	}
+
+	override Type stripDefaultArguments(){
+		return mixin(`ty.stripDefaultArguments().`~puthead);
 	}
 
 	override ulong getSizeof(){
