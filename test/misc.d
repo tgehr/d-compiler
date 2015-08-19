@@ -27,6 +27,12 @@ auto testcallCC(){
 
 // ok now
 
+int[] rejectSliceAppend(){
+	int[] a;
+	a[]~=2; // error
+	return a;
+}
+
 struct TestSeqReturn{
 	alias Seq(T...)=T;
 	Seq!(int, int) bar(){ return Seq!(1,2); }
