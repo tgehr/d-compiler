@@ -53,7 +53,7 @@ void main(){
 	shared(inout(const(int))) u7;
 
 	fuz(&kkk);
-	pragma(msg,mmo(1)); // TODO
+	pragma(msg,mmo(1));
 	foo(&kkk)+1="bar"; // error
 	//A!(a=>b);
 	int[] a; immutable int[] b;

@@ -143,7 +143,7 @@ class ConstrDeflt{
 }
 
 void testDeflt(){
-	auto c = new ConstrDeflt(); // TODO
+	auto c = new ConstrDeflt();
 }
 
 struct OvStatic{
