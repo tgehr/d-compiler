@@ -2658,13 +2658,13 @@ interface Tuple{
 
 	static VarDecl[] expandVars(Scope sc, VarDecl[] a) in{
 /+		alias util.all all;
-		assert(all!(_=>!_.rtype&&!_.init||_.sstate == SemState.completed)(a));+/
+		assert(all!(_=>!_.rtype&&!_.init||_.sstate.among(SemState.completed,SemState.error))(a));+/
 	}body{
 		// TODO: this is very naive and inefficient
 		VarDecl[] r;
 		typeof(r.length) index = 0;
 		foreach(i,x;a){
-			if(!x.type) continue;
+			if(!x.type||x.sstate==SemState.error) continue;
 			if(auto tp=x.type.isTypeTuple()){
 				assert(x.tupleContext && x.tupleContext.tupleAlias);
 				r~=a[index..i]~x.tupleContext.vds;
