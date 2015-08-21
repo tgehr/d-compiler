@@ -1,4 +1,26 @@
 
+struct DefaultArgumentsWithContext{
+	struct S{
+		int x;
+		int foo(int y=(()=>x)(),int z=bar()){ return y+bar(); } // TODO
+		int bar(){ return 1337; }
+	}
+	struct T{
+		int test(){
+			S s;
+			s.x=3;
+			int bar(S k=s){
+				return k.foo();
+			}
+			return bar();
+		}
+		pragma(msg, test());
+		
+		pragma(msg, S().foo());
+	}
+}
+
+
 alias immutable(char)[] string;
 
 void foo(int a, string b){}
