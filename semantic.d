@@ -5182,6 +5182,18 @@ mixin template Semantic(T) if(is(T==CallExp)){
 			mixin(ErrEplg);
 		}
 
+		// TODO: this might be somewhat fragile; make 'reset'
+		// a member function and implement manually where needed
+		static struct Reset{
+			void perform(Symbol self){
+				self.scope_=null;
+				self.sstate=SemState.begin;
+			}
+			void perform(Node self){
+				self.sstate=SemState.begin;
+			}
+		}
+
 		if(adapted is null)
 		foreach(i,x; tt.params[0..args.length]){
 			if(x.stc & STClazy){
@@ -5192,14 +5204,6 @@ mixin template Semantic(T) if(is(T==CallExp)){
 				auto dg = New!FunctionLiteralExp(ft,bs,FunctionLiteralExp.Kind.delegate_);
 				bs.loc = dg.loc = args[i].loc;
 				adapted[i] = dg;
-				// TODO: this is somewhat fragile
-				static struct Reset{
-					void perform(Symbol self){
-						self.scope_=null;
-						self.sstate=SemState.begin;
-					}
-					void perform(Node self){self.sstate = SemState.begin;}
-				}
 				runAnalysis!Reset(args[i]);
 			}
 		}
@@ -5209,10 +5213,13 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		type = tt.ret;
 
 		if(tt.params.length > args.length){
-			// // TODO: this allocates rather heavily
-			// args ~= array(map!(_=>_.init.ddup)(tt.params[args.length..$]));
-			sc.error("default parameters not implemented yet",loc);
-			mixin(ErrEplg);
+			// default arguments
+			import util: all;
+			assert(all!(a=>a.init !is null)(tt.params[args.length..$]));
+			// TODO: this allocates rather heavily
+			args ~= array(map!(a=>a.init.ddup)(tt.params[args.length..$]));
+			foreach(ref arg;args) runAnalysis!Reset(arg);
+			// TODO: replace 'this'-expressions suitably
 		}
 		foreach(i,x; tt.params[0..args.length]){
 			auto pty = x.type;
@@ -6882,7 +6889,7 @@ mixin template Semantic(T) if(is(T==Type)){
 
 	/* important for is-expressions and parameter matching:
 	   function, delegate and function pointer types cannot always
-	   be kept unique, since they may include default parameters
+	   be kept unique, since they may include default arguments
 	 */
 	bool equals(Type rhs){
 		return this is rhs;
