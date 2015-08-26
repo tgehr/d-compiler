@@ -5217,7 +5217,7 @@ mixin template Semantic(T) if(is(T==CallExp)){
 			import util: all;
 			assert(all!(a=>a.init !is null)(tt.params[args.length..$]));
 			// TODO: this allocates rather heavily
-			args ~= array(map!(a=>a.init.ddup)(tt.params[args.length..$]));
+			args~=map!(a=>a.init.ddup)(tt.params[args.length..$]).array;
 			foreach(ref arg;args) runAnalysis!Reset(arg);
 			// TODO: replace 'this'-expressions suitably
 		}
