@@ -40,14 +40,14 @@ auto importKindFromSTC(STC stc){
 	return ImportKind.private_;
 }
 
-enum suspiciousDeclDesc = "smells suspiciously fishy"; // "stinks" ? "is suspicious" ?
+enum suspiciousDeclDesc = "is invalid";
 
 abstract class Scope: IncompleteScope{ // SCOPE
 	abstract @property ErrorHandler handler();
 
 	protected void potentialAmbiguity(Identifier decl, Identifier lookup){
 		error(format("declaration of '%s' "~suspiciousDeclDesc, decl), decl.loc);
-		note(format("this lookup should have %s if it was valid", lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
+		note(format("this lookup should have %s otherwise", lookup.meaning?"resolved to it":"succeeded"), lookup.loc);
 	}
 
 	bool insert(Declaration decl)in{
