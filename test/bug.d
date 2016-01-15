@@ -1,5 +1,145 @@
 
 /+
+struct TemplateFunctionLiteralAlias{
+	alias id=(a)=>a;
+	static assert(id(1)==1 && id(2.5)==2.5);
+}
+
+auto foo(){ return foo(0); }
+int foo(int x){ return x; }
+
+bool bar(double x){ return true; }
+static if(bar(0)){ bool bar(int x){ return false; } }
++/
+
+/+struct DefaultArgsIFTI{
+static:
+	void previously(T=int)(T t=0){}
+	void now(T)(T t=0){}
+	alias Seq(T...)=T;
+	auto now2(T...)(T args=Seq!(1,2,3)){ return args; }
+	auto now3(T)(T[] arg=[1,2,3]){ return arg; }
+	auto now4(T)(T a=['h','i'],T b="123"){ }
+	auto now5(S,T...)(S delegate(T) dg=(int a,double b)=>"hi"){}
+	auto now6(T,R,S,U)(T x,S delegate(R) dg=(T a)=>a,U delegate(S)=x=>x){}
+	void main() {
+		previously();
+		// previously("hi"); // TODO: does it really make sense to error out here?
+		now();
+		//now2();
+		//now3();
+		//now4();
+		//now4(['h','i']);
+		//now5();
+		//now6("hi");
+	}
+}+/
+
+/+struct IFTiOverload{
+static:
+	template foo(){
+		auto foo(int x){}
+		auto foo(string y){}
+	}
+	pragma(msg, foo("hi")); // TODO
+}+/
+
+/+
+//import std.container;
+class RedBlackTree(T,alias less){
+	bool foo(int a,int b){
+		return less(a,b);
+	}
+}
+class C{
+	int[] prio;
+	this(int[] prio){
+		this.prio=prio;
+		tree=new typeof(tree)();
+		assert(tree.foo(1,0));
+	}
+	RedBlackTree!(int, (a,b)=>prio[a]<prio[b]) tree;
+} 
+void main(){
+	auto c=new C([3,1,2]);
+	//assert(c.tree.foo(0,2));
+}
+pragma(msg,main());
++/
+/+
+struct SPtr(T){
+    ptrdiff_t _offset;
+    void opAssign(T* orig) { _offset = cast(void*)orig - cast(void*)&this;}
+    inout(T)* _get()inout{ return cast(T*)((cast(void*)&this) + _offset);}
+    alias _get this;
+}
+
+auto sptr(alias init,alias var)(){ return typeof(var)(init.offsetof-var.offsetof); }
+
+struct S{
+	int x;
+	SPtr!int y=sptr!(x,y);
+}
++/
+
+
+/+ TODO: create a test out of this:
+import std.stdio;
+struct Test{
+    mixin(binOpProxy("+~+-~*--+++----*"));
+    void opBinary(string op : "+~+-~*--+++----*", T)(T rhs){
+        writeln("+~+-~*--+++----*");
+    }
+}
+
+void main(){
+    Test a,b;
+    a +~+-~*--+++----* b;
+}
+
+import std.string, std.algorithm, std.range;
+int operatorSuffixLength(string s){
+	int count(dchar c){ return 2-s.retro.countUntil!(d=>c!=d)%2; }
+	if(s.endsWith("++")) return count('+');
+	if(s.endsWith("--")) return count('-');
+	return 1;
+}
+struct TheProxy(T,string s){
+    T unwrap;
+    this(T unwrap){ this.unwrap=unwrap; }
+    static if(s.length){
+        alias NextType=TheProxy!(T,s[0..$-operatorSuffixLength(s)]);
+        alias FullType=NextType.FullType;
+		mixin(`
+        auto opUnary(string op : "`~s[$-operatorSuffixLength(s)..$]~`")(){
+            return NextType(unwrap);
+        }`);
+    }else{
+        alias FullType=typeof(this);
+    }
+}
+
+string binOpProxy(string s)in{
+	assert(s.length>=1+operatorSuffixLength(s));
+	assert(!s.startsWith("++"));
+	assert(!s.startsWith("--"));
+	foreach(dchar c;s)
+		assert("+-*~".canFind(c));
+}body{
+	int len=operatorSuffixLength(s);
+    return `
+        auto opUnary(string op:"`~s[$-len..$]~`")(){
+            return TheProxy!(typeof(this),"`~s[1..$-len]~`")(this);
+        }
+        auto opBinary(string op:"`~s[0]~`")(TheProxy!(typeof(this),"`~s[1..$-1]~`").FullType t){
+            return opBinary!"`~s~`"(t.unwrap);
+        }
+    `;
+}
++/
+
+
+/+
 
 struct S {
 	int delegate(dchar) dg = cast(void delegate(dchar))(dchar) { return 2; };

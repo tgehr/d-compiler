@@ -1,7 +1,7 @@
 struct IFTIInvalidTupleLength{
 static:
 	alias Seq(T...)=T;
-	auto test()(Seq!() args=Seq!(1,2,3)){ return args; }
+	auto test()(Seq!() args=Seq!(1,2,3)){ return args; } // TODO: should also show instantiation site
 	void main(){ test(); }
 }
 
