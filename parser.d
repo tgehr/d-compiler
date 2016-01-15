@@ -1191,7 +1191,6 @@ private struct Parser{
 		}
 	}
 
-	//@BUG!: Cannot parse C array parameters
 	//TODO: should isFunctionLiteral be a template parameter instead? Measure performance.
 	Parameter[] parseParameterList(out VarArgs vararg, bool isFunctionLiteral = false){
 		vararg=VarArgs.none;

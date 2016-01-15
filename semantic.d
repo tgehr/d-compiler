@@ -4684,13 +4684,6 @@ class Symbol: Expression{
 			type=Type.get!void();
 		}else if(auto ov=meaning.isOverloadSet()){
 			foreach(ref x; ov.decls) if(auto fd = x.isFunctionDecl()){
-				if(fd.type.hasUnresolvedReturn()){
-					fd.semantic(fd.scope_);
-					mixin(Rewrite!q{x});
-					mixin(CircErrMsg);
-					mixin(SemProp!q{sc=fd.scope_;x}); // TODO: depend just on type
-				}else fd.propagateSTC();
-
 				fd.analyzeType();
 				mixin(Rewrite!q{fd.type});
 				mixin(CircErrMsg);
@@ -4701,10 +4694,11 @@ class Symbol: Expression{
 				mixin(PropErr!q{fd.type});
 				assert(!fd.rewrite);
 			}
-			if(ov.count==1 && ov.decls.length){
+			if(ov.count==1 && ov.decls.length){ // TODO: why does this not bypass sealing?
 				if(auto fd=ov.decls[0].isFunctionDecl()){
 					meaning = fd;
-					type = fd.type; // TODO: at this point, we do not necessarily know if this type is right
+					needRetry = 1;
+					return semantic(sc);
 				}
 			}else foreach(ref x;ov.tdecls){
 				x.semantic(x.scope_);
