@@ -11967,7 +11967,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			if(!fd){
 				// if(!matchATemplate) continue; // TODO: do we want this?
 				if(inst.sstate != SemState.completed && inst.sstate != SemState.started){
-					if(inst.isGagged()) inst.ungag();
+					if(inst.isGagged()&&sc&&sc.handler.showsEffect()) inst.ungag();
 					inst.startAnalysis();
 					x.semantic(sc);
 				}
@@ -12033,7 +12033,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 			context = tcontext;
 			inst = r.extractTemplateInstance();
 			if(inst.sstate != SemState.completed && inst.sstate != SemState.started){
-				if(sc&&inst.isGagged) inst.ungag();
+				if(inst.isGagged()&&sc&&sc.handler.showsEffect) inst.ungag();
 				inst.startAnalysis();
 				inst.semantic(sc);
 			}
