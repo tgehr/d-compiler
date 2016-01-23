@@ -1,3 +1,23 @@
+struct Gag{
+	auto array(R)(R a){
+		typeof({foreach(x;a) return x;}())[] r;
+		foreach(x;a) r~=x;
+		return r;
+	}
+	auto joiner(R)(R a){
+		typeof({foreach(x;a) return x;}()) r;
+		foreach(x;a) r~=x;
+		return r;
+	}
+	auto collapse(R)(R r){
+		static if(is(typeof(joiner(r))))
+			return collapse(joiner(r));
+		else return r;
+	}
+	enum int[][][] a=[[[1],[2,3]],[[4,5],[6,7]],[[8],[9,10],[11]]];
+	pragma(msg,array(collapse(a)));
+}
+
 struct IFTIInvalidTupleLength{
 static:
 	alias Seq(T...)=T;
