@@ -4722,7 +4722,10 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 		// TODO: anonymous structs/unions etc.
 		indices = null;
 		foreach(vd;&updateLayoutTraversal){
-			if(vd.type !in indices) indices[vd.type]=index++;
+			if(vd.type !in indices){
+				assert(index<int.max);
+				indices[vd.type]=cast(int)(index++);
+			}
 			auto len = getBCSizeof(vd.type);
 			vd.setBCLoc(init, len);
 			if(maxl<len) maxl=len;
