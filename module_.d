@@ -20,15 +20,36 @@ string readCode(File f){
 string readCode(string path){ return readCode(File(path)); }
 
 class ModuleRepository{
-	private static string getActualPath(string path){
-		// TODO: search path
-		auto ext = path.extension;
-		if(ext=="") path = path.setExtension("d");
+	void addPath(string path)in{
+		debug assert(!searchPathFrozen);
+	}body{
+		searchPath~=path;
+	}
+
+	private string getActualPath(string path,bool package_){
+		auto spath = path;
+		auto ext = spath.extension;
+		if(ext=="") spath=spath.setExtension("d");
+		if(file.exists(spath)) return spath;
+		foreach(s;searchPath){
+			auto cand=buildPath(s,spath);
+			if(file.exists(cand))
+				return cand;
+		}
+		if(package_){
+			foreach(s;searchPath){
+				auto cand=buildPath(s,path,"package.d");
+				dw(cand);
+				if(file.exists(cand))
+					return cand;
+			}
+		}
 		return path;
 	}
 
-	Module getModule(string path, out string err){
-		path = getActualPath(path);
+	Module getModule(string path, bool package_, out string err){
+		debug searchPathFrozen=true;
+		path = getActualPath(path,package_);
 		auto ext = path.extension;
 		if(ext != ".d" && ext != ".di"){
 			err = path~": unrecognized extension: "~ext;
@@ -56,6 +77,8 @@ class ModuleRepository{
 
 private:
 	Module[string] modules;
+	string[] searchPath;
+	debug bool searchPathFrozen;
 }
 
 class Module: Declaration{

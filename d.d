@@ -11,10 +11,14 @@ import std.path;
 import module_, scheduler;
 
 bool isOption(string x){
-	return x.startsWith("--");
+	return x.startsWith("--")||x.startsWith("-I");
 }
 
-string applyOption(string x)in{assert(isOption(x));}body{
+string applyOption(ModuleRepository r,string x)in{assert(isOption(x));}body{
+	if(x.startsWith("-I")){
+		r.addPath(x[2..$]);
+		return null;
+	}
 	x=x[2..$];
 	switch(x){ // TODO: report DMD bug/update compiler
 		case "unittest":
@@ -41,7 +45,7 @@ int main(string[] args){
 	Module[] ms;
 	foreach(x; args){
 		if(!isOption(x)) continue;
-		if(auto err=applyOption(x)){
+		if(auto err=applyOption(r,x)){
 			stderr.writeln("error: ",err);
 			errors=true;
 		}
@@ -49,7 +53,7 @@ int main(string[] args){
 	foreach(x; args){
 		string err;
 		if(isOption(x)) continue;
-		auto m=r.getModule(x,err);
+		auto m=r.getModule(x,false,err);
 		if(m){
 			Scheduler().add(m, null);
 			ms~=m;

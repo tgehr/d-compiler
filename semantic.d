@@ -10208,7 +10208,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 			}else assert(0,text("TODO: ",e,typeid(e)));
 		}
 
-		path = computePath(symbols[0])~".d";
+		path = computePath(symbols[0]);
 	}
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -10221,7 +10221,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 		assert(!!cm);
 		auto repo = cm.repository;
 		string err;
-		auto m = repo.getModule(path, err);
+		auto m = repo.getModule(path, true, err);
 		if(!m){
 			if(err) sc.error(err, symbols[0].loc);
 			mixin(ErrEplg);

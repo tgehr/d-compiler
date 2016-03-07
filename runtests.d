@@ -191,7 +191,12 @@ auto getExpected(string source){
 }
 
 int[] getActual(string source){
-	auto output = shell("./d "~source~" 2>&1").splitLines;
+	auto fin=File(source,"r");
+	auto options=fin.readln();
+	if(options.startsWith("// options: "))
+		options=options["// options: ".length..$].strip()~" ";
+	else options="";
+	auto output = shell("./d "~options~source~" 2>&1").splitLines;
 	int[] result;
 	foreach(err;output.filter!(x=>x.canFind(": error"))){
 		while(err.startsWith("<mixin@")) err=err["<mixin@".length..$];
