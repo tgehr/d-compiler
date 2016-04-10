@@ -7904,7 +7904,9 @@ mixin template Semantic(T) if(is(T==ConstTy)||is(T==ImmutableTy)||is(T==SharedTy
 	}
 
 	override Dependent!bool implicitlyConvertsTo(Type rhs){
-		// TODO: reference types, otherwise
+		// TODO: aggregate types
+		if(cast(AggregateTy)this||cast(AggregateTy)rhs)
+			return super.implicitlyConvertsTo(rhs);
 		// getHeadUnqual never returns a qualified type ==> no recursion
 		return getHeadUnqual().implicitlyConvertsTo(rhs.getHeadUnqual());
 	}

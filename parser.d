@@ -2,6 +2,7 @@
 
 import std.algorithm, std.range, std.conv;
 import std.typetuple;
+import std.traits: EnumMembers;
 
 import lexer, operators, error, util;
 
