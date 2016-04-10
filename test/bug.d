@@ -1,4 +1,18 @@
 
+class S{
+	int[] s;
+}
+void foo(T)(T arg){
+	pragma(msg,T);
+}
+
+void main(){
+	S s;
+	const(S) t=s; // ok
+	S x=t; // error
+	foo!()(t); // TODO: ok
+}
+
 /+
 struct TemplateFunctionLiteralAlias{
 	alias id=(a)=>a;
