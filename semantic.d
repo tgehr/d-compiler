@@ -9268,7 +9268,7 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 								if(auto i=base.isIntegral()){
 									kind = i.isSigned()?kind.sintegral:kind.uintegral;
 								}else{
-									expErr("enum basetyu of switch expression type should be a built-in string or integral type");
+									expErr("enum base of switch expression type should be a built-in string or integral type");
 									e.sstate=SemState.error;
 								}
 							}
