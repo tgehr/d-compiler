@@ -1,6 +1,6 @@
 // Written in the D programming language.
 
-import std.conv;
+import std.conv, std.traits;
 import lexer;
 
 import std.algorithm : canFind;
