@@ -1,4 +1,6 @@
 
+
+/+
 class S{
 	int s;
 }
@@ -12,7 +14,7 @@ void main(){
 	S x=t; // error
 	foo!()(t); // TODO: ok
 }
-
++/
 /+
 struct TemplateFunctionLiteralAlias{
 	alias id=(a)=>a;

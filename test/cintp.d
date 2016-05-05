@@ -1,3 +1,20 @@
+struct CTFEFieldForwardReference{
+	static:
+	struct S{
+		T* a;
+		int* b;
+	}
+	S foo(){
+		S s;
+		s.a=null;
+		return s;
+	}
+	immutable x=foo();
+	
+	struct T{
+		int x;
+	}	
+}
 
 struct ManOrBoy{
 	static int a(int k, lazy int x1, lazy int x2, lazy int x3, lazy int x4, lazy int x5){
