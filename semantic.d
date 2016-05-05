@@ -7474,9 +7474,11 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 	}
 
 	override FunctionTy stripDefaultArguments(){
+		assert(sstate==SemState.completed);
 		if(strippedDefaultArguments) return strippedDefaultArguments;
 		// TODO: get rid of the allocation in the common case
 		Parameter stripParam(Parameter param){
+			if(!param.rtype && !param.init) return param; // parameter type yet to be deduced
 			assert(param.sstate==SemState.completed);
 			auto ntype=param.type.stripDefaultArguments();
 			assert(ntype.sstate==SemState.completed);
@@ -7497,6 +7499,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 			strippedDefaultArguments=New!FunctionTy(stc,nret,nparams,vararg);
 			strippedDefaultArguments.ret=nret;
 			strippedDefaultArguments.sstate=SemState.completed;
+			strippedDefaultArguments.scope_=scope_;
 			strippedDefaultArguments.strippedDefaultArguments=strippedDefaultArguments;
 		}else strippedDefaultArguments=this;
 		return strippedDefaultArguments;
