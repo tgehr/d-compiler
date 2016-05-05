@@ -651,7 +651,7 @@ void test2(){
 	auto a = [u,v];
 	static assert(is(typeof(a)==X[]));
 
-	auto b = [cu,cv];
+	auto b = [cu,cv]; // TODO
 	pragma(msg, typeof(b));
 	static assert(is(typeof(b)==const(X)[])); // TODO!
 }

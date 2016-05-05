@@ -1,6 +1,6 @@
 
 class S{
-	int[] s;
+	int s;
 }
 void foo(T)(T arg){
 	pragma(msg,T);
