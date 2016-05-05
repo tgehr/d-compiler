@@ -257,7 +257,6 @@ class Identifier: Symbol{
 		auto n=uniq.get(name,null);
 		if(n !is null) this.name = n;
 		else this.name = uniq[name] = name;
-		static int x = 0;
 	}
 	override string toString(){return !meaning?_brk(name):super.toString();}
 	override @property string kind(){return meaning?super.kind:"identifier";}
