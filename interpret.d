@@ -5442,6 +5442,8 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 	final size_t getBCLoc(ref size_t len){
 		// import std.stdio; writeln("l ",this," ",cast(void*)this," ", byteCodeStackLength," ", byteCodeStackOffset);
+		if(sstate!=SemState.completed)
+			throw new CTFERetryException(this); // TODO: make more efficient
 		len = byteCodeStackLength;
 		return byteCodeStackOffset;
 	}
