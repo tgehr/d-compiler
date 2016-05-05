@@ -67,7 +67,8 @@ auto summarize(Comparison[] comp){
 			case unexpected:
 				assert(c.info.error);
 				result.unexpectedErrors++;
-				writeln("REGRESSION AT LINE ",c.info.line);
+				if(c.info.line!=-1) writeln("REGRESSION AT LINE ",c.info.line);
+				else writeln("REGRESSION: AssertError");
 				break;
 			case missing:
 				if(c.info.todo){
@@ -198,12 +199,19 @@ int[] getActual(string source){
 	else options="";
 	auto output = shell("./d "~options~source~" 2>&1").splitLines;
 	int[] result;
-	foreach(err;output.filter!(x=>x.canFind(": error"))){
+	static bool isBad(string x){
+		if(x.canFind(": error")) return true;
+		if(x.startsWith("core.exception.AssertError"))
+			return true;
+		return false;
+	}
+	foreach(err;output.filter!isBad){
 		while(err.startsWith("<mixin@")) err=err["<mixin@".length..$];
 		if(err.startsWith(source~":")){
 			auto line = err[(source~":").length..$].parse!int;
 			result~=line;
-		}
+		}else if(err.startsWith("core.exception.AssertError"))
+			result~=-1;
 	}
 	result=result.sort.uniq.array;
 	return result;
