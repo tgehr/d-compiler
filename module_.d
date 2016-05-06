@@ -39,7 +39,6 @@ class ModuleRepository{
 		if(package_){
 			foreach(s;searchPath){
 				auto cand=buildPath(s,path,"package.d");
-				dw(cand);
 				if(file.exists(cand))
 					return cand;
 			}
