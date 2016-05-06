@@ -1,3 +1,7 @@
+// Written in the D programming language
+// Author: Timon Gehr
+// Licence: http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0
+
 import util;
 import expression; // : Node, Identifier
 import semantic, scope_;

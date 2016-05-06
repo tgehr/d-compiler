@@ -1,3 +1,9 @@
+// Written in the D programming language
+// Author: Timon Gehr
+// Licence: http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0
+
+// (This is a quick hack.)
+
 import std.stdio, std.file;
 import std.process, std.string, std.array;
 import std.algorithm, std.conv;

@@ -1,0 +1,12 @@
+Experimental D compiler frontend.
+
+Build
+=====
+Only builds with DMD 2.060 due to forward reference bugs in more recent versions.
+You might want to use https://github.com/jacob-carlborg/dvm
+dvm install 2.060; dvm use 2.060; make
+
+Test
+====
+dmd runtests
+./runtests

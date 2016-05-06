@@ -1,4 +1,6 @@
-// Written in the D programming language.
+// Written in the D programming language
+// Author: Timon Gehr
+// Licence: http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0
 
 import std.conv, std.traits;
 import lexer;
