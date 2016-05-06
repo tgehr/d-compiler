@@ -1,0 +1,65 @@
+* various forms of import statements
+- static, selective, renaming, ...
+
+* union declarations
+- Error on overlapping initialization
+
+* anonymous structs & unions
+- Analysis & Lowering
+
+* additional import paths & implicit object.d
+* implicit inheritance from Object
+* version declarations
+* Associative arrays/Associative array literals
+* module declarations
+* (implicit) super constructor calls
+- default constructor call insertion
+- flow analysis
+
+* Destructor and postblit calls
+- use flow analysis to optimize moves
+
+* with statements
+* foreach statements
+* built-in attributes
+- init, stringof, ...
+
+* pattern matching in old-style template constraints
+* declaration blocks
+-  eg. private { ... }
+
+* explicit casts from/to class references
+- eg. to/from void* and to bool
+
+* try-catch-finally statements
+* scope guards
+* initialization crossing check
+* struct postblit & destructors
+* finish operator overloading support
+
+* opDispatch
+* member alias declarations aliasing members
+- correctly provide a this pointer
+- finish support for alias to sequences of members
+
+* visibility
+- private, package
+- protected
+
+* optimize analysis
+- get rid of unneeded allocations
+- beat DMD analysis performance
+
+Meta:
+* investigate STCref problem
+
+
+
+DONE:
+* switch statements
+
+/+
+* alias this
+- implicit conversion
+- member lookup (can extend/reuse scope import functionality)
++/

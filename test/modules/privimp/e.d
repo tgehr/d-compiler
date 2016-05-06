@@ -1,0 +1,1 @@
+enum w = "visible from a.d";
