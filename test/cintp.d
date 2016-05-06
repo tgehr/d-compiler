@@ -1,3 +1,15 @@
+struct LazyVoidParam{
+	static:
+	void foo(lazy void x){ x; }	
+	int check(){
+		int x=2;
+		foo(++x);
+		return x;
+	}
+	pragma(msg, "LazyVoidParam: ",check());
+	static assert(check()==3);
+}
+
 struct CTFEFieldForwardReference{
 	static:
 	struct S{

@@ -5186,16 +5186,23 @@ mixin template Semantic(T) if(is(T==CallExp)){
 				self.sstate=SemState.begin;
 			}
 			void perform(Node self){
+				if(auto e=self.isExpression())
+					if(e.isType()) return;
 				self.sstate=SemState.begin;
 			}
 		}
-
 		if(adapted is null)
 		foreach(i,x; tt.params[0..args.length]){
 			if(x.stc & STClazy){
 				if(adapted is null) adapted = new Expression[args.length];
 				else if(adapted[i]) continue;
-				auto ft = New!FunctionTy(STC.init, args[i].type,cast(Parameter[])[],VarArgs.none);
+				auto vt=Type.get!void();
+				if(x.type.getHeadUnqual() is vt){
+					auto narg=New!CastExp(STC.init,vt,args[i]);
+					narg.loc=args[i].loc;
+					args[i]=narg;
+				}
+				auto ft = New!FunctionTy(STC.init,args[i].type,cast(Parameter[])[],VarArgs.none);
 				auto bs = New!BlockStm(cast(Statement[])[New!ReturnStm(args[i])]); // TODO: gc allocates []
 				auto dg = New!FunctionLiteralExp(ft,bs,FunctionLiteralExp.Kind.delegate_);
 				bs.loc = dg.loc = args[i].loc;
@@ -7334,6 +7341,8 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		foreach(i,p; params[0..len]){
 			if(!(p.stc & STCbyref)){
 				if(args[i].typeEquals(at[i])) continue;
+				if(p.stc&STClazy && at[i].getHeadUnqual() is Type.get!void())
+					continue;
 				mixin(ImplConvertsTo!q{bool iconv; args[i], at[i];});
 				if(!iconv){
 					match = Match.none;
@@ -7583,12 +7592,12 @@ mixin template Semantic(T) if(is(T==BasicType)){
 				r~=mixin(X!q{case Tok!"@(x)": r=Type.get!@(x)();break;});
 			return r~`default: assert(0);}`;
 		}());
-		assert(r !is this);
+		assert(r !is this,text(r));
 		mixin(RewEplg!q{r});
 	}
 
 	override Type checkVarDecl(Scope sc, VarDecl me){
-		if(op!=Tok!"void") return this;
+		if(op!=Tok!"void"||me.stc&STClazy) return this;
 		return checkVarDeclError(sc,me);
 	}
 
@@ -12311,6 +12320,8 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 					else sc.note("while matching function parameter",p.loc);
 				}
 				if(!(p.stc & STCbyref)){
+					if(p.stc&STClazy && at[i].getHeadUnqual() is Type.get!void())
+						continue;
 					auto iconvd = args[i].implicitlyConvertsTo(at[i]);
 					if(!iconvd.dependee && !iconvd.value){
 						if(args[i].sstate == SemState.error) continue;
