@@ -22,7 +22,7 @@ immutable toplevelSTC=protectionAttributes~["abstract","align","auto","auto ref"
 
 immutable protectionAttributes=["export","package","private","protected","public"];
 
-immutable attributeSTC=["property","safe","trusted","system","disable"];
+immutable attributeSTC=["property","safe","trusted","system","disable","nogc"];
 
 immutable functionSTC=["auto", "const","immutable","inout","nothrow","pure","shared","ref"];
 
@@ -230,6 +230,9 @@ private struct Parser{
 		if(code.errors.length&&code.errors[0].loc.rep.ptr==loc.rep.ptr) return; // don't re-report lexer errors
 		if(!loc.line) loc=tok.loc;
 		handler.error(err,loc);
+	}
+	void note(string note,Location loc){
+		handler.note(note,loc);
 	}
 	auto saveState(){muteerr++; return code.pushAnchor();} // saves the state and mutes all error messages until the state is restored
 	void restoreState(Anchor state){
@@ -463,7 +466,7 @@ private struct Parser{
 				STC stc;
 				Expression tt=null;
 				if(ttype!=Tok!")"){
-					stc=parseSTC!toplevelSTC();
+					stc=parseSTC!toplevelSTC().stc; // TODO: don't accept nonsensical storage classes
 					if(ttype!=Tok!")") tt=parseType();
 				}
 				expect(Tok!")");
@@ -719,7 +722,7 @@ private struct Parser{
 				do{
 					auto stc=STC.init;
 					if(ttype==Tok!"ref") stc=STCref;
-					stc|=parseSTC!toplevelSTC();
+					stc|=parseSTC!toplevelSTC().stc; // TODO: record deprecation message
 					Expression type;
 					TokenType tt;
 					Location loc=tok.loc;
@@ -925,7 +928,7 @@ private struct Parser{
 					nextToken();
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
-					STC stc=parseSTC!functionSTC();
+					STC stc=parseSTC!functionSTC().stc; // TODO: what about the deprecation message?
 					tt=New!PointerTy(New!FunctionTy(stc,tt,params,vararg));
 					tt.loc=loc.to(ptok.loc);
 					continue;
@@ -934,7 +937,7 @@ private struct Parser{
 					nextToken();
 					VarArgs vararg;
 					auto params=parseParameterList(vararg);
-					STC stc=parseSTC!functionSTC();
+					STC stc=parseSTC!functionSTC().stc; // TODO: what about the deprecation message?
 					tt=New!DelegateTy(New!FunctionTy(stc,tt,params,vararg));
 					tt.loc=loc.to(ptok.loc);
 					continue;
@@ -1041,17 +1044,22 @@ private struct Parser{
 			return parseExpression(rbp!(Tok!","));
 		}
 	}
-	STC parseSTC(alias which,bool properties=true)(){
+	static struct STCres{
+		STC stc;
+		Expression depMsg;
+	}
+	STCres parseSTC(alias which,bool properties=true)(){
 		STC stc,cstc;
+		Expression depMsg;
 	readstc: for(;;){
 			switch(ttype){
 				mixin({string r;
 					foreach(x;which){
 						if(x=="auto ref") continue;
-						else r~="case Tok!\""~x~"\": "~(typeQualifiers.canFind(x)?"if(peek().type==Tok!\"(\") break readstc;":"")~
-							     (x=="auto"&&(cast(immutable(char[])[])which).canFind("auto ref")?
-							      "if(peek().type!=Tok!\"ref\") cstc=STCauto;else{nextToken();cstc=STCautoref;}":
-							      "cstc=STC"~x)~";"~"goto Lstc;";
+						r~="case Tok!\""~x~"\": "~(typeQualifiers.canFind(x)?"if(peek().type==Tok!\"(\") break readstc;":"")~
+							(x=="auto"&&(cast(immutable(char[])[])which).canFind("auto ref")?
+							 "if(peek().type!=Tok!\"ref\") cstc=STCauto;else{nextToken();cstc=STCautoref;}":
+							 "cstc=STC"~x)~";"~"goto Lstc;";
 					}
 					return r;}());
 				static if(properties){
@@ -1064,15 +1072,28 @@ private struct Parser{
 						}
 				}
 				Lstc:
-				    if(stc&cstc) error("redundant storage class "~tok.name);
+					if(stc&cstc&&(cstc!=STCdeprecated||peek().type!=Tok!"("||!depMsg))
+						error("redundant storage class "~tok.name);
 					stc|=cstc;
 					nextToken();
+					if(cstc==STCdeprecated){
+						if(ttype==Tok!"("){
+							nextToken();
+							auto newDepMsg=parseExpression();
+							expect(Tok!")");
+							if(depMsg){
+								error("conflicting deprecation messages",newDepMsg.loc);
+								note("previous deprecation message is here",depMsg.loc);
+							}
+							depMsg=newDepMsg;
+						}
+					}
 					break;
 				default:
 					break readstc;
 			}
 		}
-		return stc;
+		return STCres(stc,depMsg);
 	}
 	bool skipSTC(alias which,bool properties=true)(){
 		bool ret=false;
@@ -1114,7 +1135,7 @@ private struct Parser{
 		Declaration d;
 		scope(success) if(d) d.loc=begin.to(ptok.loc);
 		STC nstc, ostc=stc; // hack to make alias this parsing easy. TODO: refactor a little
-		stc|=nstc=parseSTC!toplevelSTC();
+		stc|=nstc=parseSTC!toplevelSTC().stc; // TODO: record deprecation message
 		bool needtype=ttype!=Tok!"this" && (ttype!=Tok!"~"||peek().type!=Tok!"this") && ttype!=Tok!"invariant";
 		if(ttype==Tok!"alias"){
 			nextToken();
@@ -1183,7 +1204,7 @@ private struct Parser{
 		else{
 			Location loc=tok.loc;
 			Expression type,init;
-			auto stc=parseSTC!toplevelSTC();
+			auto stc=parseSTC!toplevelSTC().stc; // TODO: deprecation message
 			if(!stc||ttype!=Tok!"i") type=parseType();
 			auto name=parseIdentifier();
 			if(ttype!=Tok!"="){expectErr!"initializer for condition"(); skipToUnmatched(); return New!ErrorExp();}
@@ -1207,7 +1228,7 @@ private struct Parser{
 			if(ttype==Tok!")") break;
 			else if(ttype==Tok!"..."){vararg=VarArgs.cStyle; nextToken(); break;}
 			Location loc=tok.loc;
-			stc=parseSTC!(parameterSTC, false)(); // false means no @attributes allowed
+			stc=parseSTC!(parameterSTC, false)().stc; // false means no @attributes allowed. TODO: deprecation message?
 
 			if(isFunctionLiteral && ttype==Tok!"i"){
 				auto ptype = peek().type;
@@ -1290,7 +1311,7 @@ private struct Parser{
 		if(ttype==Tok!"(" && peekPastParen().type==Tok!"(") nextToken(), tparam=parseTemplateParameterList(), expect(Tok!")"), isTemplate=true;
 		params=parseParameterList(vararg);
 		isspecial:
-		stc|=parseSTC!functionSTC();
+		stc|=parseSTC!functionSTC().stc; // TODO: deprecation message
 		if(isTemplate) constr=parseOptTemplateConstraint();
 		CompoundStm pre, post, bdy;
 		Identifier pres;
@@ -1350,7 +1371,7 @@ private struct Parser{
 			nextToken();
 			if(ttype!=Tok!"(" && ttype!=Tok!"{") ret=parseType();
 		}
-		if(ttype==Tok!"(") params=parseParameterList(vararg,true), stc|=parseSTC!("auto ref"~functionSTC)();
+		if(ttype==Tok!"(") params=parseParameterList(vararg,true), stc|=parseSTC!("auto ref"~functionSTC)().stc; // TODO: deprecation message
 		CompoundStm bdy;
 		if(ttype != Tok!"=>") bdy=parseCompoundStm();
 		else{
@@ -1641,7 +1662,7 @@ private struct Parser{
 			mixin(getTTCases(cast(string[])toplevelSTC,["align", "enum", "extern","static"]));
 				STC nstc; // parseSTC might parse nothing in case it is actually a type constructor
 				enum STCs={string[] r; foreach(x;toplevelSTC) if(x!="align"&&x!="enum"&&x!="extern"&&x!="static") r~=x;return r;}();
-				stc|=nstc=parseSTC!STCs();
+				stc|=nstc=parseSTC!STCs().stc; // TODO: deprecation message
 				if(ttype==Tok!"{") return res=parseBlockDecl(stc);
 				else if(nstc) goto dispatch;
 				else goto default;
