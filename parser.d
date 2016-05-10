@@ -1575,10 +1575,13 @@ private struct Parser{
 		return r;
 		//return isTemplate ? New!TemplateAggregateDecl(stc,params,constraint,r) : r;
 	}
-	Expression parseVersionCondition(bool allowunittest=true){
+	Expression parseVersionCondition(bool allowspecial=true){
 		if(ttype==Tok!"i"){auto e=New!Identifier(tok.name); e.loc=tok.loc; nextToken(); return e;}
 		if(ttype==Tok!"0"||ttype==Tok!"0L"||ttype==Tok!"0U"||ttype==Tok!"0LU"){auto e=New!LiteralExp(tok); e.loc=tok.loc; nextToken(); return e;}
-		if(ttype==Tok!"unittest"&&allowunittest) return nextToken(), New!Identifier("unittest");
+		if(allowspecial){
+			if(ttype==Tok!"unittest") return nextToken(), New!Identifier("unittest");
+			if(ttype==Tok!"assert") return nextToken(), New!Identifier("assert");
+		}
 		expectErr!"condition"();
 		return New!ErrorExp();
 	}
