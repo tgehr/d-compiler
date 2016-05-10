@@ -52,6 +52,10 @@ class ModuleRepository{
 		debug searchPathFrozen=true;
 		path = getActualPath(path,package_);
 		auto ext = path.extension;
+		if(ext == ""){
+			path = path.setExtension(file.exists(ext~".di")?".di":".d");
+			ext = path.extension;
+		}
 		if(ext != ".d" && ext != ".di"){
 			err = path~": unrecognized extension: "~ext;
 			return null;
