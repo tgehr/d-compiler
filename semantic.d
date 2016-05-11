@@ -8157,6 +8157,7 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 				assert(0,format("cannot create array type for sequence '%s'", e));
 			}
 		}
+		assert(ty.sstate==SemState.completed,text(e," ",ty," ",e.sstate," ",ty.sstate," ",e.needRetry," ",ty.needRetry));
 		Type r;
 		static if(is(T==ArrayTy)) r=ty.getArray(length);
 		else r = mixin("ty.get"~T.stringof[0..$-2]~"()");
@@ -8394,7 +8395,22 @@ private:
 }
 
 mixin template Semantic(T) if(is(T==TypeofReturnExp)){
-	// TODO
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		auto fun=sc.getFunction();
+		if(!fun){
+			sc.error("'typeof(return)' must be inside function",loc);
+			mixin(ErrEplg);
+		}
+		fun.analyzeType();
+		if(fun.type.hasUnresolvedReturn()){
+			sc.error("'typeof(return)' cannot be used before return type is deduced",loc);
+			mixin(ErrEplg);
+		}
+		auto r=fun.type.ret;
+		if(!r) mixin(ErrEplg);
+		mixin(RewEplg!q{r});
+	}
 }
 
 mixin template Semantic(T) if(is(T==AggregateTy)){

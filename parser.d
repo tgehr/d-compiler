@@ -556,7 +556,7 @@ private struct Parser{
 			case Tok!"typeid": mixin(rule!(TypeidExp,"_","(",TypeOrExpression,")"));
 			case Tok!"typeof":
 				nextToken(); expect(Tok!"(");
-				if(ttype==Tok!"return"){nextToken(); expect(Tok!")"); return New!TypeofReturnExp();}
+				if(ttype==Tok!"return"){nextToken(); expect(Tok!")"); return res=New!TypeofReturnExp();}
 				mixin(doParse!(Expression,"e1",")"));
 				return res=New!TypeofExp(e1);
 			mixin({string r;
