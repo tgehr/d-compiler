@@ -1559,6 +1559,8 @@ private struct Parser{
 				if(type == Class) expectErr!"base class or interface"();
 				else expectErr!"base interfaces"();
 			}
+			if(isTemplate&&!constraint)
+				constraint=parseOptTemplateConstraint();
 		}
 		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : null;
 		if(!bdy){
