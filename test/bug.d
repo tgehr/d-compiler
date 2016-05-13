@@ -1,6 +1,50 @@
 
 
 /+
+struct S{
+	int* a;
+	T* b;
+	int* c;
+}
+struct T{
+	int x;
+	int y;
+}
+
+S x(){
+	S s;
+	s.b=new T();
+	s.b.x=3;
+	s.a=&s.b.x;
+	s.c=&s.b.y;
+	s.b.y=2;
+	return s;
+}
+immutable k=x();
+pragma(msg, k.a," ",k.c," ",k.b," ",*k.a," ",*k.c); // TODO: move somewhere else, this behaves as expected
++/
+
+/+
+struct StrangeInheritance1{
+	class A(T) if(is(T: A!T)){} // TODO
+	class B: A!B{}
+}
+
+struct StrangeInheritanc2{
+	class X{}
+	class A(T):X if(is(T: X)){} // TODO
+	class B: A!B{}
+}
+
+struct StrangeInheritance3{
+	class X{}
+	class A(T):X if(is(T: B!T)){}
+	class B(T): A!T if(is(T:X)){} // TODO
+	class C: B!C{}
+}
++/
+
+/+
 class S{
 	int s;
 }

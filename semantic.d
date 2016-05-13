@@ -8593,7 +8593,7 @@ mixin template Semantic(T) if(is(T==IfStm)){
 		mixin(SemChldPar!q{sc=tsc;s1});
 		if(s2){
 			if(!esc) esc = New!BlockScope(sc);
-			mixin(SemChldPar!q{sc=esc;s2});
+			mixin(SemChld!q{sc=esc;s2});
 		}
 		mixin(SemProp!q{sc=tsc;e});
 		mixin(SemProp!q{sc=tsc;s1});

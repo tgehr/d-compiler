@@ -1,3 +1,14 @@
+struct InvalidElse{
+	int bar(){
+		if(false) return 1;
+		else assert(0,1); // error
+	}
+	int foo(){
+		return bar(); // error
+	}
+	pragma(msg, foo());
+}
+
 struct LazyVoidParam{
 	static:
 	void foo(lazy void x){ x; }	

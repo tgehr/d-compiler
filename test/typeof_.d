@@ -1,6 +1,6 @@
 
 auto ret(){
-	typeof(return) x;
+	typeof(return) x; // error
 	return x;
 }
 
