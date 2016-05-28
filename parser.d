@@ -1622,7 +1622,9 @@ private struct Parser{
 				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"pragma":
 				mixin(rule!(PragmaDecl,Existing,"stc","_","(",PTuple,")",CondDeclBody)); // Body can be empty
-			case Tok!"import": return res=parseImportDecl(stc);
+			case Tok!"import":
+				if(flags&tryonly&&peek.type==Tok!"(") return null;
+				return res=parseImportDecl(stc);
 			case Tok!"enum":
 				auto x=peek(), y=peek(2);
 				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":" && y.type!=Tok!"(") goto default;

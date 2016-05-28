@@ -1,3 +1,17 @@
+/+
+auto eval(alias a,T...)(T args){
+	return a(args); // TODO: reverse eponymous template lookup for alias parameters
+}
+
+T foo(T)(T[] x){
+	return eval!foo(x[0]);
+}
+int foo(int x){
+	return x;
+}
+
+pragma(msg, foo([1]));
++/
 
 
 /+
