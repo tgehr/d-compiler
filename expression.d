@@ -353,6 +353,8 @@ class ImportExp: Expression{
 	Expression[] a;
 	this(Expression[] arg){a=arg;}
 	override string toString(){return _brk("import("~join(map!(to!string)(a),",")~")");}
+
+	mixin Visitors;
 }
 class AssertExp: Expression{
 	Expression[] a;

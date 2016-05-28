@@ -13,12 +13,16 @@ import std.path;
 import module_, scheduler;
 
 bool isOption(string x){
-	return x.startsWith("--")||x.startsWith("-I");
+	return x.startsWith("--")||x.startsWith("-I")||x.startsWith("-J");
 }
 
 string applyOption(ModuleRepository r,string x)in{assert(isOption(x));}body{
 	if(x.startsWith("-I")){
 		r.addPath(x[2..$]);
+		return null;
+	}
+	if(x.startsWith("-J")){
+		r.addJPath(x[2..$]);
 		return null;
 	}
 	x=x[2..$];

@@ -1551,6 +1551,56 @@ private:
 	}
 }
 
+mixin template Semantic(T) if(is(T==ImportExp)){
+	Expression aLeftover=null;
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		foreach(x;a) x.prepareInterpret();
+		mixin(SemChld!q{a});
+		if(a.length<1){
+			sc.error("missing file name for import expression", loc);
+			mixin(ErrEplg);
+		}else if(a.length>1){
+			sc.error("too many arguments for import expression", loc);
+			mixin(ErrEplg);
+		}
+		mixin(FinishDeductionProp!q{a[0]});
+		// TODO: this code is identical for MixinExp
+		int which;
+		Type[3] types = [Type.get!(const(char)[])(),
+		                 Type.get!(const(wchar)[])(),
+		                 Type.get!(const(dchar)[])()];
+		foreach(i,t;types) if(!which){
+			mixin(ImplConvertsTo!q{bool icd; a[0], t});
+			if(icd) which=cast(int)i+1;
+		}
+		if(!which){
+			sc.error("expected string argument for import expression", a[0].loc);
+			mixin(ErrEplg);
+		}
+		foreach(i,t; types) if(i+1==which)
+			mixin(ImplConvertTo!q{a[0],t});
+		assert(a[0].sstate == SemState.completed);
+
+		a[0].interpret(sc);
+		if(aLeftover) aLeftover.interpret(sc);
+		mixin(SemProp!q{a[0]});
+		if(aLeftover) mixin(SemProp!q{aLeftover});
+		auto file = a[0].interpretV().convertTo(Type.get!string()).get!string();
+		auto cm = sc.getModule();
+		auto repo = cm.repository;
+		string error=null;
+		auto str=repo.readFile(file,error);
+		if(error){
+			sc.error(error,a[0].loc);
+			mixin(ErrEplg);
+		}
+		auto r=LiteralExp.polyStringFactory(str);
+		r.loc=loc;
+		mixin(RewEplg!q{r});
+	}
+ }
+
 mixin template Semantic(T) if(is(T==AssertExp)){
 	Expression aLeftover=null;
 	override void semantic(Scope sc){
@@ -12707,10 +12757,10 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		mixin(SemChld!q{a});
 
 		if(a.length<1){
-			sc.error("missing arguments to string mixin", loc);
+			sc.error("missing argument for string mixin", loc);
 			mixin(ErrEplg);
-		}else if(a.length>2){
-			sc.error("too many arguments to string mixin", loc);
+		}else if(a.length>1){
+			sc.error("too many arguments for string mixin", loc);
 			mixin(ErrEplg);
 		}
 
@@ -12724,7 +12774,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 			if(icd) which=cast(int)i+1;
 		}
 		if(!which){
-			sc.error("expected string argument to string mixin", a[0].loc);
+			sc.error("expected string argument for string mixin", a[0].loc);
 			mixin(ErrEplg);
 		}
 		foreach(i,t; types) if(i+1==which)

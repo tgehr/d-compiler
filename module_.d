@@ -75,6 +75,33 @@ class ModuleRepository{
 		return r;
 	}
 
+	void addJPath(string jpath)in{
+		debug assert(!searchPathFrozen);
+	}body{
+		jSearchPath~=jpath;
+	}
+
+	string readFile(string path, out string err){
+		debug searchPathFrozen=true;
+		if(!jSearchPath.length){
+			err = "need -Jpath switch to import file '"~path~"'";
+			return null;
+		}
+		foreach(s;jSearchPath){
+			auto cand=buildPath(s,path);
+			if(!file.exists(cand)) continue;
+			string r;
+			try r=readCode(cand);
+			catch(Exception){
+				err = cand ~": error reading file";
+				return null;
+			}
+			return r;
+		}
+		err = path ~ ": no such file in a path specified with -J";
+		return null;
+	}
+	
 	bool hasErrors(){
 		foreach(_,m;modules) if(!m || m.sstate == SemState.error) return true;
 		return false;
@@ -83,6 +110,7 @@ class ModuleRepository{
 private:
 	Module[string] modules;
 	string[] searchPath;
+	string[] jSearchPath;
 	debug bool searchPathFrozen;
 }
 
