@@ -1609,10 +1609,6 @@ private struct Parser{
 				constraint=parseOptTemplateConstraint();
 		}
 		auto bdy=anonclass||ttype!=Tok!";" ? parseBlockDecl() : null;
-		if(!bdy){
-			if(type>=Class){expectErr!"members"(); return New!ErrorDecl();}
-			nextToken();
-		}
 		Declaration r=
 			type==Struct    ? New!StructDecl(stc,name,bdy)           :
 			type==Union     ? New!UnionDecl(stc,name,bdy)            :

@@ -316,7 +316,7 @@ class UnionDecl: ValueAggregateDecl{
 	mixin Visitors;
 }
 class ClassDecl: ReferenceAggregateDecl{
-	this(STC stc,Identifier name, Expression[] p, BlockDecl b)in{assert(!!b);}body{
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b){
 		super(stc,name,p,b);
 	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"class"~(name?" "~name.toString():"")~
@@ -328,7 +328,7 @@ class ClassDecl: ReferenceAggregateDecl{
 	mixin Visitors;
 }
 class InterfaceDecl: ReferenceAggregateDecl{
-	this(STC stc,Identifier name, Expression[] p, BlockDecl b)in{assert(!!b);}body{
+	this(STC stc,Identifier name, Expression[] p, BlockDecl b){
 		super(stc,name,p,b);
 	}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"interface"~(name?" "~name.toString():"")~

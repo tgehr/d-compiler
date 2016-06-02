@@ -5912,7 +5912,10 @@ mixin template Semantic(T) if(is(T==NewExp)){
 			if(!aggr.decl.isReferenceAggregateDecl())
 				type = type.getPointer();
 			if(auto iface=aggr.decl.isInterfaceDecl()){
-				sc.error(format("cannot create instance of interface '%s'",iface.name), loc);
+				sc.error(format("cannot create instance of interface '%s'",iface.name),loc);
+				mixin(ErrEplg);
+			}else if(!aggr.decl.bdy){
+				sc.error(format("cannot create instance of incomplete %s '%s'",aggr.decl.kind,aggr.decl.name),loc);
 				mixin(ErrEplg);
 			}
 			mixin(ResolveConstructor);
@@ -8463,6 +8466,7 @@ mixin template Semantic(T) if(is(T==TypeofReturnExp)){
 	}
 }
 
+
 mixin template Semantic(T) if(is(T==AggregateTy)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
@@ -8470,7 +8474,7 @@ mixin template Semantic(T) if(is(T==AggregateTy)){
 	}
 
 	override Type checkVarDecl(Scope sc, VarDecl me){
-		if(!decl.bdy){
+		if(!decl.isReferenceAggregateDecl()&&!decl.bdy){
 			if(me.name)
 				sc.error(format("%s '%s' has incomplete type '%s'", me.kind, me.name, this), me.loc);
 			else
@@ -10967,15 +10971,21 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			if(x.sstate == SemState.error) continue;
 			assert(x.sstate == SemState.completed);
 			auto ty = x.typeSemantic(sc);
-			if(ty){
+			static bool checkInheritance(Type ty, Scope sc, const ref Location loc){
 				auto agg = ty.isAggregateTy();
 				if(!agg && ty.sstate == SemState.completed ||
-				   agg&&!agg.decl.isReferenceAggregateDecl()){
-					sc.error("base specifier must name a class or interface",
-					         rparents[knownBefore+i].loc);
-					x = New!ErrorTy();
+				   agg && !agg.decl.isReferenceAggregateDecl()){
+					sc.error("base specifier must name a class or interface",loc);
+					return false;
 				}
+				if(agg && !agg.decl.bdy){
+					sc.error(format("base '%s' is incomplete",agg),loc);
+					return false;
+				}
+				return true;
 			}
+			if(ty && !checkInheritance(ty,sc,rparents[knownBefore+i].loc))
+				x = New!ErrorTy();
 		}
 		assert(parents.length==rparents.length,text(parents," ",rparents));
 	}
@@ -11033,7 +11043,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		}
 	Lvtbl:
 		enum SemRet = q{ return; };
-		foreach(decl; &bdy.traverseInOrder){
+		if(bdy) foreach(decl; &bdy.traverseInOrder){
 			if(auto fd = decl.isFunctionDecl()){
 				if(vtbl.has(fd)) continue;
 				mixin CreateBinderForDependent!("AddToVtbl");
@@ -11077,7 +11087,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		//mixin(PropRetry!q{parent});
 		mixin(FillShortcutScope!q{_;this});
 		mixin(PropErr!q{rparents});
-		foreach(decl; &bdy.traverseInOrder) mixin(PropErr!q{decl});
+		if(bdy) foreach(decl; &bdy.traverseInOrder) mixin(PropErr!q{decl});
 	}
 
 	// TODO: make resolution faster (?)
