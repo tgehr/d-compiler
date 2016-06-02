@@ -1141,44 +1141,85 @@ private struct Parser{
 			nextToken();
 			bool isaliasthis=ttype==Tok!"this";
 			Identifier i;
-			TemplateParameter[] tparams = null;
+			TemplateParameter[] tparams = null; bool isTemplate = false;
 			Expression tconstraint = null;
-
+			Declaration makeAliasDecl(){
+				Declaration r;
+				if(isaliasthis){
+					r=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!Identifier("this"),Expression.init));
+				}else{
+					assert(i);
+					r=New!AliasDecl(ostc,New!VarDecl(nstc,type,i,Expression.init));
+					if(isTemplate) r=wrapInTemplate(r, tparams, tconstraint);
+				}
+				assert(!!r);
+				return r;
+			}
 			if(isaliasthis&&peek.type==Tok!"=" ||
 			   ttype==Tok!"i"&&peek().type.among(Tok!"=",Tok!"(")
 			){
-				if(isaliasthis){nextToken(); nextToken(); }
-				else{
-					i=parseIdentifier();
-					if(ttype==Tok!"("){
-						nextToken();
-						tparams=parseTemplateParameterList();
-						expect(Tok!")");
-						tconstraint=parseOptTemplateConstraint();
-						expect(Tok!"=");
-					}else nextToken();
+				void parseAliasDeclarator(){
+					isaliasthis=ttype==Tok!"this";
+					if(isaliasthis){nextToken(); expect(Tok!"="); }
+					else{
+						i=parseIdentifier();
+						if(ttype==Tok!"("){
+							isTemplate=true;
+							nextToken();
+							tparams=parseTemplateParameterList();
+							expect(Tok!")");
+							tconstraint=parseOptTemplateConstraint();
+							expect(Tok!"=");
+						}else nextToken();
+					}
+					type=parseTypeOrExpression();
 				}
-				type=parseTypeOrExpression();
+				parseAliasDeclarator();
+				if(ttype==Tok!","){
+					auto decls=appender!(Declaration[])();
+					Location cbegin=begin;
+					d=makeAliasDecl();
+					d.loc=begin.to(ptok.loc);
+					decls.put(d);
+					while(ttype==Tok!","){
+						nextToken();
+						cbegin=tok.loc;
+						parseAliasDeclarator();
+						d=makeAliasDecl();
+						d.loc=cbegin.to(ptok.loc);
+					}
+					expect(Tok!";");
+					d=New!Declarators(decls.data);
+					return d;
+				}
 				expect(Tok!";");
+				d=makeAliasDecl();
 			}else{
 				type=parseType("symbol");
 				isaliasthis=ttype==Tok!"this";
-				if(isaliasthis) nextToken();
+				if(isaliasthis){
+					nextToken();
+					d=makeAliasDecl();
+					expect(Tok!";");
+				}else d=parseDeclarators(nstc,type,true,ostc);
 			}
-			if(isaliasthis){
-				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,New!Identifier("this"),Expression.init));
-				expect(Tok!";");
-			}else if(i){
-				d=New!AliasDecl(ostc,New!VarDecl(nstc,type,i,Expression.init));				
-				if(tparams) d=wrapInTemplate(d, tparams, tconstraint);
-			}else d=New!AliasDecl(ostc,parseDeclarators(nstc,type));
 			return d;
 		}
 		TokenType p;
 		if(needtype&&(!stc||(ttype!=Tok!"i" || (p=peek().type)!=Tok!"=" && p!=Tok!"("))) type=parseType("declaration");
 		if(cast(ErrorExp)type) return New!ErrorDecl();
-		if(!needtype||peek().type==Tok!"(") d=parseFunctionDeclaration(stc,type,begin);
-		else d=parseDeclarators(stc,type);
+		if(!needtype||peek().type==Tok!"("){
+			auto save=saveState();
+			nextToken(); nextToken();
+			skipToUnmatched(); nextToken();
+			bool isTemplateVar=ttype==Tok!"="; // TODO: if it is '(' reuse information in parseFunctionDeclaration
+			restoreState(save);
+			if(!isTemplateVar){
+				d=parseFunctionDeclaration(stc,type,begin);
+				return d;
+			}
+		}
+		d=parseDeclarators(stc,type);
 		return d;
 	}
 	bool skipDeclaration(){
@@ -1384,15 +1425,31 @@ private struct Parser{
 		}
 		return res=New!FunctionLiteralExp(New!FunctionTy(stc,ret,params,vararg),bdy,kind);
 	}
-	Declaration parseDeclarators(STC stc, Expression type){
-		if(peek().type==Tok!"[") return parseCArrayDecl(stc,type);
-		auto r=appender!(VarDecl[])();
+	Declaration parseDeclarators(STC stc, Expression type,bool isAlias=false,STC ostc=STC.init){
+		if(peek().type==Tok!"["){
+			Declaration v=parseCArrayDecl(stc,type);
+			if(isAlias){ auto l=v.loc; v=New!AliasDecl(ostc,v); v.loc=l; }
+			return v;
+		}
+		auto r=appender!(Declaration[])();
 		do{
 			Location loc=tok.loc;
 			auto name=parseIdentifier();
+			TemplateParameter[] tparams; bool isTemplate=false;
+			Expression tconstr;
+			if(!isAlias&&ttype==Tok!"("){
+				isTemplate=true;
+				nextToken();
+				tparams = parseTemplateParameterList();
+				expect(Tok!")");
+				tconstr = parseOptTemplateConstraint();
+				isTemplate=true;
+			}
 			Expression init;
 			if(ttype==Tok!"=") nextToken(), init=parseInitializerExp(false);
-			auto v=New!VarDecl(stc,type,name,init); v.loc=loc.to(ptok.loc);
+			Declaration v=New!VarDecl(stc,type,name,init); v.loc=loc.to(ptok.loc);
+			if(isAlias){ auto l=v.loc; v=New!AliasDecl(ostc,v); v.loc=l; }
+			if(isTemplate) v=wrapInTemplate(v,tparams,tconstr);
 			r.put(v);
 			if(ttype==Tok!",") nextToken();else break;
 		}while(ttype != Tok!";" && ttype != Tok!"EOF");
@@ -1446,17 +1503,6 @@ private struct Parser{
 		expect(Tok!"enum");
 		Identifier tag;
 		if(ttype==Tok!"i") tag=New!Identifier(tok.name), tag.loc=tok.loc, nextToken();
-		if(ttype==Tok!"("){
-			nextToken();
-			auto tparams = parseTemplateParameterList();
-			expect(Tok!")");
-			auto tconstr = parseOptTemplateConstraint();
-			expect(Tok!"=");
-			auto init=parseExpression();
-			expect(Tok!";");
-			VarDecl vd=New!VarDecl(stc|STCenum, null, tag, init);
-			return wrapInTemplate(vd, tparams, tconstr);
-		}
 		Expression base;
 		auto members=appender!(EnumVarDecl[])();
 		if(ttype==Tok!":") nextToken(), base = parseType();
@@ -1478,7 +1524,7 @@ private struct Parser{
 		expect(Tok!"}");
 		return New!EnumDecl(stc,tag,base,members.data);
 	}
-	TemplateParameter[] parseTemplateParameterList(){
+	TemplateParameter[] parseTemplateParameterList()out(r){ assert(!!r); }body{
 		auto r=appender!(TemplateParameter[])();
 		while(ttype!=Tok!")" && ttype!=Tok!"EOF"){
 			Location loc=tok.loc;
@@ -1627,7 +1673,7 @@ private struct Parser{
 				return res=parseImportDecl(stc);
 			case Tok!"enum":
 				auto x=peek(), y=peek(2);
-				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":" && y.type!=Tok!"(") goto default;
+				if(x.type!=Tok!"{" && x.type!=Tok!":" && x.type!=Tok!"i" || x.type==Tok!"i" && y.type!=Tok!"{" && y.type!=Tok!":") goto default;
 				return res=parseEnumDecl(stc);
 			case Tok!"mixin":
 				nextToken(); if(ttype==Tok!"("){mixin(rule!(MixinDecl,Existing,"stc","_",ArgumentList,")",";"));}

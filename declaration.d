@@ -397,15 +397,16 @@ class CArrayDecl: VarDecl{
 }
 
 class Declarators: Declaration{
-	VarDecl[] decls;
-	this(VarDecl[] declarations)in{assert(declarations.length>1);foreach(x;declarations) assert(x.type is declarations[0].type);}body{
+	Declaration[] decls;
+	this(Declaration[] declarations){//in{assert(declarations.length>1);foreach(x;declarations) assert(x.type is declarations[0].type);}body{
 		decls=declarations;super(STC.init,null);
 	}
 	override string toString(){
-		string r=(decls[0].stc?STCtoString(decls[0].stc)~" ":"")~(decls[0].type?decls[0].type.toString()~" ":"");
+		return decls.map!(a=>a.toString()).join;
+		/+string r=(decls[0].stc?STCtoString(decls[0].stc)~" ":"")~(decls[0].type?decls[0].type.toString()~" ":"");
 		//return r~join(map!((a){return a.name.toString();})(decls),","); // WTF???
 		foreach(x;decls[0..$-1]) r~=x.name.toString()~(x.init?"="~x.init.toString():"")~",";
-		return r~decls[$-1].name.toString()~(decls[$-1].init?"="~decls[$-1].init.toString():"")~";";
+		return r~decls[$-1].name.toString()~(decls[$-1].init?"="~decls[$-1].init.toString():"")~";";+/
 	}
 	mixin Visitors;
 }
