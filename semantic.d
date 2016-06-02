@@ -7595,24 +7595,23 @@ private:
 			}
 		}
 		diffq&=-diffq;
-		switch(diffq){
-			foreach(x; ToTuple!qualifiers){
-				enum s=mixin("STC"~x);
-				enum i="cache_"~x~(add?"":"_no");
-				enum irev = i~".cache_"~x~(add?"_no":"");
-				// alias ID!(mixin(i)) cache; // wut?
-				case s:
-					if(!mixin(i)){
-						mixin(i) = dup();
-						static if(add) mixin(i).stc|=s;
-						else mixin(i).stc&=~s;
-						mixin(irev)=this;
-					}
-					return mixin(i).modifyQualifiers!add(qual);
+		//switch(diffq){ // wtf. DMD codegen bug?
+		foreach(x; ToTuple!qualifiers){
+			enum s=mixin("STC"~x);
+			enum i="cache_"~x~(add?"":"_no");
+			enum irev = i~".cache_"~x~(add?"_no":"");
+			// alias ID!(mixin(i)) cache; // wut?
+			if(diffq==s){ // case s:
+				if(!mixin(i)){
+					mixin(i) = dup();
+					static if(add) mixin(i).stc|=s;
+					else mixin(i).stc&=~s;
+					mixin(irev)=this;
+				}
+				return mixin(i).modifyQualifiers!add(qual);
 			}
-			default: assert(0, STCtoString(diffq));
 		}
-
+		/+default: +/assert(0, STCtoString(diffq));//}
 	}
 
 	DelegateTy dgtype;
@@ -7624,7 +7623,6 @@ private:
 		string r;
 		foreach(x; qualifiers) r~="FunctionTy cache_"~x~", cache_"~x~"_no;\n";
 		foreach(x; __traits(allMembers,InoutRes)[1..$])  r~="FunctionTy cache_inoutres_"~x~";";
-
 		r~="public void clearCaches(){"; // TODO: these are not all caches!
 		r~="dgtype=null;";
 		r~="strippedDefaultArguments=null;";

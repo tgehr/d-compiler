@@ -16,7 +16,7 @@ private immutable arrLbp=mixin({string r="[";foreach(t;EnumMembers!TokenType) r~
 
 
 
-enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"scope","shared","static","synchronized"]; // ref and auto ref taken to the front for easier handling by STCtoString
+enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"return","scope","shared","static","synchronized"]; // ref and auto ref taken to the front for easier handling by STCtoString
 
 immutable toplevelSTC=protectionAttributes~["abstract","align","auto","auto ref","const","deprecated","enum","extern","final","immutable","inout","shared","nothrow","override","pure","__gshared","ref","scope","static","synchronized"]; // TODO: protection attributes must always come first!
 
@@ -26,7 +26,7 @@ immutable attributeSTC=["property","safe","trusted","system","disable","nogc"];
 
 immutable functionSTC=["auto", "const","immutable","inout","nothrow","pure","shared","ref"];
 
-immutable parameterSTC=["auto","const","final","immutable","in","inout","lazy","out","ref","scope","shared"];
+immutable parameterSTC=["auto","const","final","immutable","in","inout","lazy","out","ref","return","scope","shared"];
 
 enum typeQualifiers=["const","immutable","shared","inout"];
 
