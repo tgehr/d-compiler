@@ -6306,12 +6306,22 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				}
 				if(sym.meaning.needsAccessCheck(accessCheck)){
 					needRetry=false;
-					thisCheck(sc, this_, thisType);
+					auto newThis_=this_;
+					thisCheckAndRebind(sc, newThis_, thisType);
 					mixin(SemCheck);
-					if(!this_){
+					if(!newThis_){
 						sym.accessCheck=accessCheck;
 						sym.performAccessCheck();
 						mixin(SemProp!q{sym});
+					}
+					if(this_ && newThis_ !is this_){
+						auto b = New!(BinaryExp!(Tok!"."))(newThis_,e2);
+						b.loc = loc;
+						auto r = New!(BinaryExp!(Tok!","))(this_,b);
+						r.loc = loc;
+						transferContext(r);
+						r.semantic(sc);
+						mixin(RewEplg!q{r});
 					}
 					goto Lok;
 				}
@@ -6475,7 +6485,16 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	/* given that 'this' of type thisType is required, check if
 	   this_ can be used as the 'this' pointer
 	 */
-	private void thisCheck(Scope sc,Expression this_, Type thisType){
+	private void thisCheckAndRebind(Scope sc,ref Expression this_, Type thisType){
+		bool tryRebind(){
+			auto thisExp=New!ThisExp(); // TODO: ensure this only happens once per symbol
+			thisExp.loc=loc;
+			thisExp.semantic(New!GaggingScope(sc));
+			assert(util.among(thisExp.sstate,SemState.error,SemState.completed));
+			if(thisExp.sstate==SemState.error) return false;
+			this_=thisExp;
+			return true;
+		}
 		auto ttu = thisType.getUnqual();
 		if(!this_){
 			// statically bound calls to virtual member functions
@@ -6494,20 +6513,28 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				mixin(IsDeclAccessible!q{bool acc; Declaration, decl, sym.meaning});
 				if(acc) goto Lok;
 			}
-			// error message duplicated in Symbol.semantic
-			sc.error(format("need 'this' to access %s '%s'",
-			                e2.meaning?e2.kind:"member",e2.loc.rep),loc);
-			if(e2.meaning) sc.note(format("%s was declared here",e2.kind),e2.meaning.loc);
-			mixin(ErrEplg);
+			tryRebind();
+			if(!this_){
+				// error message duplicated in Symbol.semantic
+				sc.error(format("need 'this' to access %s '%s'",
+				                e2.meaning?e2.kind:"member",e2.loc.rep),loc);
+				if(e2.meaning) sc.note(format("%s was declared here",e2.kind),e2.meaning.loc);
+				mixin(ErrEplg);
+			}
 		}
 		// successfully resolved non-tuple field expression that
 		// requires 'this'
 		auto etu = this_.type.getUnqual();
 		mixin(RefConvertsTo!q{bool conv; etu, ttu, 0});
 		if(!conv){
-			sc.error(format("need 'this' of type '%s' to access %s '%s'",
-			                thisType.toString(),e2.kind,e2.loc.rep),loc);
-			mixin(ErrEplg);
+			tryRebind();
+			etu=this_.type.getUnqual();
+			mixin(RefConvertsTo!q{bool conv2; etu, ttu, 0});
+			if(!conv2){
+				sc.error(format("need 'this' of type '%s' to access %s '%s'",
+				                thisType.toString(),e2.kind,e2.loc.rep),loc);
+				mixin(ErrEplg);
+			}
 		}
 	Lok:;
 	}
@@ -6599,14 +6626,14 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				case "ptr":
 					type = elt.getPointer();
 					if(accessCheck != AccessCheck.none){
-						thisCheck(sc, this_, ty);
+						thisCheckAndRebind(sc, this_, ty);
 						return true;
 					}
 					goto Lnorewrite;
 				case "length":
 					type = Type.get!Size_t();
 					if(accessCheck != AccessCheck.none){
-						thisCheck(sc, this_, ty);
+						thisCheckAndRebind(sc, this_, ty);
 						return true;
 					}
 					goto Lnorewrite;
