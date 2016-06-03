@@ -180,7 +180,7 @@ immutable reservedVersions={
 }();
 //pragma(msg, reservedVersions);
 import std.algorithm,std.array;
-static assert(sort(reservedVersions.map!(x=>x[]).array)==sort(import("predefinedversions").split('\n').array));
+static assert(sort(reservedVersions.map!(x=>x[]).array)==sort(import("reservedversions").split('\n').array));
 //pragma(msg,sort(reservedVersions.map!(x=>x[]).array).setDifference(sort(import("predefinedversions").split('\n').array)).array);
 //pragma(msg,sort(import("predefinedversions").split('\n').array).setDifference(sort(reservedVersions.map!(x=>x[]).array)).array);
 
