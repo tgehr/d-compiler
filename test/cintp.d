@@ -417,7 +417,7 @@ int testStructMemberAliasParam(){
 	struct S{
 		int y;
 		void bar(int x){ foo!((ref a)=>a=x)(); }
-		void foo(alias a)(){ a(x); } // TODO
+		void foo(alias a)(){ a(x); }
 		void baz(alias a)(){ a(y); }
 	}
 	S s;

@@ -51,13 +51,13 @@ pragma(msg, fun());
 auto hun(){
 	struct S{ int x; }
 
-	auto foo(alias a)(){a=2;} // error
+	auto foo(alias a)(){a=2;}
 	S s;
 	with(s){
 		foo!x(); // ok
 	}
 	with(S){
-		foo!x();
+		foo!x(); // error // TODO: better error message
 	}
 }
 

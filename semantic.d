@@ -2048,12 +2048,10 @@ class TemplateInstanceDecl: Declaration{
 	private bool determineInstanceScope()in{
 		assert(paramScope && paramScope.parent is paramScope.iparent);
 	}body{
-		if(!(parent.stc&STCstatic)) return false; // TODO: fix!
-
 		Scope instanceScope = parentScope;
 		bool removeStatic = false;
 
-		int maxn = -1;
+		int maxn = parentScope.getFrameNesting();
 		foreach(i,x;args){
 			Declaration decl = null;
 			if(auto addr=x.isAddressExp()) x=addr.e; // delegate literals
