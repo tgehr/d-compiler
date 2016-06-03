@@ -1,3 +1,18 @@
+struct CommaExpCall{
+	static:
+	struct A{
+		int fun(){ return 0;}
+		int gun(){ return 1; }
+		int[] bar(){
+			int[] r;
+			r~=(0,this.fun)();
+			return r;
+		}
+	}
+	pragma(msg, "CommaExpCall: ",A().bar());
+	static assert(A().bar()==[0]);
+}
+
 struct InvalidElse{
 	int bar(){
 		if(false) return 1;

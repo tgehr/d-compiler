@@ -5759,10 +5759,15 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 mixin template CTFEInterpret(T) if(is(T==CallExp)){
 	private void emitCall(ref ByteCodeBuilder bld){
 		bool ctx = false;
-		if(auto s = fun.isSymbol())if(auto m = s.meaning)
-			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
-		if(auto f = fun.isFieldExp())if(auto m = f.e2.meaning)
-			if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
+		void findCtx(Expression fun){
+			if(auto s = fun.isSymbol())if(auto m = s.meaning)
+				if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
+			if(auto f = fun.isFieldExp())if(auto m = f.e2.meaning)
+				if(m.isFunctionDecl()&&!(m.stc&STCstatic)) ctx=true;
+			if(auto c = fun.isCommaExp())
+				findCtx(c.e2);
+		}
+		findCtx(fun);
 		auto tt=fun.type.getHeadUnqual();
 		if(!ctx && tt.isDelegateTy()) ctx = true;
 
@@ -5775,7 +5780,6 @@ mixin template CTFEInterpret(T) if(is(T==CallExp)){
 			assert(cast(DelegateTy)tt);
 			ft=(cast(DelegateTy)cast(void*)tt).ft;
 		}
-
 		fun.byteCompile(bld);
 		ulong numargs = ctx ? bcPointerBCSize : 0;
 		if(args.length){
