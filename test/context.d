@@ -2,19 +2,19 @@ struct TestContextInference{
 	static:
 	int f(alias x)(){ return 0; }
 	int g(alias x)(){ return x; }
-	int h(A...)(){ return A[0]; } // TODO
+	int h(A...)(){ return A[0]; }
 	struct S{
 		int x;
-		enum a = f!x();
+		enum a = f!x(); // ok
 		enum b = g!x(); // error
-		enum c = h!x(); // TODO: error
+		enum c = h!x(); // error
 	}
 	struct T {
 		int x=2;
 		static int foo(){
 			auto a = f!x(); // ok
 			auto b = g!x(); // error
-			auto c = h!x(); // TODO: error
+			auto c = h!x(); // error
 			return a;
 		}
 		static int bar(){

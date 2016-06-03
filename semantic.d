@@ -631,7 +631,11 @@ mixin template Semantic(T) if(is(T==Expression)){
 			if(s.accessCheck<accessCheck){
 				s.accessCheck = accessCheck;
 				static struct ResetSstate{
-					void perform(Expression e){ e.sstate = SemState.begin; }
+					void perform(Expression e){
+						if(e.sstate==SemState.error) return;
+						e.sstate = SemState.begin;
+						assert(!e.rewrite);
+					}
 				}
 				runAnalysis!ResetSstate(this);
 				semantic(sc);
@@ -645,7 +649,7 @@ mixin template Semantic(T) if(is(T==Expression)){
 
 	bool isUnique(){ return false; }
 
-	Expression clone(Scope sc, InContext inContext, const ref Location loc)in{
+	Expression clone(Scope sc, InContext inContext, AccessCheck accessCheck, const ref Location loc)in{
 		assert(sstate == SemState.completed);
 	}body{
 		Expression r;
@@ -1821,10 +1825,10 @@ mixin template Semantic(T) if(is(T _==UnaryExp!S,TokenType S)){
 
 	// this is necessary to make template delegate literals work correctly
 	// the scope of the symbol must be adjusted
-	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
+	override Expression clone(Scope sc, InContext inContext, AccessCheck accessCheck, const ref Location loc){
 		auto ctx=InContext.addressTaken;
 		if(inContext==inContext.fieldExp) ctx=inContext;
-		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,ctx,loc));
+		auto r=New!(UnaryExp!(Tok!"&"))(e.clone(sc,ctx,accessCheck,loc));
 		r.loc = loc;
 		r.semantic(sc);
 		return r;
@@ -2633,7 +2637,7 @@ interface Tuple{
 					static if(isarray){
 						auto exprs=et.exprs.array;
 						foreach(ref exp;exprs){
-							exp=exp.clone(sc,InContext.none,et.loc);
+							exp=exp.clone(sc,InContext.none,accessCheck,et.loc);
 							exp.checkAccess(sc, accessCheck);
 						}
 						static if(!rep.length){
@@ -2788,7 +2792,7 @@ class ExpTuple: Expression, Tuple{
 	}
 
 	private Expression indexImpl(Scope sc, InContext inContext, const ref Location loc, Expression exp){
-		auto r=exp.clone(sc,inContext,loc);
+		auto r=exp.clone(sc,inContext,accessCheck,loc);
 		r.checkAccess(sc, accessCheck);
 		return r;
 	}
@@ -2836,13 +2840,14 @@ class ExpTuple: Expression, Tuple{
 		mixin(SemEplg);
 	}
 
-	override ExpTuple clone(Scope sc, InContext inContext, const ref Location loc){
+	override ExpTuple clone(Scope sc, InContext inContext, AccessCheck accessCheck, const ref Location loc){
 		// auto r = New!ExpTuple(sc, exprs.map!(x => x.clone(sc,InContext.passedToTemplateAndOrAliased,loc)).rope, type); // TODO: report DMD bug
 		/+auto exprsa = new Expression[exprs.length];
 		foreach(i,ref x;exprsa) x = exprs[i].clone(sc,InContext.passedToTemplateAndOrAliased,loc);
 		auto r = New!ExpTuple(sc, exprsa.ropeCapture, type);+/
 
 		auto r = New!ExpTuple(exprs, type);
+		r.accessCheck = accessCheck;
 		r.loc = loc;
 		return r;
 	}
@@ -4577,12 +4582,13 @@ class Symbol: Expression{
 	private static Symbol[] clist = [];
 
 
-	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
+	override Expression clone(Scope sc, InContext inContext, AccessCheck accessCheck, const ref Location loc){
 		auto r=ddup();
 		r.scope_ = null;
 		r.sstate = SemState.begin;
 		r.loc = loc;
 		r.inContext = inContext;
+		r.accessCheck = accessCheck;
 		r.semantic(sc);
 		return r;
 	}
@@ -6200,10 +6206,10 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 
 	mixin ContextSensitive;
 
-	override Expression clone(Scope sc, InContext inContext, const ref Location loc){
-		if(e1.isCurrentExp()) return e2.clone(sc, inContext, loc);
-		auto fe1 = e1.clone(sc, inContext==InContext.fieldExp?inContext:InContext.none, loc);
-		auto fe2 = e2.clone(sc, e2.inContext, loc);
+	override Expression clone(Scope sc, InContext inContext, AccessCheck accessCheck, const ref Location loc){
+		if(e1.isCurrentExp()) return e2.clone(sc, inContext, accessCheck, loc);
+		auto fe1 = e1.clone(sc, inContext==InContext.fieldExp?inContext:InContext.none, accessCheck, loc);
+		auto fe2 = e2.clone(sc, e2.inContext, accessCheck, loc);
 		assert(cast(Symbol)fe2);
 		auto r = New!(BinaryExp!(Tok!"."))(fe1,cast(Symbol)cast(void*)fe2);
 		r.loc = loc;
@@ -6836,7 +6842,7 @@ mixin template Semantic(T) if(is(T==Type)){
 		return r;
 	}
 
-	override Type clone(Scope,InContext,const ref Location) { return this; }
+	override Type clone(Scope,InContext,AccessCheck accessCheck,const ref Location) { return this; }
 
 	final protected Type checkVarDeclError(Scope sc, VarDecl me)in{assert(sc);}body{
 		if(me.name)
@@ -9532,7 +9538,7 @@ mixin template Semantic(T) if(is(T==ReturnStm)){
 					auto exps=new Expression[et.length];
 					size_t i=0;
 					foreach(Expression exp;et){
-						exps[i]=exp.clone(sc, InContext.none, e.loc);
+						exps[i]=exp.clone(sc, InContext.none, AccessCheck.all, e.loc);
 						exps[i].checkAccess(sc, AccessCheck.all);
 						i++;
 					}
@@ -10684,7 +10690,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		assert(sstate == SemState.completed);
 		assert(!aliasee.isSymbol());
 	}body{
-		auto r=aliasee.clone(sc, inContext, loc);
+		auto r=aliasee.clone(sc, inContext, check, loc);
 		if(auto et=r.isExpTuple()) et.accessCheck=check;
 		else r.restoreAccessCheck(sc, check);
 		return r;
