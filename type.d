@@ -27,6 +27,18 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 		uniqueType!T.sstate = SemState.completed;
 		return uniqueType!T;
 	}
+	static BasicType get(T:Cent)(){
+		if(uniqueType!T) return uniqueType!T;
+		uniqueType!T=New!BasicType(Tok!"cent");
+		uniqueType!T.sstate = SemState.completed;
+		return uniqueType!T;
+	}
+	static BasicType get(T:UCent)(){
+		if(uniqueType!T) return uniqueType!T;
+		uniqueType!T=New!BasicType(Tok!"ucent");
+		uniqueType!T.sstate = SemState.completed;
+		return uniqueType!T;
+	}
 
 	static Type get(T: T*)(){
 		if(uniqueType!(T*)) return uniqueType!(T*);
@@ -104,7 +116,7 @@ abstract class Type: Expression{ //Types can be part of Expressions and vice-ver
 
 protected:
 	static template uniqueType(T){
-		static if(.isBasicType!T) BasicType uniqueType;
+		static if(.isBasicType!T||is(T==Cent)||is(T==UCent)) BasicType uniqueType;
 		else Type uniqueType;
 	}
 	Type[long] arrType;
@@ -197,13 +209,22 @@ class TypeofReturnExp: Type{
 	mixin Visitors;
 }
 
-enum integralTypes = ["bool","byte","ubyte","short","ushort","int","uint","long","ulong","char","wchar","dchar"];
+enum integralTypes = ["bool","byte","ubyte","short","ushort","int","uint","long","ulong","cent","ucent","char","wchar","dchar"];
 enum basicTypes = integralTypes~["float","double","real","ifloat","idouble","ireal","cfloat","cdouble","creal","void"];
 
 
 template isBasicType(T){
 	enum isBasicType=canFind(basicTypes,T.stringof);
 }
+
+import cent_;
+
+template BasicTypeRep(string ty) if(basicTypes.canFind(ty)){
+	static if(ty=="cent") alias Cent BasicTypeRep;
+	else static if(ty=="ucent") alias UCent BasicTypeRep;
+	else mixin(`alias `~ty~` BasicTypeRep;`);
+}
+
 
 int basicTypeBitSize(TokenType op){
 	switch(op){
@@ -216,6 +237,8 @@ int basicTypeBitSize(TokenType op){
 			return 32;
 		case Tok!"long", Tok!"ulong":
 			return 64;
+		case Tok!"cent", Tok!"ucent":
+			return 128;
 		case Tok!"float", Tok!"ifloat":
 			return 32;
 		case Tok!"double", Tok!"idouble":

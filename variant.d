@@ -45,9 +45,10 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, tpl, err
+	none, str, wstr, dstr, int64, cent_, ucent_, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, tpl, err
 }
 
+import cent_;
 template getOccupied(T){
 	static if(is(T==string))
 		enum getOccupied = Occupies.str;
@@ -57,6 +58,10 @@ template getOccupied(T){
 		enum getOccupied = Occupies.dstr;
 	}else static if(is(T:long)&&!is(T==struct)&&!is(T==class))
 		enum getOccupied = Occupies.int64;
+	else static if(is(T==Cent))
+		enum getOccupied = Occupies.cent_;
+	else static if(is(T==UCent))
+		 enum getOccupied = Occupies.ucent_;
 	else static if(isFloatingPoint!T){
 		static assert(T.sizeof<=typeof(Variant.flt80).sizeof);
 		enum getOccupied = Occupies.flt80;
@@ -154,7 +159,7 @@ struct Variant{
 					foreach(x;ToTuple!basicTypes){
 						static if(x!="void")
 						case Tok!x:
-							mixin("alias "~x~" T;"); // workaround DMD bug
+							mixin("alias BasicTypeRep!`"~x~"` T;"); // workaround DMD bug
 						return getOccupied!T;
 					}
 					default: assert(0,text(bt.op));
@@ -248,7 +253,7 @@ struct Variant{
 	private union{
 		typeof(null) none;
 		string str; wstring wstr; dstring dstr;
-		ulong int64;
+		ulong int64; Cent cent_; UCent ucent_;
 		real flt80; ireal fli80; creal cmp80;
 		struct{
 			union{
@@ -279,6 +284,8 @@ struct Variant{
 		else static if(is(T==wstring)){assert(occupies == Occupies.wstr); return wstr;}
 		else static if(is(T==dstring)){assert(occupies == Occupies.dstr); return dstr;}
 		else static if(getOccupied!T==Occupies.int64){assert(occupies == Occupies.int64,"occupies was "~to!string(occupies)~" instead of int64"); return cast(T)int64;}
+		else static if(is(T==Cent)){assert(occupies == Occupies.cent_); return cent_; }
+		else static if(is(T==UCent)){assert(occupies == Occupies.ucent_); return ucent_; }
 		else static if(is(T==float)||is(T==double)||is(T==real)){
 			assert(occupies == Occupies.flt80||occupies == Occupies.fli80);
 			return flt80;
@@ -367,7 +374,7 @@ struct Variant{
 				foreach(x;ToTuple!basicTypes){
 					static if(x=="void"){case Tok!"void": return "";}
 					else case Tok!x:
-						mixin(`alias typeof(`~x~`.init) T;`); // dmd parser workaround
+						mixin(`alias typeof(BasicTypeRep!"`~x~`".init) T;`); // dmd parser workaround
 						enum sfx = is(T==uint) ? "U" :
 					       is(T==long)||is(T==real) ? "L" :
 						   is(T==ulong) ? "LU" :
@@ -449,13 +456,17 @@ struct Variant{
 					foreach(tx;ToTuple!basicTypes){
 						static if(tx!="void"){
 							case Tok!tx:// TODO: code generated for integral types is more or less identical
-							mixin(`alias typeof(`~tx~`.init) T;`); // dmd parser workaround
+							mixin(`alias typeof(BasicTypeRep!"`~tx~`".init) T;`); // dmd parser workaround
 							enum occ=getOccupied!T;
 							switch(bt.op){
 								foreach(x;ToTuple!basicTypes){
 									static if(x!="void")
 									case Tok!x:
-										return Variant(mixin(`cast(`~x~`)cast(T)this.`~.to!string(occ)),to);
+										static convert(To,From)(From from){
+											static if(is(To==Cent)||is(To==UCent)) return To(from);
+											else return cast(To)from; // TODO: case distinction shouldn't be necessary
+										}
+										return Variant(mixin(`convert!(BasicTypeRep!"`~x~`")(cast(T)this.`~.to!string(occ)~`)`),to);
 								}
 								case Tok!"void": return this;
 								default: assert(0);
@@ -671,7 +682,7 @@ struct Variant{
 		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
 				static if(x!="void"){
-					alias typeof(mixin(x~`.init`)) T;
+					alias typeof(mixin(`BasicTypeRep!"`~x~`".init`)) T;
 					alias getOccupied!T occ;
 					static if(occ == Occupies.cmp80 && op == "%")
 						// can do complex modulo real
@@ -703,7 +714,7 @@ struct Variant{
 		switch((cast(BasicType)cast(void*)type.getHeadUnqual()).op){
 			foreach(x; ToTuple!basicTypes){
 				static if(x!="void"){
-					alias typeof(mixin(x~`.init`)) T;
+					alias typeof(mixin(`BasicTypeRep!"`~x~`".init`)) T;
 					alias getOccupied!T occ;
 					enum code = q{ mixin(op~`cast(T)`~to!string(occ)) };
 					static if(is(typeof(mixin(code))==T)){

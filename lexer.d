@@ -1249,6 +1249,7 @@ TokenType isKeyword(string s){
 						if(s[3]=='e') return Tok!"case";
 						if(s[3]=='t') return Tok!"cast";
 					}
+					if(s[1]=='e' && s[2]=='n' && s[3]=='t') return Tok!"cent";
 					if(s[1]=='h' && s[2]=='a' && s[3]=='r') return Tok!"char";
 					break;
 				case 'e':

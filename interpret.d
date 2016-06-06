@@ -5929,7 +5929,7 @@ mixin template CTFEInterpret(T) if(is(T==BasicType)){
 			foreach(x;ToTuple!basicTypes){
 				static if(x!="void")
 				case Tok!x:
-					mixin("alias "~x~" T;"); // workaround DMD bug
+					mixin("alias BasicTypeRep!`"~x~"` T;"); // workaround DMD bug
 				assert(mem.length==T.sizeof);
 				mixin(res);
 			}

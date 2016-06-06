@@ -697,8 +697,8 @@ mixin template Semantic(T) if(is(T==Expression)){
 	}body{
 		if(auto t=type.implicitlyConvertsTo(rhs).prop) return t;
 		auto l = type.getHeadUnqual().isIntegral(), r = rhs.getHeadUnqual().isIntegral();
-		if(l && r){
-			// note: r.getLongRange is always valid for basic types
+		if(l && r && l.bitSize()<128 && r.bitSize()<128){ // TODO: VRP for cent and ucent
+			// note: r.getLongRange is always valid for other basic types
 			if(l.op == Tok!"long" || l.op == Tok!"ulong"){
 				return r.getLongRange().contains(getLongRange()).independent;
 			}else{
@@ -7671,7 +7671,7 @@ mixin template Semantic(T) if(is(T==BasicType)){
 		mixin({
 			string r=`Type r;switch(op){`;
 			foreach(x; basicTypes)
-				r~=mixin(X!q{case Tok!"@(x)": r=Type.get!@(x)();break;});
+				r~=mixin(X!q{case Tok!"@(x)": r=Type.get!(BasicTypeRep!"@(x)")();break;});
 			return r~`default: assert(0);}`;
 		}());
 		assert(r !is this,text(r));
@@ -7697,11 +7697,11 @@ mixin template Semantic(T) if(is(T==BasicType)){
 
 	private static immutable int[] strength=
 		[Tok!"bool":1,Tok!"char":2,Tok!"byte":2,Tok!"ubyte":2,Tok!"wchar":3,Tok!"short":3,Tok!"ushort":3,
-		 Tok!"dchar":4,Tok!"int":4,Tok!"uint":4,Tok!"long":5,Tok!"ulong":5,Tok!"float":6,Tok!"double":6,Tok!"real":6,
+		 Tok!"dchar":4,Tok!"int":4,Tok!"uint":4,Tok!"long":5,Tok!"ulong":5,Tok!"cent":6,Tok!"ucent":6,Tok!"float":7,Tok!"double":7,Tok!"real":7,
 		 Tok!"ifloat":-1,Tok!"idouble":-1,Tok!"ireal":-1,Tok!"cfloat":-2,Tok!"cdouble":-2,Tok!"creal":-2, Tok!"void":0];
 
-	override BasicType isIntegral(){return strength[op]>0 && strength[op]<=5 ? this : null;}
-	final BasicType isFloating(){return strength[op]==6 ? this : null;}
+	override BasicType isIntegral(){return strength[op]>0 && strength[op]<=6 ? this : null;}
+	final BasicType isFloating(){return strength[op]==7 ? this : null;}
 	override BasicType isComplex(){return strength[op]==-2 ? this : null;}
 	final BasicType isImaginary(){return strength[op]==-1 ? this : null;}
 
@@ -7715,6 +7715,8 @@ mixin template Semantic(T) if(is(T==BasicType)){
 			case Tok!"uint": return Type.get!int();
 			case Tok!"long": return Type.get!ulong();
 			case Tok!"ulong": return Type.get!long();
+			case Tok!"cent": return Type.get!UCent();
+			case Tok!"ucent": return Type.get!Cent();
 			case Tok!"char": return Type.get!byte();
 			case Tok!"wchar": return Type.get!short();
 			case Tok!"dchar": return Type.get!int();
@@ -7775,6 +7777,8 @@ mixin template Semantic(T) if(is(T==BasicType)){
 				case 5:
 					return Type.get!ulong().independent!Type;
 				case 6:
+					return Type.get!UCent().independent!Type;
+				case 7:
 					if(op==Tok!"float" && bt.op==Tok!"float") return this.independent!Type;
 					else if(op!=Tok!"real" && bt.op!=Tok!"real") return Type.get!double().independent!Type;
 					else return Type.get!real().independent!Type;
@@ -7798,7 +7802,7 @@ mixin template Semantic(T) if(is(T==BasicType)){
 			if(op==Tok!"ireal" || bt.op==Tok!"creal") return Type.get!creal();
 		}
 		// imaginary + 2's complement integer
-		if(strength[bt.op]<6){
+		if(strength[bt.op]<7){
 			if(op==Tok!"ifloat") return Type.get!cfloat();
 			if(op==Tok!"idouble") return Type.get!cdouble();
 			if(op==Tok!"ireal") return Type.get!creal();
@@ -7821,7 +7825,7 @@ mixin template Semantic(T) if(is(T==BasicType)){
 			if(op==Tok!"creal" || bt.op==Tok!"ireal") return Type.get!creal();
 		}
 		// complex + 2's complement integer
-		if(strength[bt.op]<6){
+		if(strength[bt.op]<7){
 			if(op==Tok!"cfloat") return Type.get!cfloat();
 			if(op==Tok!"cdouble") return Type.get!cdouble();
 			if(op==Tok!"creal") return Type.get!creal();
