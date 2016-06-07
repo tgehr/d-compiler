@@ -60,6 +60,16 @@ string STCtoString(STC stc){
 	return r[1..$];
 }
 
+STC conflictingSTC(STC stc){
+	auto r=STC.init;
+	if(stc&STCvisibility) r|=STCvisibility&~stc;
+	return r;
+}
+
+STC oneSTCOf(STC stc){
+	return stc&-stc;
+}
+
 private string getTTCases(string[] s,string[] excl = []){
 	string r="case ";
 	foreach(x;s) if(!excl.canFind(x)) r~="Tok!\""~x~"\",";
@@ -1049,7 +1059,7 @@ private struct Parser{
 		Expression depMsg;
 	}
 	STCres parseSTC(alias which,bool properties=true)(){
-		STC stc,cstc;
+		STC stc,cstc,confl;
 		Expression depMsg;
 	readstc: for(;;){
 			switch(ttype){
@@ -1074,7 +1084,10 @@ private struct Parser{
 				Lstc:
 					if(stc&cstc&&(cstc!=STCdeprecated||peek().type!=Tok!"("||!depMsg))
 						error("redundant storage class "~tok.name);
+					if(cstc&confl)
+						error("conflicting storage classes "~tok.name~" and "~STCtoString(oneSTCOf(stc&conflictingSTC(cstc))));
 					stc|=cstc;
+					confl|=conflictingSTC(cstc);
 					nextToken();
 					if(cstc==STCdeprecated){
 						if(ttype==Tok!"("){

@@ -14,7 +14,6 @@ mixin CreateBinderForDependent!("LookupHereImpl");
 mixin CreateBinderForDependent!("GetUnresolvedImpl");
 mixin CreateBinderForDependent!("GetUnresolvedHereImpl");
 
-
 final class DoesNotExistDecl: Declaration{
 	this(Identifier orig){originalReference = orig; super(STC.init, orig); sstate = SemState.completed;}
 	Identifier originalReference;
@@ -42,6 +41,11 @@ auto importKindFromSTC(STC stc){
 	return ImportKind.private_;
 }
 
+STC getVisibility(STC stc){
+	if(auto r=stc&STCvisibility) return r;
+	return STCpublic;
+}
+
 enum suspiciousDeclDesc = "is invalid";
 
 abstract class Scope: IncompleteScope{ // SCOPE
@@ -59,11 +63,13 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}body{
 		auto d=symtabLookup(this, decl.name);
 		if(d){
-			 if(typeid(d) is typeid(DoesNotExistDecl)){
+			if(typeid(d) is typeid(DoesNotExistDecl)){
+				if(d.stc&STCpublic && getVisibility(decl.stc)&STCprivate)
+					goto Lok; // public DoesNotExistDecl does not rule out private symbols
 				potentialAmbiguity(decl.name, d.name);
 				mixin(SetErr!q{d.name});
 				return false;
-		     }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
+		    }else if(auto fd=decl.isOverloadableDecl()){ // some declarations can be overloaded, so no error
 				if(auto os=d.isOverloadSet()){
 					fd.scope_ = this;
 					if(os.sealingLookup){
@@ -115,7 +121,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		assert(visited is null,text(visited));
 		scope(exit) visited=null;
 	};
-	// a dummy DoesNotExistDecl for circular lookups through imports
+	// a dummy DoesNotExistDecl for circular lookups through imports and invisible symbols
 	private @property DoesNotExistDecl inex(){
 		static DoesNotExistDecl inex;
 		return inex?inex:(inex=New!DoesNotExistDecl(null));
@@ -139,6 +145,21 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		return inexistentImpl(view, ident);
 	}
 
+	final bool isVisibleFrom(Scope view,STC protection)in{ // TODO: can be hard to determine for protected
+		assert(util.among(protection,STCpublic,STCprivate,STCprotected),STCtoString(protection));
+	}body{
+		if(protection == STCpublic) return true;
+		if(protection == STCprivate) return (getModule() is view.getModule());
+		assert(protection == STCprotected);
+		auto decl=getAggregate(),vdecl=view.getAggregate();
+		if(!decl || !vdecl) return (getModule() is view.getModule());
+		auto rdecl=decl.isReferenceAggregateDecl(), rvdecl=vdecl.isReferenceAggregateDecl();
+		if(!rdecl || !rvdecl) return false;
+		//return rdecl.isSubtypeOf(rvdecl); // TODO: finish implementation of protected
+		return true;
+	}
+
+
 	// lookup implementation
 
 	// TODO: report DMD bug regarding protected
@@ -155,7 +176,16 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 	Declaration lookupExactlyHere(Scope view, Identifier ident){
 		auto r = symtabLookup(view, ident);
-		if(r) if(auto ov=r.isOverloadSet()) if(!ov.sealingLookup) return null;
+		if(r){
+			if(auto ov=r.isOverloadSet()) if(!ov.sealingLookup) return null;
+			if(typeid(r) is typeid(DoesNotExistDecl)){
+				if(r.stc&STCpublic)
+					if(isVisibleFrom(view,STCprivate)) return null; // TODO: protected
+			}else{
+				// assert(r.scope_ is this,text(r," ",r.scope_," ",this));
+				if(!isVisibleFrom(view,getVisibility(r.stc))) return inex; // TODO: this is moot, it possibly leaks information about private symbols
+			}
+		}
 		return r;
 	}
 
@@ -182,7 +212,9 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		Declaration[] decls;
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
-			// TODO: private (imports)
+			if(util.among(im[1],ImportKind.private_,ImportKind.protected_))
+				if(!isVisibleFrom(view,(im[1]==ImportKind.private_?STCprivate:STCprotected)))
+					continue;
 			mixin(LookupHereImpl!q{auto d;im[0],view,ident,onlyMixins});
 			if(!d) return d.independent;
 			else if(typeid(d) !is typeid(DoesNotExistDecl)) decls~=d;
@@ -201,7 +233,9 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		bool isUnresolved = false;
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
-			// TODO: private (imports)
+			if(util.among(im[1],ImportKind.private_,ImportKind.protected_))
+				if(!isVisibleFrom(view,(im[1]==ImportKind.private_?STCprivate:STCprotected)))
+					continue;
 			// TODO: eliminate duplication?
 			mixin(GetUnresolvedHereImpl!q{auto d;im[0], view, ident, onlyMixins, noHope});
 			if(d) unres~=d;
@@ -247,7 +281,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			visited[this]=true;
 			bool success = true;
 			foreach(d;unres){
-				if(auto x=d.lookupExactlyHere(view, ident)) continue;
+				//if(auto x=d.lookupExactlyHere(view, ident)) continue; // TODO: why was this here? Necessary?
 				success &= d.inexistentImpl(view, ident);
 			}
 			return success;
@@ -267,47 +301,52 @@ abstract class Scope: IncompleteScope{ // SCOPE
 
 	/+protected+/ bool inexistentImpl(Scope view, Identifier ident){
 		auto d=symtabLookup(view, ident);
-		if(!d) insert(New!DoesNotExistDecl(ident));
-		else if(auto ov=d.isOverloadSet()){
+		if(!d){
+			// TODO: this will be somewhat challenging for protected
+			d=New!DoesNotExistDecl(ident);
+			if(!isVisibleFrom(view,STCprivate)) d.stc|=STCpublic; // only bans public symbols
+			insert(d);
+		}else if(auto ov=d.isOverloadSet()){
 			assert(!ov.sealingLookup);
 			ov.sealingLookup = ident;
 		}else if(typeid(d) !is typeid(DoesNotExistDecl)){
 			potentialAmbiguity(d.name, ident);
 			mixin(SetErr!q{ident});
 			return false;
+		}else if(d.stc&STCpublic && isVisibleFrom(view,STCprivate)){
+			// TODO: protected
+			d.stc&=~STCpublic;
 		}
 		return true;
 	}
 
-	void potentialInsert(Identifier ident, Declaration decl){
+	void potentialInsert(Identifier ident, Declaration dependee, Declaration decl){
 		auto ptr = ident.ptr in psymtab;
-		if(!ptr) psymtab[ident.ptr]~=decl;
-		else if((*ptr).find(decl).empty) (*ptr)~=decl;
+		auto t=tuple(dependee,decl);
+		if(!ptr) psymtab[ident.ptr]~=t;
+		else if((*ptr).find(t).empty) (*ptr)~=t; // TODO: this can be slow
 	}
 
-	void potentialInsertArbitrary(Declaration mxin, Declaration decl){
-		arbitrary ~= mxin;
-		arbitrarydecls ~= decl;
+	void potentialInsertArbitrary(Declaration dependee, Declaration decl){
+		auto t=tuple(dependee,decl);
+		if(arbitrary.find(t).empty) arbitrary~=t; // TODO: this can be slow
 	}
-	void potentialRemoveArbitrary(Declaration mxin, Declaration decl){
+	void potentialRemoveArbitrary(Declaration dependee, Declaration decl){
 		foreach(i,x; arbitrary){
-			if(x is mxin && arbitrarydecls[i] is decl){
+			if(x is tuple(dependee,decl)){
 				arbitrary[i]=move(arbitrary[$-1]);
 				arbitrary=arbitrary[0..$-1];
 				arbitrary.assumeSafeAppend();
-				arbitrarydecls[i]=move(arbitrarydecls[$-1]);
-				arbitrarydecls=arbitrarydecls[0..$-1];
-				arbitrarydecls.assumeSafeAppend();
 				break;
 			}
 		}
 	}
 
-	void potentialRemove(Identifier ident, Declaration decl){
+	void potentialRemove(Identifier ident, Declaration dependee, Declaration decl){
 		auto ptr = ident.ptr in psymtab;
 		if(!ptr) return;
 		foreach(i,x;*ptr)
-			if(x is decl){
+			if(x is tuple(dependee,decl)){
 				(*ptr)[i]=move((*ptr)[$-1]);
 				(*ptr)=(*ptr)[0..$-1];
 				(*ptr).assumeSafeAppend();
@@ -318,15 +357,18 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	Declaration/+final+/[] potentialLookup(Scope view, Identifier ident){
 		// TODO: this is very wasteful
 		if(auto d=symtabLookup(view, ident)){
-			if(d.isOverloadSet()){
+			if(d.isOverloadSet() && isVisibleFrom(view,getVisibility(d.stc))){ // TODO: enforce storage class compatibility for overloads
 				// do not look up overloads in imports/template mixins
 				import std.range : chain, zip;
 				auto psym=psymtab.get(ident.ptr,[]);
-				return zip(chain(psym,arbitrary),chain(psym,arbitrarydecls))
-					.filter!(a=>!!a[0].isMixinDecl()).map!(a=>a[1]).array;
+				return chain(psym,arbitrary)
+					.filter!(a=>!!a[1].isMixinDecl()).map!(a=>a[0]).array;
 			}else return [];
 		}
-		return psymtab.get(ident.ptr,[])~arbitrarydecls;
+		// return chain(psymtab.get(ident.ptr,[]),arbitrary).filter!(x=>isVisibleFrom(view,getVisibility(x[1].stc))).map!(a=>a[0]).array; // TODO (DMD bug)
+		auto r=psymtab.get(ident.ptr,[])~arbitrary;
+		foreach(ref x;r) if(!isVisibleFrom(view,getVisibility(x[1].stc))) x[0]=null;
+		return r.filter!(x=>x[0]!is null).map!(a=>a[0]).array;
 	}
 
 	private Identifier[const(char)*] notImported;
@@ -410,9 +452,9 @@ protected:
 private:
 
 	Declaration[const(char)*] symtab;
-	Declaration[][const(char)*] psymtab;
-	Declaration[] arbitrary;
-	Declaration[] arbitrarydecls;
+	alias std.typecons.Tuple!(Declaration,Declaration) PotentialDecl; // (dependee,decl)
+	PotentialDecl[][const(char)*] psymtab;
+	PotentialDecl[] arbitrary;
 	/+Q+/std.typecons.Tuple!(Scope,ImportKind)[] imports; // DMD bug
 }
 

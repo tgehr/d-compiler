@@ -3299,11 +3299,11 @@ private:
 
 mixin template Semantic(T) if(is(T==TemplateMixinDecl)){
 	// TODO: peek into ongoing instantiation for more precision?
-	override void potentialInsert(Scope sc, Declaration decl){
-		sc.potentialInsertArbitrary(this, decl);
+	override void potentialInsert(Scope sc, Declaration dependee){
+		sc.potentialInsertArbitrary(dependee,this);
 	}
-	override void potentialRemove(Scope sc, Declaration decl){
-		sc.potentialRemoveArbitrary(this, decl);
+	override void potentialRemove(Scope sc, Declaration dependee){
+		sc.potentialRemoveArbitrary(dependee,this);
 	}
 
 	override void presemantic(Scope sc){
@@ -9829,14 +9829,14 @@ mixin template Semantic(T) if(is(T==Declaration)){
 	invariant(){assert(sstate != SemState.pre || !scope_, to!string(typeid(this)));}
 
 	void pickupSTC(STC stc){
-		this.stc|=stc;
+		this.stc|=~conflictingSTC(this.stc)&stc;
 	}
 
-	void potentialInsert(Scope sc, Declaration decl){
-		if(name) sc.potentialInsert(name, decl);
+	void potentialInsert(Scope sc, Declaration dependee){
+		if(name) sc.potentialInsert(name, dependee, this);
 	}
-	void potentialRemove(Scope sc, Declaration decl){
-		if(name) sc.potentialRemove(name, decl);
+	void potentialRemove(Scope sc, Declaration dependee){
+		if(name) sc.potentialRemove(name, dependee, this);
 	}
 
 
@@ -10286,11 +10286,11 @@ mixin template Semantic(T) if(is(T==EmptyDecl)){
 }
 
 mixin template Semantic(T) if(is(T==ImportDecl)){
-	override void potentialInsert(Scope sc, Declaration decl){
-		sc.potentialInsertArbitrary(this, decl);
+	override void potentialInsert(Scope sc, Declaration dependee){
+		sc.potentialInsertArbitrary(dependee, this);
 	}
-	override void potentialRemove(Scope sc, Declaration decl){
-		sc.potentialRemoveArbitrary(this, decl);
+	override void potentialRemove(Scope sc, Declaration dependee){
+		sc.potentialRemoveArbitrary(dependee, this);
 	}
 	private string path;
 	override void presemantic(Scope sc){
@@ -11379,6 +11379,7 @@ class OverloadSet: Declaration{
 		// TODO: check that all overloads are @property or non-property (?)
 		// TODO: detect @property function templates (?)
 		if(decl.stc&STCproperty) stc|=STCproperty;
+		if(auto v=decl.stc&STCvisibility) stc|=v; // TODO: detect conflicts
 	}
 
 	void addAlias(AliasDecl decl)in{
@@ -12776,11 +12777,11 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 	else static if(is(T==MixinStm)) alias Statement R;
 	else static if(is(T==MixinDecl)) alias Declaration R;
 	static if(is(T==MixinDecl)){
-		override void potentialInsert(Scope sc, Declaration decl){
-			sc.potentialInsertArbitrary(this, decl);
+		override void potentialInsert(Scope sc, Declaration dependee){
+			sc.potentialInsertArbitrary(dependee,this);
 		}
-		override void potentialRemove(Scope sc, Declaration decl){
-			sc.potentialRemoveArbitrary(this, decl);
+		override void potentialRemove(Scope sc, Declaration dependee){
+			sc.potentialRemoveArbitrary(dependee,this);
 		}
 
 		override void presemantic(Scope sc){
