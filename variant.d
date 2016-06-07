@@ -181,11 +181,13 @@ struct Variant{
 		//type = Type.get!T();
 		this.type = type;
 		mixin(to!string(getOccupied!T)~` = value;`);
+		assert(occupies == getOccupied!T);
 	}
 
 	this()(Variant[] tpl, TypeTuple type){
 		this.type=type;
 		this.tpl=tpl;
+		assert(occupies == Occupies.tpl);
 	}
 
 	this()(Variant[] arr, Variant[] cnt, Type type)in{ // TODO: extend FieldAccess and merge with ptr constructor
@@ -198,6 +200,7 @@ struct Variant{
 		this.type=type;
 		this.arr=arr;
 		this.cnt=cnt;
+		assert(occupies==Occupies.arr);
 	}
 
 	this()(FieldAccess[] ptr, Variant[] cnt, Type type)in{
@@ -211,12 +214,14 @@ struct Variant{
 		this.type=type;
 		this.ptr_=ptr;
 		this.cnt=cnt;
+		assert(occupies==Occupies.ptr_);
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
 		//id = RTTypeID.get!Vars(type);
 		this.type=type;
 		this.vars=vars;
+		assert(occupies == Occupies.vars);
 	}
 
 	this()(Symbol fptr, Type type)in{
@@ -232,6 +237,7 @@ struct Variant{
 	}body{
 		this.type=type;
 		this.fptr=fptr;
+		assert(occupies == Occupies.fptr);
 	}
 
 	this()(Symbol dgfptr, Variant[VarDecl] dgctx, Type type)in{
@@ -247,6 +253,7 @@ struct Variant{
 		this.type=type;
 		this.dgfptr=dgfptr;
 		this.dgctx=dgctx;
+		assert(occupies == Occupies.dg);
 	}
 
 
