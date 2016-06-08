@@ -1,3 +1,17 @@
+struct TestSeqAccessCheck2{
+	static:
+	alias Seq(T...)=T;
+	struct S{
+		Seq!int x;
+		static void foo(int y){
+			x,y=y; // ok
+			x=Seq!y; // error
+		}
+		pragma(msg, typeof(x=x)); // ok
+	}
+	pragma(msg, typeof(S.x=S.x)); // ok
+}
+
 auto testSeqAccessCheck(){
 	alias Seq(T...)=T;
 	Seq!(int) tp;
@@ -327,19 +341,19 @@ struct TestSeqTemplateArgument{
 		this(); // ok
 		this(int y,int z){ return x[0]=y; } // error
 		this(int y){ x[0]=y; }
-		this(int y,string z){ x=Seq!y; } // TODO: just expand into individual assignments
+		this(int y,string z){ x=Seq!y; }
 	}
 	static assert(S(2).x[0]==2);
 	static assert([S(3).x]==[3]);
 	static assert([S(4,"").x]==[4]);
 	auto bar(){
 		Seq!int x=3;
-		void bar(int y){ x=Seq!y; } // // TODO: ditto
+		void bar(int y){ x=Seq!y; }
 		bar(4);
 		return x;
 	}
 	pragma(msg, foo());
-	static assert([bar()]==[4]); // TODO
+	static assert([bar()]==[4]);
 
 	// static assert(S(4).x==Seq!4); // TODO
 }

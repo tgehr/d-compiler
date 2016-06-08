@@ -4303,12 +4303,11 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 	mixin(__dgliteralRng());
 }
 
-// TODO: is there a more elegant but efficient solution for this?
-// eg. a more elegant but wasteful solution would be to make BinaryExp!(Tok!"=")
-// inherit from TemporaryExp
-// (the result of assign expressions involving tuples must auto-expand)
 class TupleAssignExp: TemporaryExp{
-	Expression e1, e2;
+	ExpTuple e1, e2;
+	Expression commaLeft1,commaLeft2;
+	Expression[] assignments;
+	Expression lowered;
 	this(Expression e1, Expression e2)in{
 		assert(e1&&e1.sstate==SemState.completed);
 		assert(e2&&e2.sstate==SemState.completed);
@@ -4316,12 +4315,53 @@ class TupleAssignExp: TemporaryExp{
 		assert(e1.isLvalue());
 		assert(e1.type.isTypeTuple());
 	}body{
-		this.e1=e1;
-		this.e2=e2;
+		if(auto ce1=e1.isCommaExp()) commaLeft1=ExpTuple.splitCommaExp(ce1,this.e1);
+		else this.e1=e1.isExpTuple();
+		if(auto ce2=e2.isCommaExp()) commaLeft2=ExpTuple.splitCommaExp(ce2,this.e2);
+		else this.e2=e2.isExpTuple();
+		assert(this.e1&&this.e2);
 	}
 	void semantic(Scope sc){
 		mixin(SemPrlg);
 		type=e1.type;
+		assert(e1.length == e2.length);
+		if(commaLeft1){ commaLeft1.semantic(sc); assert(commaLeft1.sstate==SemState.completed); }
+		if(commaLeft2){ commaLeft2.semantic(sc); assert(commaLeft2.sstate==SemState.completed); }
+		if(assignments.length!=e1.length){
+			// TODO: InContext.assigned
+			assignments=new Expression[](e1.length);
+			foreach(i,ref assgn;assignments){
+				assgn=New!(BinaryExp!(Tok!"="))(e1.index(sc,InContext.none,e1.loc,i),e2.index(sc,InContext.none,e2.loc,i));
+				assgn.loc=loc;
+			}
+		}
+		foreach(ref assgn;assignments) mixin(SemChld!q{assgn});
+		if(!lowered){
+			Expression vars=null;
+			auto symbols=new Expression[](e1.length); // TODO: allocation
+			foreach(i;0..e1.length){
+				auto tmpe=New!TmpVarExp(assignments[i]);
+				tmpe.loc=loc;
+				tmpe.semantic(sc);
+				if(vars){
+					auto r=New!(BinaryExp!(Tok!","))(vars,tmpe);
+					r.loc=vars.loc;
+					vars=r;
+				}else vars=tmpe;
+				symbols[i]=tmpe.sym;
+			}
+			lowered=New!(BinaryExp!(Tok!","))(vars,New!ExpTuple(symbols));
+			lowered.loc=loc;
+			if(commaLeft2){
+				lowered=New!(BinaryExp!(Tok!","))(commaLeft2,lowered);
+				lowered.loc=loc;
+			}
+			if(commaLeft1){
+				lowered=New!(BinaryExp!(Tok!","))(commaLeft1,lowered);
+				lowered.loc=loc;
+			}
+		}
+		mixin(SemChld!q{lowered});
 		mixin(NoRetry);
 		sstate=SemState.completed;
 		createTemporary(sc);

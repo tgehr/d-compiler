@@ -3003,7 +3003,7 @@ mixin template CTFEInterpret(T) if(is(T==ExpTuple)){
 		foreach(i,x;exprs) lvs[i]=x.byteCompileLV(bld);
 		assert(cast(TypeTuple)type);
 		auto ty=cast(TypeTuple)cast(void*)type;
-		return LVtuple(lvs,ty);
+		return LVtuple(lvs,ty); // only used for obtaining a sequence of pointers for seq ref return
 	}
 }
 
@@ -3591,9 +3591,7 @@ mixin template CTFEInterpret(T) if(is(T _==BinaryExp!S,TokenType S)){
 
 mixin template CTFEInterpret(T) if(is(T==TupleAssignExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
-		auto strat = e1.byteCompileLV(bld);
-		e2.byteCompile(bld);
-		strat.emitStoreKV(bld);
+		lowered.byteCompile(bld);
 	}
 }
 
