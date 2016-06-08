@@ -45,7 +45,7 @@ struct BCPointer{
 }
 
 enum Occupies{
-	none, str, wstr, dstr, int64, cent_, ucent_, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, tpl, err
+	none, str, wstr, dstr, int64, cent_, ucent_, flt80, fli80, cmp80, arr, ptr_, vars, fptr, dg, tpl, void_, err
 }
 
 import cent_;
@@ -77,6 +77,8 @@ template getOccupied(T){
 		enum getOccupied = Occupies.none;
 	else static if(is(T==Variant[VarDecl]))
 		enum getOccupied = Occupies.vars;
+	else static if(is(T==void))
+		enum getOccupied = Occupies.void_;
 	else static assert(0);
 }
 
@@ -157,12 +159,11 @@ struct Variant{
 			if(auto bt=tu.isBasicType()){
 				switch(bt.op){
 					foreach(x;ToTuple!basicTypes){
-						static if(x!="void")
 						case Tok!x:
 							mixin("alias BasicTypeRep!`"~x~"` T;"); // workaround DMD bug
 						return getOccupied!T;
 					}
-					default: assert(0,text(bt.op));
+				default: assert(0,text(bt.op));
 				}
 			}else if(auto et=tu.isEnumTy()){
 				assert(et.decl.base);
@@ -181,7 +182,8 @@ struct Variant{
 		//type = Type.get!T();
 		this.type = type;
 		mixin(to!string(getOccupied!T)~` = value;`);
-		assert(occupies == getOccupied!T);
+		static if(is(T==typeof(null))) assert(occupies == Occupies.void_ || occupies == Occupies.none);
+		else assert(occupies == getOccupied!T);
 	}
 
 	this()(Variant[] tpl, TypeTuple type){
@@ -387,7 +389,7 @@ struct Variant{
 		if(auto bt=type.isBasicType()){
 			switch(bt.op){
 				foreach(x;ToTuple!basicTypes){
-					static if(x=="void"){case Tok!"void": return "";}
+					static if(x=="void"){case Tok!"void": return "<void>";} // (this is what DMD does)
 					else case Tok!x:
 						mixin(`alias typeof(BasicTypeRep!"`~x~`".init) T;`); // dmd parser workaround
 						enum sfx = is(T==uint) ? "U" :
@@ -557,10 +559,12 @@ struct Variant{
 		final switch(occupies){
 			case Occupies.none: return 0;
 				foreach(x; EnumMembers!Occupies[1..$]){
-					static if(x!=Occupies.dg)
+					static if(x!=Occupies.dg && x!=Occupies.void_)
 					case x: return typeid(mixin(to!string(x))).getHash(&mixin(to!string(x)));
 				}
 			case Occupies.dg: // TODO!
+				return 0;
+			case Occupies.void_:// better value?
 				return 0;
 		}
 		assert(0); // TODO: file bug

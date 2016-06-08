@@ -154,7 +154,7 @@ void goooo(int){}
 alias goooo foooo; // TODO: fix
 //alias double foooo;
 
-pragma(msg, foooo); // TODO: error
+pragma(msg, foooo);
 
 
 
