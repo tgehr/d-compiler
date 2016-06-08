@@ -1,3 +1,20 @@
+
+struct TwoContextsOfSameType{
+	static:
+	struct S{
+		int x=3;
+		int[] bar(){
+			int baz(){ return 2; }
+			S s;
+			s.foo!baz();
+			return [x,s.x];
+		}
+		void foo(alias a)(){ x=a(); }
+	}
+	static assert(S().bar()==[3,2]); // TODO
+	pragma(msg, "TwoContextsOfSameType: ",S().bar());
+}
+
 struct TestContextInference{
 	static:
 	int f(alias x)(){ return 0; }
