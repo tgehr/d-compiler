@@ -198,9 +198,17 @@ struct Variant{
 			foreach(x;cnt) assert(tt.equals(x.type.getUnqual()),text(cnt," ",tt," ",x.type," ",x));
 	}body{
 		this.type=type;
-		this.arr=arr;
-		this.cnt=cnt;
-		assert(occupies==Occupies.arr);
+		switch(occupies){
+			case Occupies.arr:
+				this.arr=arr;
+				this.cnt=cnt;
+				break;
+			// TODO: this is a temporary hack (the special-casing of strings should be transparent)
+			case Occupies.str: string r; foreach(v;arr) r~=v.get!char(); str=r; break;
+			case Occupies.wstr: wstring r; foreach(v;arr) r~=v.get!wchar(); wstr=r; break;
+			case Occupies.dstr: dstring r; foreach(v;arr) r~=v.get!dchar(); dstr=r; break;
+			default: assert(0);
+		}
 	}
 
 	this()(FieldAccess[] ptr, Variant[] cnt, Type type)in{
