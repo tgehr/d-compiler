@@ -95,12 +95,11 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			mixin(SetErr!q{d});
 			return false;
 		}
-
+	Lok:
 		if(auto ov = decl.isOverloadableDecl()){
 			decl.scope_ = this;
 			decl = New!OverloadSet(ov);
 		}
-	Lok:
 		symtab[decl.name.ptr]=decl;
 		decl.scope_=this;
 		Identifier.tryAgain = true; // TODO: is this required?
