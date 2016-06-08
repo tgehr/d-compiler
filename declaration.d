@@ -461,7 +461,7 @@ class FunctionDecl: OverloadableDecl{
 		return
 			isConstructor()?"constructor":
 			stc&STCproperty?"property":
-			isMemberFunction()?"member function":"function";
+			isMember()?"member function":"function";
 	}
 	override FunctionDecl isFunctionDecl(){return this;}
 

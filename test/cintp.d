@@ -6,6 +6,7 @@ struct CommaExpCall{
 		int[] bar(){
 			int[] r;
 			r~=(0,this.fun)();
+			//r~=(true?this.gun:this.fun)(); // TODO: dmd evaluates the functions within the ternary expression here
 			return r;
 		}
 	}
@@ -426,6 +427,22 @@ int testConstructor(){
 static assert(testConstructor()==5);
 pragma(msg, "testConstructor: ", testConstructor());
 
+int testStructMemberAliasParam2(){
+	int x;
+	struct S{
+		int y;
+		int bar(){
+			return foo!(()=>2*x)+baz!(()=>4*x)+this.baz!(()=>x)();
+		}
+		int foo(alias a)(){ return a(); }
+		static int baz(alias a)(){ return a(); }
+	}
+	S s;
+	x=5;
+	return s.bar();
+}
+static assert(testStructMemberAliasParam2()==35);
+pragma(msg, "testStructMemberAliasParam2: ", testStructMemberAliasParam2());
 
 int testStructMemberAliasParam(){
 	int x;

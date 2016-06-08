@@ -4408,7 +4408,7 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		assert(e2.meaning);
 		auto this_=e1.extractThis();
-		if(e2.meaning.stc&STCstatic){
+		if(!e2.meaning.isMember()){
 			if(this_) ExpressionStm.byteCompileIgnoreResult(bld, this_);
 			return e2.byteCompile(bld);
 		}
@@ -4495,7 +4495,7 @@ mixin template CTFEInterpret(T) if(is(T==FieldExp)){
 
 	override LValueStrategy byteCompileLV(ref ByteCodeBuilder bld){
 		assert(e2.meaning);
-		if(e2.meaning.stc&STCstatic){
+		if(!e2.meaning.isMember()){
 			if(auto this_=e1.extractThis()) ExpressionStm.byteCompileIgnoreResult(bld, this_);
 			return e2.byteCompileLV(bld);
 		}
@@ -5423,7 +5423,6 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		}
 		return byteCompileInitLV(bld, loader, loadersc);
 	}
-
 
 	final void setBCLoc(size_t off, size_t len){
 		// import std.stdio; writeln(this," ", len," ", off);

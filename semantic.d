@@ -9856,6 +9856,21 @@ mixin template Semantic(T) if(is(T==Declaration)){
 		mixin(SemEplg);
 	}
 
+
+	final bool isMember(){
+		if(stc&STCstatic) return false;
+		auto fd=isFunctionDecl();
+		if(fd && fd.isConstructor()){
+			// constructors are logically members of the enclosing scope
+			auto decl=scope_.getDeclaration();
+			if(!decl||!decl.isAggregateDecl()||decl.stc&STCstatic) return false;
+			if(auto decl2=decl.scope_.getDeclaration)
+				return !!decl2.isAggregateDecl();
+		}
+		if(auto decl=scope_.getDeclaration()) return !!decl.isAggregateDecl();
+		return false;
+	}
+
 	/* Returns true if the declaration has to be checked for accessibility at
 	   the given access check level.
 	 */
@@ -12329,19 +12344,6 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		mixin(SemProp!q{type});
 		mixin(SemEplg);
 	}
-	private bool isMemberFunction(){
-		if(stc&STCstatic) return false;
-		if(!isConstructor()){
-			if(auto decl=scope_.getDeclaration()) return !!decl.isAggregateDecl();
-		}else{
-			// constructors are logically members of the enclosing scope
-			auto decl=scope_.getDeclaration();
-			if(!decl||!decl.isAggregateDecl()||decl.stc&STCstatic) return false;
-			if(auto decl2=decl.scope_.getDeclaration)
-				return !!decl2.isAggregateDecl();
-		}
-		return false;
-	}
 	override bool needsAccessCheck(AccessCheck check){
 		return super.needsAccessCheck(check);
 	}
@@ -12354,7 +12356,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		//mixin(SemProp!q{type});
 		if(auto nr=type.needRetry) { needRetry = nr; mixin(SemRet); }
 		mixin(PropErr!q{type});
-		if(!isMemberFunction()&&!isConstructor()) this_ = null;
+		if(!isMember()&&!isConstructor()) this_ = null;
 		mixin(MatchCallHelper!q{auto r; type, sc, loc, this_, args, context});
 		return (r ? this : Declaration.init).independent;
 	}
@@ -12641,7 +12643,7 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 	bool inferAttributes;
 	@property STC inferredSTCs(){
 		auto infer=(inferStatic?STCstatic:STC.init)|(inferAttributes?STCinferrable:STC.init);
-		if(isMemberFunction()||isConstructor()) infer&=~STCimmutable;
+		if(isMember()||isConstructor()) infer&=~STCimmutable;
 		return infer;
 	}
 
