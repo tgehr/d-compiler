@@ -25,7 +25,7 @@ template IntFCChldNoEplg(string s){
 		foreach(t; ss){
 			r~=mixin(X!q{
 				@(t)._interpretFunctionCalls(sc);
-				mixin(PropRetry!(q{@(t)},false));
+				mixin(PropRetry!q{@(t)});
 			});
 		}
 		return r~PropErr!s;
@@ -2978,7 +2978,7 @@ mixin template CTFEInterpret(T) if(is(T==Expression)){
 			r.loc = this.loc;
 			mixin(RewEplg!q{r});
 		}catch(CTFERetryException e){
-			mixin(PropRetry!(q{e.node},false));
+			mixin(PropRetry!q{e.node});
 			needRetry = true;
 		}catch(UnwindException e){
 			// (only show note if not totally obvious)

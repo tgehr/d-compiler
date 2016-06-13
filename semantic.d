@@ -93,14 +93,13 @@ template PropErr(string s) if(!s.canFind(",")){
 }
 template PropErr(string s) if(s.canFind(",")){ alias MultiArgument!(.PropErr,s) PropErr; }
 
-template PropRetryNoRew(string s,bool reset=true) if(!s.canFind(",")){
+template PropRetryNoRew(string s) if(!s.canFind(",")){
 	enum sp = splitScope(s);
 	enum PropRetryNoRew=mixin(X!q{
 		static assert(!is(typeof(_nR)));
 		if(auto _nR=@(sp[1]).needRetry){
 			assert(_nR!=2 || sstate != SemState.error,text("error in cdep from ",@(sp[1])," to ",toString()));
 			if(sstate != SemState.error){
-				static if(@(reset.to!string)) if(sstate == SemState.completed) sstate = SemState.begin;
 				needRetry = _nR;
 				if(_nR==2){mixin(SetErr!q{@(sp[1])});}
 				// dw("propagated retry ",_nR," from ",@(sp[1])," to ",toString()," ",__LINE__);
@@ -111,9 +110,9 @@ template PropRetryNoRew(string s,bool reset=true) if(!s.canFind(",")){
 	});
 }
 
-template PropRetry(string s,bool reset=true) if(!s.canFind(",")){
+template PropRetry(string s) if(!s.canFind(",")){
 	enum sp = splitScope(s);
-	enum PropRetry=Rewrite!(sp[1])~PropRetryNoRew!(s,reset);
+	enum PropRetry=Rewrite!(sp[1])~PropRetryNoRew!s;
 }
 
 template PropRetry(string s) if(s.canFind(",")){ alias MultiArgument!(.PropRetry,s) PropRetry; }
@@ -3385,7 +3384,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 			else instantiateResSemantic(sc);
 			return;
 		}
-
 		mixin(RevEpoLkup!q{e});
 		foreach(x; args){
 			x.willPassToTemplate();
@@ -3393,7 +3391,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 				x.prepareInterpret();
 			x.weakenAccessCheck(AccessCheck.none);
 		}
-
 		e.willInstantiate();
 		mixin(SemChld!q{e});
 		if(auto r=e.isUFCSCallExp()){
@@ -3440,7 +3437,6 @@ mixin template Semantic(T) if(is(T==TemplateInstanceExp)){
 				return a.type;
 			}));
 		}
-
 		mixin(SemProp!q{sym.meaning});
 
 		if(inContext==InContext.called) return IFTIsemantic(sc,container,sym,accessCheck);

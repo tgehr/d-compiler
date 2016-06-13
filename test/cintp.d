@@ -1,3 +1,16 @@
+struct TestScheduling{
+	static:
+	alias Seq(T...)=T;
+	struct S{
+		int x;
+		this(int y,string z){
+			x=Seq!y; // error
+		}
+	}
+	static assert([S(4,"").x]==[4]); // error
+	static assert([S(4,"").x]==[4]); // error
+}
+
 struct CommaExpCall{
 	static:
 	struct A{
