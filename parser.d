@@ -24,7 +24,7 @@ immutable protectionAttributes=["export","package","private","protected","public
 
 immutable attributeSTC=["property","safe","trusted","system","disable","nogc"];
 
-immutable functionSTC=["auto", "const","immutable","inout","nothrow","pure","shared","ref"];
+immutable functionSTC=["auto", "const","immutable","inout","nothrow","pure","shared","ref","return"];
 
 immutable parameterSTC=["auto","const","final","immutable","in","inout","lazy","out","ref","return","scope","shared"];
 
