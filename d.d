@@ -39,9 +39,8 @@ string applyOption(ModuleRepository r,string x)in{assert(isOption(x));}body{
 
 int main(string[] args){
 	import core.memory; GC.disable();
-
-	if(args.length<2){
-		stderr.writeln("error: no input files");
+	if(args.empty){
+		stderr.writeln("error: clever");
 		return 1;
 	}
 	args.popFront();
@@ -67,6 +66,10 @@ int main(string[] args){
 			if(err) stderr.writeln("error: ",err);
 			errors=true;
 		}
+	}
+	if(!ms.length){
+		stderr.writeln("error: no input files");
+		return 1;		
 	}
 	if(errors) return 1;
 	Scheduler().run();
