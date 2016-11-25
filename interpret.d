@@ -1279,7 +1279,10 @@ struct ByteCodeBuilder{
 		byteCode~=*cast(ulong*)&c;
 	}
 	void emitConstant(real c){
-		static if(real.sizeof == 12){
+		static if(real.sizeof == 10){
+			byteCode~=*cast(ulong*)&c;
+			byteCode~=*((cast(ushort*)&c)+4);
+		}else static if(real.sizeof == 12){
 			byteCode~=*cast(ulong*)&c;
 			byteCode~=*((cast(uint*)&c)+2);
 		}else static if(real.sizeof == 16){
