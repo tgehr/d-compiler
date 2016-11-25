@@ -10994,11 +10994,12 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
+		OverloadSet set=null;
+		if(!parent) goto Lfresh;
 		{
-		if(!parent) goto Lfresh2;
 		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, asc, decl.name});
 		if(setnr[1]){ needRetry=setnr[1]; return indepvoid; }
-		auto set=setnr[0];
+		set=setnr[0];
 		if(!set) goto Lfresh;
 
 		// need to provide new/aliased versions for ALL overloads
@@ -11023,17 +11024,14 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				return indepvoid;
 			}
 		}
-	Lfresh:
-		if(set) goto Lfresh3;
 		}
-	Lfresh2:
-		if(decl.stc & STCoverride){
+	Lfresh:
+		if(!set && decl.stc & STCoverride){
 			// this error message is duplicated in OverloadSet.determineOverride
 			decl.scope_.error(format("method '%s' does not override anything", decl.name), decl.loc);
 				mixin(SetErr!q{decl});
 			return Dependee(ErrorDecl(), null).dependent!void;
 		}
-	Lfresh3:
 		if(!(decl.stc&STCnonvirtual)) vtbl.addFresh(decl);
 		return indepvoid;
 	}
