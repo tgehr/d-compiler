@@ -610,10 +610,11 @@ struct Variant{
 					}
 				}
 			}
+			enum op2 = TokChars!(toIntegerRelationalOp(Tok!op));
 			// for ==, != we know that the lengths must be equal
-			static if(op=="==") return Variant(true,Type.get!bool());
-			else static if(op=="!=") return Variant(false,Type.get!bool());
-			else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
+			static if(op2=="=="||op2=="<>=") return Variant(true,Type.get!bool());
+			else static if(op2=="!="||op2=="!<>=") return Variant(false,Type.get!bool());
+			else return Variant(mixin(`l1 `~op2~` l2`),Type.get!bool());
 		}
 		if(occupies == Occupies.arr){
 			if(rhs.occupies != Occupies.arr) rhs=rhs.strToArr();

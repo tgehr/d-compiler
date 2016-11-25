@@ -116,6 +116,21 @@ bool isRelationalOp(TokenType op){
 	}
 }
 
+TokenType toIntegerRelationalOp(TokenType op){
+	switch(op){
+		// convert relational float operators to integer operators
+		case Tok!"!>": return Tok!"<=";
+		case Tok!"!<": return Tok!">=";
+		case Tok!"!>=": return Tok!"<";
+		case Tok!"!<=": return Tok!">";
+		case Tok!"<>": return Tok!"!=";
+		case Tok!"!<>": return Tok!"==";
+		case Tok!"<>=": return Tok!"<>="; // cannot translate, always true
+		case Tok!"!<>=": return Tok!"!<>="; // cannot translate, always false
+		default: return op;
+	}
+}
+
 bool isLogicalOp(TokenType op){
 	switch(op){
 		case Tok!"||": // logical OR

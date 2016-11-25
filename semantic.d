@@ -4233,9 +4233,13 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						return e2.get@(x)();
 					}else static if(S==Tok!"in"||S==Tok!"!in"){
 						return super.get@(x)();
+					}else static if(S==Tok!"<>="||S==Tok!"!<>="){
+						enum value = S==Tok!"<>=";
+						return @(x)(value, value, true);
 					}else static if(isRelationalOp(S)){
 						static if(S==Tok!"is") enum S = Tok!"==";
 						else static if(S==Tok!"!is") enum S = Tok!"!=";
+						else enum S = toIntegerRelationalOp(S);
 						auto it = e1.type.getHeadUnqual().isIntegral();
 						if(!it) return @(x)(0,1,true);
 						// TODO: make more efficient
@@ -4276,9 +4280,6 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 							return r1.geq(r2) ? @(x)(1,1,true)
 								 : r1.le(r2)  ? @(x)(0,0,true)
 								 :              @(x)(0,1,true);
-						}else static if(S==Tok!"<>="||S==Tok!"!<>="){
-							enum value = S==Tok!"<>=";
-							return @(x)(value, value, true);
 						}else static assert(0,TokChars!S);
 					}else static if(isLogicalOp(S)){
 						auto r1 = e1.get@(x)(), r2 = e2.get@(x)();
