@@ -1468,7 +1468,7 @@ class LVpopc: LValueStrategy{
 		info = inf;
 		this.iscc=iscc;
 	}
-	@property size_t lvBCSize(){ return 1+iscc; }
+	override @property size_t lvBCSize(){ return 1+iscc; }
 
 	override void emitStore(ref ByteCodeBuilder bld){
 		bld.emitUnsafe(iscc?Instruction.popccn:Instruction.popcn, info);
@@ -4738,7 +4738,7 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 	public final int getIndex(VarDecl vd)in{assert(isLayoutKnown()&&vd&&vd.type&&vd.scope_&&vd.isField&&vd.scope_&&vd.scope_.getDeclaration() is this);}body{
 		return indices[vd.type];
 	}
-	void updateLayout()in{assert(!isLayoutKnown());}body{
+	override void updateLayout()in{assert(!isLayoutKnown());}body{
 		size_t maxl=0, index=0, init=initialOffset();
 		// TODO: anonymous structs/unions etc.
 		indices = null;

@@ -3026,7 +3026,7 @@ class TypeTuple: Type, Tuple{
 				override Type getTail@(upperf(x))(){
 					return @(impl(`getTail`~upperf(x)));
 				}
-				Type in@(upperf(x))Context(){return @(impl(`in`~upperf(x)~`Context`));}
+				override Type in@(upperf(x))Context(){return @(impl(`in`~upperf(x)~`Context`));}
 			});
 		}
 		return r;
@@ -4322,7 +4322,7 @@ class TupleAssignExp: TemporaryExp{
 		else this.e2=e2.isExpTuple();
 		assert(this.e1&&this.e2);
 	}
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		type=e1.type;
 		assert(e1.length == e2.length);
@@ -5744,7 +5744,7 @@ class TmpVarExp: Expression{
 		sym.loc = loc;
 		e = null;
 	}
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!tmpVarDecl) initTmpVarDecl(sc,false);
 		mixin(SemChld!q{tmpVarDecl, sym});
@@ -10980,7 +10980,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				this.name=name;
 				needRetry = nr;
 			}
-			void semantic(Scope sc){
+			override void semantic(Scope sc){
 				mixin(SemPrlg);
 				mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;self,view,name});
 				if(setnr[1]) { needRetry=setnr[1]; return; }
@@ -12250,7 +12250,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		}
 	}
 
-	void emitError(Scope sc){
+	override void emitError(Scope sc){
 		if(sc) set.matchError(sc, loc, this_, args);
 	}
 
