@@ -607,9 +607,9 @@ class ConditionDeclExp: Expression{
 	STC stc;
 	Expression ty;
 	Identifier name;
-	Expression init;
-	this(STC s, Expression t, Identifier n, Expression i){stc=s; ty=t; name=n; init=i;}
-	override string toString(){return (stc?STCtoString(stc)~" ":"")~(ty?ty.toString()~" ":"")~name.toString()~(init?"="~init.toString():"");}
+	Expression init_;
+	this(STC s, Expression t, Identifier n, Expression i){stc=s; ty=t; name=n; init_=i;}
+	override string toString(){return (stc?STCtoString(stc)~" ":"")~(ty?ty.toString()~" ":"")~name.toString()~(init_?"="~init_.toString():"");}
 
 	mixin Visitors;
 }

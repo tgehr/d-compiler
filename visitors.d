@@ -46,14 +46,14 @@ mixin template DeepDup(T) if(is(T: Node) && !is(T: BasicType)){
 		}
 		auto res=cast(T)sdup();
 		static if(is(T==VarDecl)){
-			if(init)
-			if(auto tmp=(cast()init).isTemporaryExp()){
+			if(init_)
+			if(auto tmp=(cast()init_).isTemporaryExp()){
 				assert(!tmp.tmpVarDecl||tmp.tmpVarDecl is this);
 				auto otmp = tmp.tmpVarDecl;
 				tmp.tmpVarDecl = null;
 				auto n = tmp.ddup();
 				n.tmpVarDecl = otmp;
-				res.init = n;
+				res.init_ = n;
 			}
 		}
 		foreach(x;__traits(allMembers, T)){

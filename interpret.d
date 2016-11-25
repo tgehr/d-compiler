@@ -107,7 +107,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 	Variant interpretV()in{assert(sstate == SemState.completed, to!string(this));}body{
 		//return Variant.error(format("expression '%s' is not interpretable at compile time"),loc.rep);
 		return Variant("TODO: cannot interpret "~to!string(this)~" yet",Type.get!string());
-		//return Variant.init;
+		//return Variant.init_;
 	}
 
 	final Expression cloneConstant()in{assert(!!isConstant()||isArrayLiteralExp());}body{
@@ -230,8 +230,8 @@ mixin template Interpret(T) if(is(T==Symbol)){
 	override Variant interpretV(){
 		if(auto vd = meaning.isVarDecl()){
 			assert(meaning.sstate == SemState.completed);
-			assert(vd.init, text(this," ",loc));
-			return vd.init.interpretV();
+			assert(vd.init_, text(this," ",loc));
+			return vd.init_.interpretV();
 		}
 		assert(0);
 	}
@@ -698,13 +698,13 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 mixin template Interpret(T) if(is(T==TmpVarExp)){
 	override bool checkInterpret(Scope sc){
-		assert(!!tmpVarDecl.init);
+		assert(!!tmpVarDecl.init_);
 		return true; // be optimistic
 	}
 	override Variant interpretV(){ return Variant(null, Type.get!void()); }
 	override void _interpretFunctionCalls(Scope sc){
-		assert(!!tmpVarDecl.init);
-		mixin(IntFCChld!q{tmpVarDecl.init});
+		assert(!!tmpVarDecl.init_);
+		mixin(IntFCChld!q{tmpVarDecl.init_});
 	}
 	FunctionDef ctfeCallWrapper;
 }
@@ -4692,7 +4692,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		foreach(vd;&traverseDeclaredFields){
 			size_t len, off = vd.getBCLoc(len);
 			if(len!=-1){
-				if(vd.init) vd.init.byteCompile(bld);
+				if(vd.init_) vd.init_.byteCompile(bld);
 				else foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
 			}else{
 				bld.error(format("cannot interpret field '%s' of type '%s' during compile time",vd.toString(),vd.type.toString()),loc);
@@ -5220,20 +5220,20 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 	private void byteCompileOptionalInit(ref ByteCodeBuilder bld, bool initialize){
-		if(init&&init.isVoidInitializerExp()) initialize=false; // TODO: catch use before write?
+		if(init_&&init_.isVoidInitializerExp()) initialize=false; // TODO: catch use before write?
 		if(auto tp=type.isTypeTuple()){
 			assert(initialize);
 			assert(tupleContext && tupleContext.vds.length == tp.length);
-			auto complexInit=init&&!init.isExpTuple();
+			auto complexInit=init_&&!init_.isExpTuple();
 			foreach(x;tupleContext.vds) x.byteCompileOptionalInit(bld,!complexInit);
 			if(complexInit){
-				if(stc&STCref) UnaryExp!(Tok!"&").emitAddressOf(bld, init);
-				else init.byteCompile(bld);
+				if(stc&STCref) UnaryExp!(Tok!"&").emitAddressOf(bld, init_);
+				else init_.byteCompile(bld);
 				size_t size=getBCSize();
 				bld.emitTmppush(size);
 				size_t off = 0;
 				foreach(x;tupleContext.vds){
-					auto lv=x.byteCompileInitLV(bld, init, x.scope_);
+					auto lv=x.byteCompileInitLV(bld, init_, x.scope_);
 					size_t len; x.getBCLoc(len);
 					bld.emitTmppop(len);
 					lv.emitStore(bld);
@@ -5248,7 +5248,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		size_t off, len = getBCSize();
 		// dw(len," ",type);
 		if(len==-1) return emitUnsupportedError(bld);
-		if(initialize)if(auto ini=init?init.isStructConsExp():null){
+		if(initialize)if(auto ini=init_?init_.isStructConsExp():null){
 			assert(ini.tmpVarDecl is this,text(ini.tmpVarDecl));
 			ini.beginByteCompile(bld);
 		}
@@ -5268,10 +5268,10 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			bld.emitConstant(off);
 		}
 		if(stc&STCref){
-			assert(!!init);
-			UnaryExp!(Tok!"&").emitAddressOf(bld, init);
+			assert(!!init_);
+			UnaryExp!(Tok!"&").emitAddressOf(bld, init_);
 		}else{
-			if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
+			if(init_) init_.byteCompile(bld); // TODO: in semantic, add correct 'init_'s
 			else byteCompileDefaultInit(bld, type, scope_);
 		}
 
@@ -5287,7 +5287,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			}
 		}
 
-		if(auto ini=init?init.isStructConsExp():null){
+		if(auto ini=init_?init_.isStructConsExp():null){
 			assert(ini.tmpVarDecl is this);
 			ini.finishByteCompile(bld);
 		}
@@ -5310,20 +5310,20 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			else
 				bld.error("cannot access variable at compile time", loader.loc);
 		}
-		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init))){
+		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init_))){
 			accessError();
 			return;
 		}if(stc&STCenum){
 			// TODO: this can be inefficient for immutable variables
-			init.byteCompile(bld);
+			init_.byteCompile(bld);
 			return;
 		}else{
 			// TODO: nested functions
 			size_t len, off = getBCLoc(len);
 			if(!~off){
-				if(stc&(STCimmutable|STCconst)&&init){
+				if(stc&(STCimmutable|STCconst)&&init_){
 					// TODO: this should implicitly copy aggregates
-					init.byteCompile(bld);
+					init_.byteCompile(bld);
 					return;
 				}
 				accessError();
@@ -5378,12 +5378,12 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}body{
 		size_t len, off = getBCLoc(len);
 		if(!~off){
-			if(stc&(STCimmutable|STCconst)&&init){
+			if(stc&(STCimmutable|STCconst)&&init_){
 				if(stc&STCstatic){
 					static LiteralExp[VarDecl] decls;
 					if(this !in decls){
-						assert(cast(LiteralExp)init,text(init," ",));
-						auto v=init.interpretV();
+						assert(cast(LiteralExp)init_,text(init_," ",));
+						auto v=init_.interpretV();
 						auto s=[v]; // TODO: allocation here
 						auto p=Variant([FieldAccess(s.ptr-s.ptr)], s, type.getPointer());
 						auto e=p.toExpr();
@@ -5394,7 +5394,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 				}else{
 					// global local variables
 					// TODO: aliasing
-					init.byteCompile(bld);
+					init_.byteCompile(bld);
 					emitMakeArray(bld,type.getDynArr(), 1);
 					bld.emit(Instruction.ptra);
 				}
@@ -5548,8 +5548,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				}
 			}
 			void perform(VarDecl self){
-				if(self.init && self.stc&STCref)
-					runAnalysis!MarkHeapContext(self.init);
+				if(self.init_ && self.stc&STCref)
+					runAnalysis!MarkHeapContext(self.init_);
 			}
 			void perform(FieldExp self){
 				// the implicit this pointer is passed by reference
@@ -6206,8 +6206,8 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 			size_t len, off = vd.getBCLoc(len);
 			auto ctlen=getCTSizeof(vd.type);
 			assert(len != -1);
-			if(vd !in vars && vd.init){
-				vars[vd]=vd.init.interpretV(); // TODO: ok?
+			if(vd !in vars && vd.init_){
+				vars[vd]=vd.init_.interpretV(); // TODO: ok?
 			}
 			if(vd in vars){
 				auto var = vars[vd];
