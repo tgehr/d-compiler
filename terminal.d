@@ -29,5 +29,8 @@ version(linux){
 		return 8;
 	}
 }else{
-	bool isATTY(ref File){return false;}
+	bool isATTy(ref File){return false;}
+	int getTabSize(){
+		return 8;
+	}
 }
