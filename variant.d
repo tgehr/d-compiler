@@ -234,6 +234,12 @@ struct Variant{
 		assert(occupies == Occupies.vars);
 	}
 
+	this()(typeof(null), Type type = null){ // templated because of DMD bug
+		//id = RTTypeID.get!Vars(type);
+		this.type=type;
+		this.vars=null;
+	}
+
 	this()(Symbol fptr, Type type)in{
 		auto tu=type.getHeadUnqual();
 		assert(tu.isPointerTy()&&tu.getFunctionTy());
