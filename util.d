@@ -364,10 +364,13 @@ bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool)
 	return true;
 }
 
-/+
-bool among(S,T...)(S arg,T args){
-	foreach(ref x; args)
-		if(arg == x) return true;
-	return false;
+static if(is(typeof(std.algorithm.among(0))))
+	alias std.algorithm.among among;
+else{
+	int among(S,T...)(S arg,T args){
+		foreach(i,ref x; args)
+			if(arg == x) return i+1;
+		return 0;
+	}
 }
-+/
+
