@@ -9200,7 +9200,7 @@ struct DisjointIntervalSet(T, alias l=(auto ref x)=>x.l,alias r=(auto ref x)=>x.
 	private size_t _length;
 	@property size_t length(){ return _length; }
 
-	auto S tryIntersect(S)(
+	S tryIntersect(S)(
 		T toIntersect,
 		scope S delegate(T) intersected,
 		scope S delegate() noneFound)
@@ -9212,7 +9212,7 @@ struct DisjointIntervalSet(T, alias l=(auto ref x)=>x.l,alias r=(auto ref x)=>x.
 	}
 
 	// TODO: how to accept both ref and non-ref delegates without using alias?
-	auto S insertOrIntersect(S)(
+	S insertOrIntersect(S)(
 		T toInsert,
 		scope S delegate() inserted,
 		scope S delegate(T)intersected)
