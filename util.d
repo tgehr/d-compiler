@@ -63,7 +63,7 @@ S escape(S)(S i,bool isc=false)if(isSomeString!S){ // TODO: COW, replace with st
 			case '\0': r~="\\0"; break;
 			case ' ':  r~=" "; break;
 			default:
-				if(uni.isWhite(x)) r~=format("\\u%4.4X",cast(uint)x); // wtf? 
+				if(uni.isWhite(x)) r~=to!S(format("\\u%4.4X",cast(uint)x)); // wtf? 
 				else r~=x; break;
 		}
 	}

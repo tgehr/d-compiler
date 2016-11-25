@@ -943,7 +943,7 @@ private:
 								while('0' <= *p && *p <= '9') p++;
 							}else{ // TODO: Could construct value directly in memory
 								rval = 1.0L;
-								for(int i=0,j=exp&-1u;i<16;i++,j>>=1) if(j&1) rval*=pw2[i];
+								for(int i=0,j=cast(int)(exp&-1u);i<16;i++,j>>=1) if(j&1) rval*=pw2[i];
 								if(neg) rval = val / rval;
 								else rval *= val;
 							}

@@ -8338,7 +8338,7 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 		static if(is(T==PointerTy))
 			return (rhs.isPointerTy() || rhs.isBasicType()).independent;
 		else static if(is(T==DynArrTy))
-			return (cast(bool)rhs.isDynArrTy()).independent;
+			return (!!rhs.isDynArrTy()).independent;
 		else return implicitlyConvertsTo(rhs);
 	}
 
@@ -12440,7 +12440,7 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		if(r && !isFunctionDef() && rhs.isFunctionDef() && type.equals(rhs.type)
 		   && stc == rhs.stc && scope_ is rhs.scope_) // TODO: consider linkage
 			return false.independent;
-		return (cast(bool)r).independent;
+		return (!!r).independent;
 	}
 
 	override void matchError(Scope sc, Location loc, Type this_, Expression[] args){
