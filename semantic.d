@@ -2881,7 +2881,7 @@ class ExpTuple: Expression, Tuple{
 		return false;
 	}
 	override size_t tmplArgToHash(){
-		import hashtable;
+		import hashtable : toHash;
 		return toHash(exprs.value.hash);
 	}
 
@@ -2996,7 +2996,7 @@ class TypeTuple: Type, Tuple{
 	}
 
 	override size_t tmplArgToHash(){
-		import hashtable;
+		import hashtable : toHash;
 		return toHash(types.value.hash);
 	}
 

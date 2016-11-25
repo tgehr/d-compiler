@@ -391,6 +391,7 @@ struct Variant{
 				foreach(x;ToTuple!basicTypes){
 					static if(x=="void"){case Tok!"void": return "<void>";} // (this is what DMD does)
 					else case Tok!x:
+					{
 						mixin(`alias typeof(BasicTypeRep!"`~x~`".init) T;`); // dmd parser workaround
 						enum sfx = is(T==uint) ? "U" :
 					       is(T==long)||is(T==real) ? "L" :
@@ -410,6 +411,7 @@ struct Variant{
 						static if(occ==Occupies.flt80)
 							if(this.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
 						return left~res~right~rlsfx~sfx;
+					}
 				}
 				default: assert(0);
 			}
@@ -479,11 +481,13 @@ struct Variant{
 								foreach(x;ToTuple!basicTypes){
 									static if(x!="void")
 									case Tok!x:
+										{
 										static convert(To,From)(From from){
 											static if(is(To==Cent)||is(To==UCent)) return To(from);
 											else return cast(To)from; // TODO: case distinction shouldn't be necessary
 										}
 										return Variant(mixin(`convert!(BasicTypeRep!"`~x~`")(cast(T)this.`~.to!string(occ)~`)`),to);
+										}
 								}
 								case Tok!"void": return this;
 								default: assert(0);

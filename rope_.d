@@ -82,7 +82,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 
 		private this(RopeImpl* rope){ this.rope = rope; }
 		invariant(){ assert(cast(void*)rope is array.ptr); }
-		private union{
+		/*private*/ union{
 			T[] array=void;
 			struct{
 				size_t padding=0;

@@ -5,6 +5,7 @@
 import std.array, std.algorithm, std.range, std.conv, std.string;
 
 import lexer, parser, expression, scope_, semantic, visitors, util;
+import variant;
 
 import analyze;
 
