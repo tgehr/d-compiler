@@ -64,8 +64,8 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 	struct Rope{
 		static if(segtree) private SliceSegTree* tree;
 		private this(T[] array){
-			if(array==[]) return;
 			this.array = array;
+			if(array==[]) return;
 			static if(segtree){
 				tree=new SliceSegTree(buildSegTree(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
 			}
@@ -74,8 +74,8 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 		static if(segtree){
 			@property value(){ return isArray()?tree?tree.value:S.init:rope.value; }
 			private this(T[] array, SliceSegTree* tree){
-				if(array==[]) return;
 				this.array = array;
+				if(array==[]) return;
 				this.tree = tree;
 			}
 		}
@@ -86,7 +86,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			T[] array=void;
 			struct{
 				size_t padding=0;
-				RopeImpl* rope=null;
+				RopeImpl* rope=void;
 			}
 		}
 		private @property bool isArray(){ return array.length || rope is null; }
