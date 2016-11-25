@@ -1044,11 +1044,13 @@ private struct Parser{
 				break;
 			}
 			if(ttype == Tok!"(") goto isdglit;
+			{
 			restoreState(save);
 			nextToken();
 			auto e=parseAssocArgumentList!("}",false,StructAssocExp)();
 			expect(Tok!"}");
 			return res=New!StructLiteralExp(e);
+			}
 		isdglit:
 			restoreState(save);
 			return parseExpression(rbp!(Tok!","));

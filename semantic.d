@@ -1267,6 +1267,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 					length = v.length;
 				}else if(!isEmpty) goto Lafter;
 				//import std.stdio; wrietln("duh ",e,length);
+				{
 				LongRange rng;
 				if(s_t is Type.get!uint()){
 					auto r = a[0].getIntRange();
@@ -1280,6 +1281,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 					sc.error(format("array index %s is out of bounds [0%s..%d%s)",
 					         a[0].toString(),Size_t.suffix,length,Size_t.suffix),a[0].loc);
 					mixin(ErrEplg);
+				}
 				}
 			Lafter:;
 			}
@@ -1468,6 +1470,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 				auto v = e.interpretV(); // TODO: this is inefficient
 				length = v.length;
 			}else if(!isEmpty) goto Lafter;
+			{
 			LongRange[2] rng;
 			if(s_t is Type.get!uint()){
 				auto r1 = l.getIntRange(), r2 = r.getIntRange();
@@ -1488,6 +1491,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 			|| s_t is Type.get!ulong() && l.getLongRange().gr(r.getLongRange())){
 				sc.error("lower slice index exceeds upper slice index",l.loc.to(r.loc));
 				mixin(ErrEplg);
+			}
 			}
 		Lafter:
 			if(!isConstFoldable()){
@@ -4085,7 +4089,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			mixin(SemEplg);
 		}else{
 			if(!e1.finishDeduction(sc) || !e2.finishDeduction(sc)) goto Lerr;
-
+			{
 			// operator overloading with opBinary and opBinaryRight
 			static if(overloadableBinary.canFind(TokChars!S)){
 				mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
@@ -4163,6 +4167,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 				super.semantic(sc);// TODO: implement
 			}
 			sc.error(format("incompatible types '%s' and '%s' for binary "~TokChars!S,e1.type,e2.type),loc);
+			}
 		Lerr:mixin(ErrEplg);
 		}
 	}
@@ -4450,12 +4455,12 @@ mixin template Semantic(T) if(is(T==IsExp)){
 		if(!gscope) gscope = New!GaggingScope(sc);
 		auto f = ty.typeSemantic(gscope);
 		mixin(PropRetry!q{sc=gscope;ty});
+		Token tok;
 		if(ty.sstate == SemState.error) goto no;
 
 		assert(!!f);
 		if(f.hasPseudoTypes()) mixin(ErrEplg);
 
-		Token tok;
 		switch(which){
 			case WhichIsExp.type:
 				goto yes;
@@ -6298,7 +6303,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				if(ident.sstate == SemState.failed) goto Linexistent;
 			}
 		}
-
+		{
 		assert(!!e2.meaning);
 		// TODO: find a better design here
 		if(rewrite)
@@ -6455,6 +6460,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		}/+else{
 			// we have a 'this' pointer that we don't need
 		}+/
+		}
 	Lok:
 		// in order to be able to reuse isImplicitlyCalled (TODO: improve)
 		if(e2.isImplicitlyCalled(inContext)){
@@ -6564,6 +6570,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				mixin(ErrEplg);
 			}
 		}
+		{
 		// successfully resolved non-tuple field expression that
 		// requires 'this'
 		auto etu = this_.type.getUnqual();
@@ -6577,6 +6584,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				                thisType.toString(),e2.kind,e2.loc.rep),loc);
 				mixin(ErrEplg);
 			}
+		}
 		}
 	Lok:;
 	}
@@ -8856,6 +8864,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 	Identifier[] checkMembership;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		{
 		if(lower) goto Llowered;
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
@@ -8907,6 +8916,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			lower=createRangeForeach(sc);
 			mixin(SemCheck);
 			goto Llowered;
+		}
 		}
 		// TODO: foreach over delegates
 		// TODO: foreach over Tuples
@@ -9680,6 +9690,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 				if(!sc.isEnclosing(getLoweredEnclosingStatement())) goto Lerr;
 			}
 		}
+		{
 		auto fun=sc.getFunction();
 		if(auto oafun=fun.isOpApplyFunctionDef()){
 			if(oafun.lstm is mixin(_name)){
@@ -9696,6 +9707,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 		}
 		assert(!!mixin(_name));
 		mixin(SemEplg);
+		}
 	Lerr:
 		sc.error(format("enclosing label '%s' for "~_which~" statement not found",e.toString()),e.loc);
 		mixin(ErrEplg);
@@ -10981,7 +10993,8 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
-		if(!parent) goto Lfresh;
+		{
+		if(!parent) goto Lfresh2;
 		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, asc, decl.name});
 		if(setnr[1]){ needRetry=setnr[1]; return indepvoid; }
 		auto set=setnr[0];
@@ -11010,12 +11023,16 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 			}
 		}
 	Lfresh:
-		if(!set && decl.stc & STCoverride){
+		if(set) goto Lfresh3;
+		}
+	Lfresh2:
+		if(decl.stc & STCoverride){
 			// this error message is duplicated in OverloadSet.determineOverride
 			decl.scope_.error(format("method '%s' does not override anything", decl.name), decl.loc);
 				mixin(SetErr!q{decl});
 			return Dependee(ErrorDecl(), null).dependent!void;
 		}
+	Lfresh3:
 		if(!(decl.stc&STCnonvirtual)) vtbl.addFresh(decl);
 		return indepvoid;
 	}
@@ -11104,6 +11121,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		mixin(CheckCircularInheritance!q{_;this});
 		mixin(InheritVtbl!q{ClassDecl _; this});
 		if(!parents.length) goto Lvtbl;
+		{
 		assert(parents[0].sstate==SemState.error||!!cast(AggregateTy)parents[0]);
 		bool hasExplicitBaseClass = false;
 		if(parents[0].sstate != SemState.error){
@@ -11124,6 +11142,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				mixin(SetErr!q{rparents[1+i]});
 			}
 			{alias scope_ sc;mixin(SemChldPar!q{rparents[1+i]});}
+		}
 		}
 	Lvtbl:
 		enum SemRet = q{ return; };

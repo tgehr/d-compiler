@@ -2817,17 +2817,22 @@ Ltailcall:
 	}
 	void fail(Location loc){ throw new UnwindException(loc); }
 Ldivbyzero:
+	{
 	auto info0 = obtainErrorInfo();
 	handler.error("divide by zero", info0.loc);
 	fail(info0.loc);
+	}
 Loutofbounds:
+	{
 	auto info1 = obtainErrorInfo();
 	auto s_t = Type.get!Size_t();
 	if(s_t.getSizeof()==uint.sizeof) tmp[0] = cast(uint)tmp[0];
 	else assert(s_t.getSizeof()==ulong.sizeof);
 	handler.error(format("array index %s%s is out of bounds [0%s..%d%s)",tmp[0],Size_t.suffix,Size_t.suffix,tmp[1],Size_t.suffix),info1.loc);
 	fail(info1.loc);
+	}
 Lshiftoutofrange:
+	{
 	auto info2 = obtainErrorInfo();
 	bool isSigned;
 	if(auto e = cast(BinaryExp!(Tok!"<<"))info2) isSigned=(cast(BasicType)e.e2.type).isSigned();
@@ -2836,7 +2841,9 @@ Lshiftoutofrange:
 	if(isSigned) handler.error(format("shift amount of %d is outside the range 0..%d", cast(long)tmp[0], tmp[1]),info2.loc);
 	else handler.error(format("shift amount of %d is outside the range 0..%d", tmp[0], tmp[1]),info2.loc);
 	fail(info2.loc);
+	}
 Linvalidpointer:
+	{
 	auto info3 = obtainErrorInfo();
 	bool offby1=cast(bool)tmp[1];
 	if(!offby1){
@@ -2846,7 +2853,9 @@ Linvalidpointer:
 	}
 	handler.error(format("%s pointer dereference%s",tmp[0]?"null":"invalid",offby1?" (off by one)":""), info3.loc);
 	fail(info3.loc);
+	}
 Lsliceoutofbounds:
+	{
 	auto info4 = obtainErrorInfo();
 	auto s_t2 = Type.get!Size_t();
 	if(s_t2.getSizeof()==uint.sizeof) tmp[0]=cast(uint)tmp[0], tmp[1]=cast(uint)tmp[1];
@@ -2858,32 +2867,43 @@ Lsliceoutofbounds:
 		handler.error(format("lower slice index %dU exceeds upper slice index %dU",tmp[0],tmp[1]),info4.loc);
 	}
 	fail(info4.loc);
+	}
 Lnullfunction:
+	{
 	auto info5 = obtainErrorInfo();
 	assert(!!cast(CallExp)info5);
 	auto ce = cast(CallExp)cast(void*)info5;
 	handler.error(format("null %s dereference", ce.e.type.isDelegateTy?"delegate":"function pointer"),ce.loc);
 	fail(info5.loc);
+	}
 Lcastfailure:
+	{
 	auto castinfo = obtainErrorInfo();
 	assert(!!cast(CastExp)castinfo);
 	auto cae = cast(CastExp)cast(void*)castinfo;
 	auto t1 = cast(Type)cast(void*)tmp[0];
 	handler.error(format("cannot interpret cast from '%s' aliasing a '%s' to '%s' at compile time", cae.e.type,t1,cae.type), cae.loc); // TODO: 'an'
 	fail(castinfo.loc);
+	}
 Linvfunction:
+	{
 	auto info6 = obtainErrorInfo();
 	handler.error("interpretation of invalid function failed", info6.loc);
 	fail(info6.loc);
+	}
 Lhlt:
+	{
 	auto hltinfo = cast(HltErrorInfo)cast(void*)obtainErrorInfo();
 	handler.error(hltinfo.err, hltinfo.loc);
 	fail(hltinfo.loc);
+	}
 Lhltstr:
+	{
 	auto hltsinfo = obtainErrorInfo();
 	string err = cast(string)stack.pop!BCSlice().slice;
 	handler.error(err, hltsinfo.loc);
 	fail(hltsinfo.loc);
+	}
 }
 
 
@@ -3183,7 +3203,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			a[0].byteCompile(bld);
 			goto Lload;
 		}
-
+		{
 		e.byteCompile(bld);
 		mixin(byteCompileDollar);
 		if(!a.length) return;
@@ -3205,6 +3225,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			bld.emitUnsafe(I.ptrtoa, this);
 			bld.emit(I.push);
 			bld.emitConstant(0);
+		}
 		}
 	Lload:
 		if(LVstorea.isArrElement(type)){
@@ -5165,8 +5186,9 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSize;
+		goto ptr;
+	}else if(type is Type.get!(typeof(null))())
 	ptr: return bcPointerBCSize+(type.getUnqual() is Type.get!(void*)());
-	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return bcDelegateBCSize;
 	if(auto aggrty = type.isAggregateTy()){

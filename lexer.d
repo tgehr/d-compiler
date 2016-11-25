@@ -749,6 +749,7 @@ private:
 					goto lexstringsuffix;
 				// DQString
 				case '"':
+					{
 					// appender only used if there is an escape sequence, slice otherwise
 					// TODO: how costly is eager initialization?
 					auto r=appender!string();
@@ -773,6 +774,7 @@ private:
 					if(!r.data.length) res[0].str = start[0..p-1-start];
 					else{ r.put(s[0..p-1-s]); res[0].str = r.data; }
 					goto lexstringsuffix;
+					}
 					lexstringsuffix:
 					if(*p=='c')      res[0].type = Tok!"``c", p++;
 					else if(*p=='w') res[0].type = Tok!"``w", p++;
@@ -1072,6 +1074,7 @@ private:
 			if(*p == 'i') p++, tok.type += 3; static assert(Tok!".0f"+3==Tok!".0fi" && Tok!".0"+3==Tok!".0i" && Tok!".0L"+3==Tok!".0Li");
 			return _p = p, tok;
 		}
+		{
 		// parse suffixes:
 		bool sfxl = 0, sfxu = 0;
 		switch(*p){
@@ -1115,6 +1118,7 @@ private:
 		if(tok.type == Tok!"0LU" && adjexp) tok = tokError("integer constant exceeds ulong.max",_p[0..p-_p]);
 		if(leadingzero && val > 7) tok = tokError("octal literals are deprecated",_p[0..p-_p]);
 		return _p=p, tok;
+		}
 		Lexp: return _p=p, tokError("exponent expected",p[0..1]);
 	}
 }
