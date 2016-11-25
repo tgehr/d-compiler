@@ -4,7 +4,7 @@
 
 import lexer, operators, expression, declaration, type, semantic, util;
 
-import std.algorithm: map;
+import std.algorithm: map, among;
 import std.traits: isIntegral, isFloatingPoint, Unqual;
 import std.range: ElementType;
 import std.conv: to, text;

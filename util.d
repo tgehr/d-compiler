@@ -364,8 +364,10 @@ bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool)
 	return true;
 }
 
+/+
 bool among(S,T...)(S arg,T args){
 	foreach(ref x; args)
 		if(arg == x) return true;
 	return false;
 }
++/

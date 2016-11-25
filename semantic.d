@@ -6495,7 +6495,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			mixin(SemChldPar!q{ufcs});
 			if(ufcs.isSymbol()||ufcs.isType())
 			if(ufcs.sstate == SemState.completed){
-				bool incomplete=inContext.among(InContext.called,InContext.instantiated);
+				bool incomplete=!!inContext.among(InContext.called,InContext.instantiated);
 				incomplete&=!(ufcs.isSymbol()&&ufcs.isSymbol().meaning.stc&STCproperty);
 				auto r = New!UFCSCallExp(ufcs, this_, incomplete);
 				r.loc=loc;
@@ -6538,7 +6538,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			auto thisExp=New!ThisExp(); // TODO: ensure this only happens once per symbol
 			thisExp.loc=loc;
 			thisExp.semantic(New!GaggingScope(sc));
-			assert(util.among(thisExp.sstate,SemState.error,SemState.completed));
+			assert(thisExp.sstate.among(SemState.error,SemState.completed));
 			if(thisExp.sstate==SemState.error) return false;
 			this_=thisExp;
 			return true;
