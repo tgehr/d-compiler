@@ -228,16 +228,14 @@ struct Variant{
 	}
 
 	this()(Variant[VarDecl] vars, Type type = null){ // templated because of DMD bug
-		//id = RTTypeID.get!Vars(type);
 		this.type=type;
 		this.vars=vars;
 		assert(occupies == Occupies.vars);
 	}
 
-	this()(typeof(null), Type type = null){ // templated because of DMD bug
-		//id = RTTypeID.get!Vars(type);
-		this.type=type;
-		this.vars=null;
+	this()(typeof(null)){ // templated because of DMD bug
+		this.type=Type.get!(typeof(null))();
+		assert(occupies == Occupies.none);
 	}
 
 	this()(Symbol fptr, Type type)in{
@@ -580,14 +578,9 @@ struct Variant{
 		assert(0); // TODO: file bug
 	}
 
-	size_t toHash() const @trusted nothrow{
-		try {
-			auto t = cast(Variant*)&this;
-			return t.toHash_();
-		}
-		catch(Exception) {
-			assert(0);
-		}
+	size_t toHash()const @trusted nothrow{
+		try return (cast(Variant*)&this).toHash_();
+		catch(Exception) assert(0);
 	}
 
 	// TODO: BUG: shift ops not entirely correct
