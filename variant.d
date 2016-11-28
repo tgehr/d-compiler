@@ -563,7 +563,7 @@ struct Variant{
 
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
 
-	size_t toHash()@trusted{
+	size_t toHash_() @trusted{
 		// TODO: differing containers should result in the same template instantiations!
 		// -> strip containers?
 		final switch(occupies){
@@ -578,6 +578,16 @@ struct Variant{
 				return 0;
 		}
 		assert(0); // TODO: file bug
+	}
+
+	size_t toHash() const @trusted nothrow{
+		try {
+			auto t = cast(Variant*)&this;
+			return t.toHash_();
+		}
+		catch(Exception) {
+			assert(0);
+		}
 	}
 
 	// TODO: BUG: shift ops not entirely correct
