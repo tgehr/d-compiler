@@ -234,6 +234,12 @@ struct Variant{
 		assert(occupies == Occupies.vars);
 	}
 
+	this()(typeof(null), Type type = null){ // templated because of DMD bug
+		//id = RTTypeID.get!Vars(type);
+		this.type=type;
+		this.vars=null;
+	}
+
 	this()(Symbol fptr, Type type)in{
 		auto tu=type.getHeadUnqual();
 		assert(tu.isPointerTy()&&tu.getFunctionTy());
@@ -391,6 +397,7 @@ struct Variant{
 				foreach(x;ToTuple!basicTypes){
 					static if(x=="void"){case Tok!"void": return "<void>";} // (this is what DMD does)
 					else case Tok!x:
+					{
 						mixin(`alias typeof(BasicTypeRep!"`~x~`".init) T;`); // dmd parser workaround
 						enum sfx = is(T==uint) ? "U" :
 					       is(T==long)||is(T==real) ? "L" :
@@ -410,6 +417,7 @@ struct Variant{
 						static if(occ==Occupies.flt80)
 							if(this.flt80%1==0&&!res.canFind("e")) rlsfx=".0";
 						return left~res~right~rlsfx~sfx;
+					}
 				}
 				default: assert(0);
 			}
@@ -479,11 +487,13 @@ struct Variant{
 								foreach(x;ToTuple!basicTypes){
 									static if(x!="void")
 									case Tok!x:
+										{
 										static convert(To,From)(From from){
 											static if(is(To==Cent)||is(To==UCent)) return To(from);
 											else return cast(To)from; // TODO: case distinction shouldn't be necessary
 										}
 										return Variant(mixin(`convert!(BasicTypeRep!"`~x~`")(cast(T)this.`~.to!string(occ)~`)`),to);
+										}
 								}
 								case Tok!"void": return this;
 								default: assert(0);
@@ -553,7 +563,7 @@ struct Variant{
 
 	bool opEquals(Variant rhs){ return cast(bool)opBinary!"=="(rhs); }
 
-	size_t toHash()@trusted{
+	size_t toHash_() @trusted{
 		// TODO: differing containers should result in the same template instantiations!
 		// -> strip containers?
 		final switch(occupies){
@@ -568,6 +578,16 @@ struct Variant{
 				return 0;
 		}
 		assert(0); // TODO: file bug
+	}
+
+	size_t toHash() const @trusted nothrow{
+		try {
+			auto t = cast(Variant*)&this;
+			return t.toHash_();
+		}
+		catch(Exception) {
+			assert(0);
+		}
 	}
 
 	// TODO: BUG: shift ops not entirely correct
@@ -606,10 +626,11 @@ struct Variant{
 					}
 				}
 			}
+			enum op2 = TokChars!(toIntegerRelationalOp(Tok!op));
 			// for ==, != we know that the lengths must be equal
-			static if(op=="==") return Variant(true,Type.get!bool());
-			else static if(op=="!=") return Variant(false,Type.get!bool());
-			else return Variant(mixin(`l1 `~op~` l2`),Type.get!bool());
+			static if(op2=="=="||op2=="<>=") return Variant(true,Type.get!bool());
+			else static if(op2=="!="||op2=="!<>=") return Variant(false,Type.get!bool());
+			else return Variant(mixin(`l1 `~op2~` l2`),Type.get!bool());
 		}
 		if(occupies == Occupies.arr){
 			if(rhs.occupies != Occupies.arr) rhs=rhs.strToArr();

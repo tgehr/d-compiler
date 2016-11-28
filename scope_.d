@@ -145,7 +145,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	}
 
 	final bool isVisibleFrom(Scope view,STC protection)in{ // TODO: can be hard to determine for protected
-		assert(util.among(protection,STCpublic,STCprivate,STCprotected),STCtoString(protection));
+		assert(protection.among(STCpublic,STCprivate,STCprotected),STCtoString(protection));
 	}body{
 		if(protection == STCpublic) return true;
 		if(protection == STCprivate) return (getModule() is view.getModule());
@@ -211,7 +211,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		Declaration[] decls;
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
-			if(util.among(im[1],ImportKind.private_,ImportKind.protected_))
+			if(im[1].among(ImportKind.private_,ImportKind.protected_))
 				if(!isVisibleFrom(view,(im[1]==ImportKind.private_?STCprivate:STCprotected)))
 					continue;
 			mixin(LookupHereImpl!q{auto d;im[0],view,ident,onlyMixins});
@@ -232,7 +232,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		bool isUnresolved = false;
 		foreach(im;imports){
 			if(onlyMixins && im[1]!=ImportKind.mixin_) continue;
-			if(util.among(im[1],ImportKind.private_,ImportKind.protected_))
+			if(im[1].among(ImportKind.private_,ImportKind.protected_))
 				if(!isVisibleFrom(view,(im[1]==ImportKind.private_?STCprivate:STCprotected)))
 					continue;
 			// TODO: eliminate duplication?

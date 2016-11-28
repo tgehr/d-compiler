@@ -107,7 +107,7 @@ mixin template Interpret(T) if(is(T==Expression)){
 	Variant interpretV()in{assert(sstate == SemState.completed, to!string(this));}body{
 		//return Variant.error(format("expression '%s' is not interpretable at compile time"),loc.rep);
 		return Variant("TODO: cannot interpret "~to!string(this)~" yet",Type.get!string());
-		//return Variant.init;
+		//return Variant.init_;
 	}
 
 	final Expression cloneConstant()in{assert(!!isConstant()||isArrayLiteralExp());}body{
@@ -230,8 +230,8 @@ mixin template Interpret(T) if(is(T==Symbol)){
 	override Variant interpretV(){
 		if(auto vd = meaning.isVarDecl()){
 			assert(meaning.sstate == SemState.completed);
-			assert(vd.init, text(this," ",loc));
-			return vd.init.interpretV();
+			assert(vd.init_, text(this," ",loc));
+			return vd.init_.interpretV();
 		}
 		assert(0);
 	}
@@ -698,13 +698,13 @@ mixin template Interpret(T) if(is(T==TernaryExp)){
 mixin template Interpret(T) if(is(T==TemporaryExp)){}
 mixin template Interpret(T) if(is(T==TmpVarExp)){
 	override bool checkInterpret(Scope sc){
-		assert(!!tmpVarDecl.init);
+		assert(!!tmpVarDecl.init_);
 		return true; // be optimistic
 	}
 	override Variant interpretV(){ return Variant(null, Type.get!void()); }
 	override void _interpretFunctionCalls(Scope sc){
-		assert(!!tmpVarDecl.init);
-		mixin(IntFCChld!q{tmpVarDecl.init});
+		assert(!!tmpVarDecl.init_);
+		mixin(IntFCChld!q{tmpVarDecl.init_});
 	}
 	FunctionDef ctfeCallWrapper;
 }
@@ -1279,7 +1279,10 @@ struct ByteCodeBuilder{
 		byteCode~=*cast(ulong*)&c;
 	}
 	void emitConstant(real c){
-		static if(real.sizeof == 12){
+		static if(real.sizeof == 10){
+			byteCode~=*cast(ulong*)&c;
+			byteCode~=*((cast(ushort*)&c)+4);
+		}else static if(real.sizeof == 12){
 			byteCode~=*cast(ulong*)&c;
 			byteCode~=*((cast(uint*)&c)+2);
 		}else static if(real.sizeof == 16){
@@ -1468,7 +1471,7 @@ class LVpopc: LValueStrategy{
 		info = inf;
 		this.iscc=iscc;
 	}
-	@property size_t lvBCSize(){ return 1+iscc; }
+	override @property size_t lvBCSize(){ return 1+iscc; }
 
 	override void emitStore(ref ByteCodeBuilder bld){
 		bld.emitUnsafe(iscc?Instruction.popccn:Instruction.popcn, info);
@@ -2817,17 +2820,22 @@ Ltailcall:
 	}
 	void fail(Location loc){ throw new UnwindException(loc); }
 Ldivbyzero:
+	{
 	auto info0 = obtainErrorInfo();
 	handler.error("divide by zero", info0.loc);
 	fail(info0.loc);
+	}
 Loutofbounds:
+	{
 	auto info1 = obtainErrorInfo();
 	auto s_t = Type.get!Size_t();
 	if(s_t.getSizeof()==uint.sizeof) tmp[0] = cast(uint)tmp[0];
 	else assert(s_t.getSizeof()==ulong.sizeof);
 	handler.error(format("array index %s%s is out of bounds [0%s..%d%s)",tmp[0],Size_t.suffix,Size_t.suffix,tmp[1],Size_t.suffix),info1.loc);
 	fail(info1.loc);
+	}
 Lshiftoutofrange:
+	{
 	auto info2 = obtainErrorInfo();
 	bool isSigned;
 	if(auto e = cast(BinaryExp!(Tok!"<<"))info2) isSigned=(cast(BasicType)e.e2.type).isSigned();
@@ -2836,7 +2844,9 @@ Lshiftoutofrange:
 	if(isSigned) handler.error(format("shift amount of %d is outside the range 0..%d", cast(long)tmp[0], tmp[1]),info2.loc);
 	else handler.error(format("shift amount of %d is outside the range 0..%d", tmp[0], tmp[1]),info2.loc);
 	fail(info2.loc);
+	}
 Linvalidpointer:
+	{
 	auto info3 = obtainErrorInfo();
 	bool offby1=cast(bool)tmp[1];
 	if(!offby1){
@@ -2846,7 +2856,9 @@ Linvalidpointer:
 	}
 	handler.error(format("%s pointer dereference%s",tmp[0]?"null":"invalid",offby1?" (off by one)":""), info3.loc);
 	fail(info3.loc);
+	}
 Lsliceoutofbounds:
+	{
 	auto info4 = obtainErrorInfo();
 	auto s_t2 = Type.get!Size_t();
 	if(s_t2.getSizeof()==uint.sizeof) tmp[0]=cast(uint)tmp[0], tmp[1]=cast(uint)tmp[1];
@@ -2858,32 +2870,43 @@ Lsliceoutofbounds:
 		handler.error(format("lower slice index %dU exceeds upper slice index %dU",tmp[0],tmp[1]),info4.loc);
 	}
 	fail(info4.loc);
+	}
 Lnullfunction:
+	{
 	auto info5 = obtainErrorInfo();
 	assert(!!cast(CallExp)info5);
 	auto ce = cast(CallExp)cast(void*)info5;
 	handler.error(format("null %s dereference", ce.e.type.isDelegateTy?"delegate":"function pointer"),ce.loc);
 	fail(info5.loc);
+	}
 Lcastfailure:
+	{
 	auto castinfo = obtainErrorInfo();
 	assert(!!cast(CastExp)castinfo);
 	auto cae = cast(CastExp)cast(void*)castinfo;
 	auto t1 = cast(Type)cast(void*)tmp[0];
 	handler.error(format("cannot interpret cast from '%s' aliasing a '%s' to '%s' at compile time", cae.e.type,t1,cae.type), cae.loc); // TODO: 'an'
 	fail(castinfo.loc);
+	}
 Linvfunction:
+	{
 	auto info6 = obtainErrorInfo();
 	handler.error("interpretation of invalid function failed", info6.loc);
 	fail(info6.loc);
+	}
 Lhlt:
+	{
 	auto hltinfo = cast(HltErrorInfo)cast(void*)obtainErrorInfo();
 	handler.error(hltinfo.err, hltinfo.loc);
 	fail(hltinfo.loc);
+	}
 Lhltstr:
+	{
 	auto hltsinfo = obtainErrorInfo();
 	string err = cast(string)stack.pop!BCSlice().slice;
 	handler.error(err, hltsinfo.loc);
 	fail(hltsinfo.loc);
+	}
 }
 
 
@@ -3183,7 +3206,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			a[0].byteCompile(bld);
 			goto Lload;
 		}
-
+		{
 		e.byteCompile(bld);
 		mixin(byteCompileDollar);
 		if(!a.length) return;
@@ -3205,6 +3228,7 @@ mixin template CTFEInterpretIE(T) if(is(T _==IndexExp)){
 			bld.emitUnsafe(I.ptrtoa, this);
 			bld.emit(I.push);
 			bld.emitConstant(0);
+		}
 		}
 	Lload:
 		if(LVstorea.isArrElement(type)){
@@ -4692,7 +4716,7 @@ mixin template CTFEInterpret(T) if(is(T==AggregateDecl)){
 		foreach(vd;&traverseDeclaredFields){
 			size_t len, off = vd.getBCLoc(len);
 			if(len!=-1){
-				if(vd.init) vd.init.byteCompile(bld);
+				if(vd.init_) vd.init_.byteCompile(bld);
 				else foreach(i;0..len){bld.emit(Instruction.push); bld.emitConstant(0);}
 			}else{
 				bld.error(format("cannot interpret field '%s' of type '%s' during compile time",vd.toString(),vd.type.toString()),loc);
@@ -4717,7 +4741,7 @@ mixin template CTFEInterpret(T) if(is(T==UnionDecl)){
 	public final int getIndex(VarDecl vd)in{assert(isLayoutKnown()&&vd&&vd.type&&vd.scope_&&vd.isField&&vd.scope_&&vd.scope_.getDeclaration() is this);}body{
 		return indices[vd.type];
 	}
-	void updateLayout()in{assert(!isLayoutKnown());}body{
+	override void updateLayout()in{assert(!isLayoutKnown());}body{
 		size_t maxl=0, index=0, init=initialOffset();
 		// TODO: anonymous structs/unions etc.
 		indices = null;
@@ -5165,8 +5189,9 @@ size_t getBCSizeof(Type type)in{ assert(!!type); }body{
 	if(type.isArrayTy()) return (getCTSizeof(type)+ulong.sizeof-1)/ulong.sizeof;
 	if(auto ptr=type.isPointerTy()){
 		if(ptr.ty.isFunctionTy()) return bcFunPointerBCSize;
+		goto ptr;
+	}else if(type is Type.get!(typeof(null))())
 	ptr: return bcPointerBCSize+(type.getUnqual() is Type.get!(void*)());
-	}else if(type is Type.get!(typeof(null))()) goto ptr;
 	static assert(FunctionDef.sizeof<=ulong.sizeof && (void*).sizeof<=ulong.sizeof);
 	if(type.isDelegateTy()) return bcDelegateBCSize;
 	if(auto aggrty = type.isAggregateTy()){
@@ -5220,20 +5245,20 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}
 
 	private void byteCompileOptionalInit(ref ByteCodeBuilder bld, bool initialize){
-		if(init&&init.isVoidInitializerExp()) initialize=false; // TODO: catch use before write?
+		if(init_&&init_.isVoidInitializerExp()) initialize=false; // TODO: catch use before write?
 		if(auto tp=type.isTypeTuple()){
 			assert(initialize);
 			assert(tupleContext && tupleContext.vds.length == tp.length);
-			auto complexInit=init&&!init.isExpTuple();
+			auto complexInit=init_&&!init_.isExpTuple();
 			foreach(x;tupleContext.vds) x.byteCompileOptionalInit(bld,!complexInit);
 			if(complexInit){
-				if(stc&STCref) UnaryExp!(Tok!"&").emitAddressOf(bld, init);
-				else init.byteCompile(bld);
+				if(stc&STCref) UnaryExp!(Tok!"&").emitAddressOf(bld, init_);
+				else init_.byteCompile(bld);
 				size_t size=getBCSize();
 				bld.emitTmppush(size);
 				size_t off = 0;
 				foreach(x;tupleContext.vds){
-					auto lv=x.byteCompileInitLV(bld, init, x.scope_);
+					auto lv=x.byteCompileInitLV(bld, init_, x.scope_);
 					size_t len; x.getBCLoc(len);
 					bld.emitTmppop(len);
 					lv.emitStore(bld);
@@ -5248,7 +5273,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 		size_t off, len = getBCSize();
 		// dw(len," ",type);
 		if(len==-1) return emitUnsupportedError(bld);
-		if(initialize)if(auto ini=init?init.isStructConsExp():null){
+		if(initialize)if(auto ini=init_?init_.isStructConsExp():null){
 			assert(ini.tmpVarDecl is this,text(ini.tmpVarDecl));
 			ini.beginByteCompile(bld);
 		}
@@ -5268,10 +5293,10 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			bld.emitConstant(off);
 		}
 		if(stc&STCref){
-			assert(!!init);
-			UnaryExp!(Tok!"&").emitAddressOf(bld, init);
+			assert(!!init_);
+			UnaryExp!(Tok!"&").emitAddressOf(bld, init_);
 		}else{
-			if(init) init.byteCompile(bld); // TODO: in semantic, add correct 'init's
+			if(init_) init_.byteCompile(bld); // TODO: in semantic, add correct 'init_'s
 			else byteCompileDefaultInit(bld, type, scope_);
 		}
 
@@ -5287,7 +5312,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			}
 		}
 
-		if(auto ini=init?init.isStructConsExp():null){
+		if(auto ini=init_?init_.isStructConsExp():null){
 			assert(ini.tmpVarDecl is this);
 			ini.finishByteCompile(bld);
 		}
@@ -5310,20 +5335,20 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 			else
 				bld.error("cannot access variable at compile time", loader.loc);
 		}
-		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init))){
+		if(stc&STCstatic && (!(stc&(STCimmutable|STCconst)||!init_))){
 			accessError();
 			return;
 		}if(stc&STCenum){
 			// TODO: this can be inefficient for immutable variables
-			init.byteCompile(bld);
+			init_.byteCompile(bld);
 			return;
 		}else{
 			// TODO: nested functions
 			size_t len, off = getBCLoc(len);
 			if(!~off){
-				if(stc&(STCimmutable|STCconst)&&init){
+				if(stc&(STCimmutable|STCconst)&&init_){
 					// TODO: this should implicitly copy aggregates
-					init.byteCompile(bld);
+					init_.byteCompile(bld);
 					return;
 				}
 				accessError();
@@ -5378,12 +5403,12 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 	}body{
 		size_t len, off = getBCLoc(len);
 		if(!~off){
-			if(stc&(STCimmutable|STCconst)&&init){
+			if(stc&(STCimmutable|STCconst)&&init_){
 				if(stc&STCstatic){
 					static LiteralExp[VarDecl] decls;
 					if(this !in decls){
-						assert(cast(LiteralExp)init,text(init," ",));
-						auto v=init.interpretV();
+						assert(cast(LiteralExp)init_,text(init_," ",));
+						auto v=init_.interpretV();
 						auto s=[v]; // TODO: allocation here
 						auto p=Variant([FieldAccess(s.ptr-s.ptr)], s, type.getPointer());
 						auto e=p.toExpr();
@@ -5394,7 +5419,7 @@ mixin template CTFEInterpret(T) if(is(T==VarDecl)){
 				}else{
 					// global local variables
 					// TODO: aliasing
-					init.byteCompile(bld);
+					init_.byteCompile(bld);
 					emitMakeArray(bld,type.getDynArr(), 1);
 					bld.emit(Instruction.ptra);
 				}
@@ -5548,8 +5573,8 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 				}
 			}
 			void perform(VarDecl self){
-				if(self.init && self.stc&STCref)
-					runAnalysis!MarkHeapContext(self.init);
+				if(self.init_ && self.stc&STCref)
+					runAnalysis!MarkHeapContext(self.init_);
 			}
 			void perform(FieldExp self){
 				// the implicit this pointer is passed by reference
@@ -5926,9 +5951,11 @@ mixin template CTFEInterpret(T) if(is(T==BasicType)){
 			foreach(x;ToTuple!basicTypes){
 				static if(x!="void")
 				case Tok!x:
+				{
 					mixin("alias BasicTypeRep!`"~x~"` T;"); // workaround DMD bug
 				assert(mem.length==T.sizeof);
 				mixin(res);
+				}
 			}
 			default: assert(0);
 		}
@@ -6206,8 +6233,8 @@ mixin template CTFEInterpret(T) if(is(T==AggregateTy)){
 			size_t len, off = vd.getBCLoc(len);
 			auto ctlen=getCTSizeof(vd.type);
 			assert(len != -1);
-			if(vd !in vars && vd.init){
-				vars[vd]=vd.init.interpretV(); // TODO: ok?
+			if(vd !in vars && vd.init_){
+				vars[vd]=vd.init_.interpretV(); // TODO: ok?
 			}
 			if(vd in vars){
 				auto var = vars[vd];

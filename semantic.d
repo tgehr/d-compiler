@@ -1267,6 +1267,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 					length = v.length;
 				}else if(!isEmpty) goto Lafter;
 				//import std.stdio; wrietln("duh ",e,length);
+				{
 				LongRange rng;
 				if(s_t is Type.get!uint()){
 					auto r = a[0].getIntRange();
@@ -1280,6 +1281,7 @@ mixin template Semantic(T) if(is(T==IndexExp)){
 					sc.error(format("array index %s is out of bounds [0%s..%d%s)",
 					         a[0].toString(),Size_t.suffix,length,Size_t.suffix),a[0].loc);
 					mixin(ErrEplg);
+				}
 				}
 			Lafter:;
 			}
@@ -1468,6 +1470,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 				auto v = e.interpretV(); // TODO: this is inefficient
 				length = v.length;
 			}else if(!isEmpty) goto Lafter;
+			{
 			LongRange[2] rng;
 			if(s_t is Type.get!uint()){
 				auto r1 = l.getIntRange(), r2 = r.getIntRange();
@@ -1488,6 +1491,7 @@ mixin template Semantic(T) if(is(T==SliceExp)){
 			|| s_t is Type.get!ulong() && l.getLongRange().gr(r.getLongRange())){
 				sc.error("lower slice index exceeds upper slice index",l.loc.to(r.loc));
 				mixin(ErrEplg);
+			}
 			}
 		Lafter:
 			if(!isConstFoldable()){
@@ -2411,8 +2415,8 @@ class TemplateInstanceDecl: Declaration{
 		// TODO: check whether the default argument matches
 		enum SemRet = q{ return true; }; // TODO: get rid of this again
 		foreach(i,ref r; resolved.unsafeByRef)
-			if(!r&&params[i].init){
-				r=params[i].init.ddup();
+			if(!r&&params[i].init_){
+				r=params[i].init_.ddup();
 				resolvedSome = true;
 			}
 		foreach(r;resolved) if(r) r.prepareInterpret();
@@ -2711,7 +2715,7 @@ interface Tuple{
 
 	static VarDecl[] expandVars(Scope sc, VarDecl[] a) in{
 /+		alias util.all all;
-		assert(all!(_=>!_.rtype&&!_.init||_.sstate.among(SemState.completed,SemState.error))(a));+/
+		assert(all!(_=>!_.rtype&&!_.init_||_.sstate.among(SemState.completed,SemState.error))(a));+/
 	}body{
 		// TODO: this is very naive and inefficient
 		VarDecl[] r;
@@ -2877,7 +2881,7 @@ class ExpTuple: Expression, Tuple{
 		return false;
 	}
 	override size_t tmplArgToHash(){
-		import hashtable;
+		import hashtable : toHash;
 		return toHash(exprs.value.hash);
 	}
 
@@ -2992,7 +2996,7 @@ class TypeTuple: Type, Tuple{
 	}
 
 	override size_t tmplArgToHash(){
-		import hashtable;
+		import hashtable : toHash;
 		return toHash(types.value.hash);
 	}
 
@@ -3022,7 +3026,7 @@ class TypeTuple: Type, Tuple{
 				override Type getTail@(upperf(x))(){
 					return @(impl(`getTail`~upperf(x)));
 				}
-				Type in@(upperf(x))Context(){return @(impl(`in`~upperf(x)~`Context`));}
+				override Type in@(upperf(x))Context(){return @(impl(`in`~upperf(x)~`Context`));}
 			});
 		}
 		return r;
@@ -4085,7 +4089,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 			mixin(SemEplg);
 		}else{
 			if(!e1.finishDeduction(sc) || !e2.finishDeduction(sc)) goto Lerr;
-
+			{
 			// operator overloading with opBinary and opBinaryRight
 			static if(overloadableBinary.canFind(TokChars!S)){
 				mixin(BuildOpOver!("opoverloadR","e2","opBinaryRight",
@@ -4163,6 +4167,7 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 				super.semantic(sc);// TODO: implement
 			}
 			sc.error(format("incompatible types '%s' and '%s' for binary "~TokChars!S,e1.type,e2.type),loc);
+			}
 		Lerr:mixin(ErrEplg);
 		}
 	}
@@ -4228,9 +4233,13 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 						return e2.get@(x)();
 					}else static if(S==Tok!"in"||S==Tok!"!in"){
 						return super.get@(x)();
+					}else static if(S==Tok!"<>="||S==Tok!"!<>="){
+						enum value = S==Tok!"<>=";
+						return @(x)(value, value, true);
 					}else static if(isRelationalOp(S)){
 						static if(S==Tok!"is") enum S = Tok!"==";
 						else static if(S==Tok!"!is") enum S = Tok!"!=";
+						else enum S = toIntegerRelationalOp(S);
 						auto it = e1.type.getHeadUnqual().isIntegral();
 						if(!it) return @(x)(0,1,true);
 						// TODO: make more efficient
@@ -4271,9 +4280,6 @@ mixin template Semantic(T) if(is(T _==BinaryExp!S,TokenType S) && !is(T==BinaryE
 							return r1.geq(r2) ? @(x)(1,1,true)
 								 : r1.le(r2)  ? @(x)(0,0,true)
 								 :              @(x)(0,1,true);
-						}else static if(S==Tok!"<>="||S==Tok!"!<>="){
-							enum value = S==Tok!"<>=";
-							return @(x)(value, value, true);
 						}else static assert(0,TokChars!S);
 					}else static if(isLogicalOp(S)){
 						auto r1 = e1.get@(x)(), r2 = e2.get@(x)();
@@ -4317,7 +4323,7 @@ class TupleAssignExp: TemporaryExp{
 		else this.e2=e2.isExpTuple();
 		assert(this.e1&&this.e2);
 	}
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		type=e1.type;
 		assert(e1.length == e2.length);
@@ -4450,12 +4456,12 @@ mixin template Semantic(T) if(is(T==IsExp)){
 		if(!gscope) gscope = New!GaggingScope(sc);
 		auto f = ty.typeSemantic(gscope);
 		mixin(PropRetry!q{sc=gscope;ty});
+		Token tok;
 		if(ty.sstate == SemState.error) goto no;
 
 		assert(!!f);
 		if(f.hasPseudoTypes()) mixin(ErrEplg);
 
-		Token tok;
 		switch(which){
 			case WhichIsExp.type:
 				goto yes;
@@ -4711,7 +4717,7 @@ class Symbol: Expression{
 		// those are not virtual functions because of centralized symbol dependency handling
 		// TODO: make specific parts virtual functions of the relevant classes instead
 		if(auto vd=meaning.isVarDecl()){
-			if(vd.stc & STCenum || (vd.init&&vd.stc&(STCimmutable|STCconst)&&vd.willInterpretInit())){
+			if(vd.stc & STCenum || (vd.init_&&vd.stc&(STCimmutable|STCconst)&&vd.willInterpretInit())){
 				mixin(MeaningSemantic);
 				mixin(CircErrMsg);
 				mixin(SemProp!q{sc=meaning.scope_;meaning});
@@ -4733,8 +4739,8 @@ class Symbol: Expression{
 				if(decl.isAggregateDecl())
 					type = type.applyScopeSTC(sc);
 			if(vd.stc&STCenum){
-				if(vd.init){
-					auto r=vd.init.cloneConstant();
+				if(vd.init_){
+					auto r=vd.init_.cloneConstant();
 					r.loc = loc;
 					mixin(RewEplg!q{r});
 				}else assert(meaning.sstate == SemState.error);
@@ -4976,7 +4982,7 @@ class Symbol: Expression{
 		if(auto vd = meaning.isVarDecl())
 			return vd.stc&STCenum
 				|| vd.stc&(STCimmutable|STCconst)
-				&& vd.init && vd.init.isConstant();
+				&& vd.init_ && vd.init_.isConstant();
 		if(auto vd = meaning.isFunctionDecl()) return true;
 		return false;
 	}
@@ -4989,7 +4995,7 @@ class Symbol: Expression{
 	// DMD 2.058/2.059 behave approximately like this:
 	/+override bool typeEquals(Type rhs){
 		if(meaning.stc&STCenum)
-		if(auto vd = meaning.isVarDecl()) return vd.init.typeEquals(rhs);
+		if(auto vd = meaning.isVarDecl()) return vd.init_.typeEquals(rhs);
 		return super.typeEquals(rhs);
 	}+/
 	// override Type isType(){...} // TODO.
@@ -5038,14 +5044,14 @@ class Symbol: Expression{
 	override IntRange getIntRange(){
 		if(auto vd=meaning.isVarDecl()){
 			if(vd.stc&STCenum || vd.stc&STCstatic&&vd.stc&STCimmutable)
-				return vd.init.getIntRange();
+				return vd.init_.getIntRange();
 		}
 		return super.getIntRange();
 	}
 	override LongRange getLongRange(){
 		if(auto vd=meaning.isVarDecl()){
 			if(vd.stc&STCenum || vd.stc&STCstatic&&vd.stc&STCimmutable)
-				return vd.init.getLongRange();
+				return vd.init_.getLongRange();
 		}
 		return super.getLongRange();
 	}
@@ -5308,9 +5314,9 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		if(tt.params.length > args.length){
 			// default arguments
 			import util: all;
-			assert(all!(a=>a.init !is null)(tt.params[args.length..$]));
+			assert(all!(a=>a.init_ !is null)(tt.params[args.length..$]));
 			// TODO: this allocates rather heavily
-			args~=map!(a=>a.init.ddup)(tt.params[args.length..$]).array;
+			args~=map!(a=>a.init_.ddup)(tt.params[args.length..$]).array;
 			foreach(ref arg;args) runAnalysis!Reset(arg);
 			// TODO: replace 'this'-expressions suitably
 		}
@@ -5716,8 +5722,8 @@ class TmpVarDecl: VarDecl{
 
 	override void handleRef(Scope sc){ return actuallyHandleRef(sc); }
 
-	override TmpVarDecl newVarDecl(STC stc, Expression rtype, Identifier name, Expression init){
-		return New!TmpVarDecl(stc,rtype,name,init);
+	override TmpVarDecl newVarDecl(STC stc, Expression rtype, Identifier name, Expression init_){
+		return New!TmpVarDecl(stc,rtype,name,init_);
 	}
 
 	mixin DownCastMethod;
@@ -5739,15 +5745,15 @@ class TmpVarExp: Expression{
 		sym.loc = loc;
 		e = null;
 	}
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!tmpVarDecl) initTmpVarDecl(sc,false);
 		mixin(SemChld!q{tmpVarDecl, sym});
 		type = Type.get!void();
 		mixin(SemEplg);
 	}
-	override @property string kind(){ return tmpVarDecl.init.kind; }
-	override string toString(){ return tmpVarDecl.init.toString(); }
+	override @property string kind(){ return tmpVarDecl.init_.kind; }
+	override string toString(){ return tmpVarDecl.init_.toString(); }
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -6298,7 +6304,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				if(ident.sstate == SemState.failed) goto Linexistent;
 			}
 		}
-
+		{
 		assert(!!e2.meaning);
 		// TODO: find a better design here
 		if(rewrite)
@@ -6455,6 +6461,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 		}/+else{
 			// we have a 'this' pointer that we don't need
 		}+/
+		}
 	Lok:
 		// in order to be able to reuse isImplicitlyCalled (TODO: improve)
 		if(e2.isImplicitlyCalled(inContext)){
@@ -6489,7 +6496,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			mixin(SemChldPar!q{ufcs});
 			if(ufcs.isSymbol()||ufcs.isType())
 			if(ufcs.sstate == SemState.completed){
-				bool incomplete=inContext.among(InContext.called,InContext.instantiated);
+				bool incomplete=!!inContext.among(InContext.called,InContext.instantiated);
 				incomplete&=!(ufcs.isSymbol()&&ufcs.isSymbol().meaning.stc&STCproperty);
 				auto r = New!UFCSCallExp(ufcs, this_, incomplete);
 				r.loc=loc;
@@ -6532,7 +6539,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 			auto thisExp=New!ThisExp(); // TODO: ensure this only happens once per symbol
 			thisExp.loc=loc;
 			thisExp.semantic(New!GaggingScope(sc));
-			assert(util.among(thisExp.sstate,SemState.error,SemState.completed));
+			assert(thisExp.sstate.among(SemState.error,SemState.completed));
 			if(thisExp.sstate==SemState.error) return false;
 			this_=thisExp;
 			return true;
@@ -6564,6 +6571,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				mixin(ErrEplg);
 			}
 		}
+		{
 		// successfully resolved non-tuple field expression that
 		// requires 'this'
 		auto etu = this_.type.getUnqual();
@@ -6577,6 +6585,7 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 				                thisType.toString(),e2.kind,e2.loc.rep),loc);
 				mixin(ErrEplg);
 			}
+		}
 		}
 	Lok:;
 	}
@@ -6774,12 +6783,12 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 		super.semantic(sc);
 	}
 
-	static VarDecl createDecl(Scope ascope, STC stc, Expression init)in{
+	static VarDecl createDecl(Scope ascope, STC stc, Expression init_)in{
 		assert(!!ascope);
 	}body{
 		// TODO: the allocation of a new identifier is unnecessary
 		auto dollar = new VarDecl(stc, Type.get!Size_t(),
-		                     New!Identifier("__dollar"), init);
+		                     New!Identifier("__dollar"), init_);
 		dollar.sstate = SemState.begin; // do not add to scope
 		dollar.scope_ = ascope;
 		dollar.semantic(ascope);
@@ -6800,10 +6809,10 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 		VarDecl getDollar(){
 			if(!dollar){
 				auto stc = STC.init;
-				Expression init = null;
+				Expression init_ = null;
 				void createInit(Tuple tp){
 					stc |= STCenum;
-					init = LiteralExp.factory(Variant(tp.length, Type.get!Size_t()));
+					init_ = LiteralExp.factory(Variant(tp.length, Type.get!Size_t()));
 				}
 				if(auto tp=e.isTuple()) createInit(tp);
 				else if(e.type){ if(auto tp=e.type.isTuple()) createInit(tp); }
@@ -6812,7 +6821,7 @@ mixin template Semantic(T) if(is(T==DollarExp)){
 				auto decl=ascope.getDeclaration();
 				if(!decl||!decl.isFunctionDef()) stc |= STCstatic;
 
-				dollar = DollarExp.createDecl(ascope, stc, init);
+				dollar = DollarExp.createDecl(ascope, stc, init_);
 			}
 			return dollar;
 		}
@@ -6857,7 +6866,7 @@ mixin template Semantic(T) if(is(T==FunctionLiteralExp)){
 mixin template Semantic(T) if(is(T==ConditionDeclExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-		if(!decl) decl=New!VarDecl(stc,ty,name,init);
+		if(!decl) decl=New!VarDecl(stc,ty,name,init_);
 		if(!sym) sym=New!Symbol(decl);
 		mixin(SemChld!q{decl,sym});
 		type = decl.type;
@@ -7254,7 +7263,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		if(ret) mixin(SemChldPar!q{ret});
 		foreach(p; params){
 			if(p.sstate==SemState.pre) p.sstate = SemState.begin; // never insert into scope
-			if(!p.rtype && !p.init) continue; // parameter type needs to be deduced
+			if(!p.rtype && !p.init_) continue; // parameter type needs to be deduced
 			p.semantic(sc); // TODO: rewriting parameters ever needed?
 			assert(!p.rewrite);
 		}
@@ -7422,7 +7431,7 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 	override Dependent!Expression matchCallHelper(Scope sc, const ref Location loc, Type this_, Expression[] args, ref MatchContext context){
 		alias util.any any; // TODO: file bug
 		if(args.length > params.length ||
-		   any!(_=>_.init is null)(params[args.length..params.length])){
+		   any!(_=>_.init_ is null)(params[args.length..params.length])){
 				context.match=Match.none;
 				return null.independent!Expression;
 		}
@@ -7609,11 +7618,11 @@ mixin template Semantic(T) if(is(T==FunctionTy)){
 		if(strippedDefaultArguments) return strippedDefaultArguments;
 		// TODO: get rid of the allocation in the common case
 		Parameter stripParam(Parameter param){
-			if(!param.rtype && !param.init) return param; // parameter type yet to be deduced
+			if(!param.rtype && !param.init_) return param; // parameter type yet to be deduced
 			assert(param.sstate==SemState.completed);
 			auto ntype=param.type.stripDefaultArguments();
 			assert(ntype.sstate==SemState.completed);
-			if(ntype!=param.type||param.init){
+			if(ntype!=param.type||param.init_){
 				auto nparam=New!Parameter(param.stc,ntype,param.name,null);
 				nparam.type=ntype;
 				nparam.sstate=SemState.completed;
@@ -8330,7 +8339,7 @@ mixin template Semantic(T) if(is(T==PointerTy)||is(T==DynArrTy)||is(T==ArrayTy))
 		static if(is(T==PointerTy))
 			return (rhs.isPointerTy() || rhs.isBasicType()).independent;
 		else static if(is(T==DynArrTy))
-			return (cast(bool)rhs.isDynArrTy()).independent;
+			return (!!rhs.isDynArrTy()).independent;
 		else return implicitlyConvertsTo(rhs);
 	}
 
@@ -8856,6 +8865,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 	Identifier[] checkMembership;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		{
 		if(lower) goto Llowered;
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
@@ -8907,6 +8917,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			lower=createRangeForeach(sc);
 			mixin(SemCheck);
 			goto Llowered;
+		}
 		}
 		// TODO: foreach over delegates
 		// TODO: foreach over Tuples
@@ -8980,7 +8991,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		symidx.loc=indexvar.loc;
 		auto index=New!IndexExp(agsymi,[cast(Expression)symidx]);
 		symidx.loc=agsym.loc;
-		vars[$-1].init=index;
+		vars[$-1].init_=index;
 
 		auto f=ForeachRangeStm.createForStmForRange(sc,var,indexvar,s_t,isReverse,left,right,bdy,mdecls,mups);
 		f.loc=loc;
@@ -9085,7 +9096,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		ielem.loc=vars[0].loc;
 		auto elem=New!(BinaryExp!(Tok!"."))(sym,ielem);
 		elem.loc=ielem.loc;
-		vars[0].init=elem;
+		vars[0].init_=elem;
 		auto s2=New!BlockStm([cast(Statement)vars[0],bdy]);
 		auto f=New!ForStm(s1,e1,e2,s2);
 		f.loc=loc;
@@ -9116,13 +9127,13 @@ mixin template Semantic(T) if(is(T==ForeachRangeStm)){
 	}
 
 	static ForStm createForStmForRange(Scope sc,ForeachVarDecl var,ForeachVarDecl idxvar,Type type,bool isReverse,Expression left, Expression right, Statement bdy, scope Statement[] mdecls=[],scope Statement[] mups=[]){
-		if(var){ assert(!var.init); var.init=left; }
+		if(var){ assert(!var.init_); var.init_=left; }
 		if(!idxvar){
 			idxvar=New!ForeachVarDecl(STC.init, type, null, isReverse?right:left);
-			idxvar.loc=idxvar.init.loc;
+			idxvar.loc=idxvar.init_.loc;
 		}
 		auto boundvar=New!ForeachVarDecl(STC.init, type, null, isReverse?left:right);
-		boundvar.loc=boundvar.init.loc;
+		boundvar.loc=boundvar.init_.loc;
 		auto tmpl=isReverse?boundvar:idxvar;
 		tmpl.presemantic(sc);
 		auto tmpr=isReverse?idxvar:boundvar;
@@ -9142,14 +9153,14 @@ mixin template Semantic(T) if(is(T==ForeachRangeStm)){
 		if(!isReverse){
 			e2=New!(UnaryExp!(Tok!"++"))(syml);
 			e2.loc=e1.loc;
-			if(var) var.init=syml;
+			if(var) var.init_=syml;
 			s2=New!BlockStm((var?[cast(Statement)var]:[])~mups~[bdy]);
 		}else{
 			auto edec=New!(UnaryExp!(Tok!"--"))(symr);
 			edec.loc=e1.loc;
 			auto sdec=New!ExpressionStm(edec);
 			sdec.loc=edec.loc;
-			if(var) var.init=symr;
+			if(var) var.init_=symr;
 			s2=New!BlockStm((var?[sdec,var]:[cast(Statement)sdec])~mups~[bdy]);
 		}
 		s2.loc=bdy.loc;
@@ -9189,7 +9200,7 @@ struct DisjointIntervalSet(T, alias l=(auto ref x)=>x.l,alias r=(auto ref x)=>x.
 	private size_t _length;
 	@property size_t length(){ return _length; }
 
-	auto S tryIntersect(S)(
+	S tryIntersect(S)(
 		T toIntersect,
 		scope S delegate(T) intersected,
 		scope S delegate() noneFound)
@@ -9201,7 +9212,7 @@ struct DisjointIntervalSet(T, alias l=(auto ref x)=>x.l,alias r=(auto ref x)=>x.
 	}
 
 	// TODO: how to accept both ref and non-ref delegates without using alias?
-	auto S insertOrIntersect(S)(
+	S insertOrIntersect(S)(
 		T toInsert,
 		scope S delegate() inserted,
 		scope S delegate(T)intersected)
@@ -9445,8 +9456,8 @@ mixin template Semantic(T) if(is(T==SwitchStm)){
 			if(et.decl){
 				mixin(SemChld!q{et.decl});
 				foreach(m;et.decl.members){
-					assert(m.init&&m.init.isConstant());
-					auto v=ComparisonValue(m.init.interpretV());
+					assert(m.init_&&m.init_.isConstant());
+					auto v=ComparisonValue(m.init_.interpretV());
 					auto cr=CaseRange(v,v);
 					if(!casesInOrder.tryIntersect(cr, (CaseRange _)=>true, ()=>false)){
 						if(!err){
@@ -9680,6 +9691,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 				if(!sc.isEnclosing(getLoweredEnclosingStatement())) goto Lerr;
 			}
 		}
+		{
 		auto fun=sc.getFunction();
 		if(auto oafun=fun.isOpApplyFunctionDef()){
 			if(oafun.lstm is mixin(_name)){
@@ -9696,6 +9708,7 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 		}
 		assert(!!mixin(_name));
 		mixin(SemEplg);
+		}
 	Lerr:
 		sc.error(format("enclosing label '%s' for "~_which~" statement not found",e.toString()),e.loc);
 		mixin(ErrEplg);
@@ -10053,22 +10066,22 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 
 		vd.stc|=type.getHeadSTC();
 		// TODO: this is controversial, and should only be done for fields
-		// if(vd.stc&(STCimmutable|STCconst) && vd.init) vd.stc|=STCstatic;
+		// if(vd.stc&(STCimmutable|STCconst) && vd.init_) vd.stc|=STCstatic;
 	};
 
-	final bool willInterpretInit()in{assert(!!init);}body{
+	final bool willInterpretInit()in{assert(!!init_);}body{
 		return stc&(STCenum|STCstatic) || isField;
 	}
 
 	protected void defaultInit(){
-		// convention: init is null means that the type should be zeroed out
-		if(!init && type && type.sstate == SemState.completed){
+		// convention: init_ is null means that the type should be zeroed out
+		if(!init_ && type && type.sstate == SemState.completed){
 			// default initializers
 			if(auto aggr=type.getUnqual().isAggregateTy())
 			if(auto strd=aggr.decl.isStructDecl()){
-				init = New!StructConsExp(type,(Expression[]).init);
-				init.loc = loc;
-				init.initOfVar(this);
+				init_ = New!StructConsExp(type,(Expression[]).init);
+				init_.loc = loc;
+				init_.initOfVar(this);
 			}
 		}
 
@@ -10086,14 +10099,14 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			mixin(PropRetry!q{rtype});
 		}
 
-		if(init){
-			init.initOfVar(this);
-			if(init.sstate!=SemState.completed){
-				if(willInterpretInit()) init.prepareInterpret();
-				mixin(SemChldExpPar!q{init});
+		if(init_){
+			init_.initOfVar(this);
+			if(init_.sstate!=SemState.completed){
+				if(willInterpretInit()) init_.prepareInterpret();
+				mixin(SemChldExpPar!q{init_});
 			}
 			// deduce type
-			if(!type && init.sstate!=SemState.error) type=init.type;
+			if(!type && init_.sstate!=SemState.error) type=init_.type;
 		}else if(!rtype && !type){
 			sc.error(format("initializer required for '%s' declaration",STCtoString(stc)),loc);
 			mixin(ErrEplg);
@@ -10120,20 +10133,20 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		// add appropriate storage classes according to type
 		stc |= type.getHeadSTC();
 		// TODO: this is controversial, and should only be done for fields
-		// if(stc&(STCimmutable|STCconst) && init) stc|=STCstatic;
+		// if(stc&(STCimmutable|STCconst) && init_) stc|=STCstatic;
 
-		if(!init) defaultInit(); // TODO: this is a hack (and incorrect, since some code relies on init==null)
+		if(!init_) defaultInit(); // TODO: this is a hack (and incorrect, since some code relies on init_==null)
 
-		if(init){
-			mixin(SemChldPar!q{init});
-			if(willInterpretInit()&&init.sstate==SemState.completed){
-				mixin(ImplConvertsTo!q{bool iconv;init, type});
+		if(init_){
+			mixin(SemChldPar!q{init_});
+			if(willInterpretInit()&&init_.sstate==SemState.completed){
+				mixin(ImplConvertsTo!q{bool iconv;init_, type});
 				// type deduction should finish before interpretation
 				// expressions with no deduced type have type 'void'
-				if(!iconv||type is Type.get!void()) mixin(FinishDeductionProp!q{init});
-				assert(init.sstate == SemState.completed, to!string(init));
-				init.interpret(sc);
-				mixin(PropRetry!q{init});
+				if(!iconv||type is Type.get!void()) mixin(FinishDeductionProp!q{init_});
+				assert(init_.sstate == SemState.completed, to!string(init_));
+				init_.interpret(sc);
+				mixin(PropRetry!q{init_});
 				// TODO: is there a more elegant way to handle array initialization?
 			}
 		}else if(stc&STCenum){
@@ -10147,45 +10160,45 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			if(!tc) tc = New!TupleContext();
 			ExpTuple et = null;
 			TypeTuple tt = null;
-			if(init && init.type){
-				et=init.isExpTuple();
-				if(!et) tt=init.type.isTypeTuple();
+			if(init_ && init_.type){
+				et=init_.isExpTuple();
+				if(!et) tt=init_.type.isTypeTuple();
 				if(et||tt){
 					if(len!=(et?et.length:tt.length)){
 						sc.error(format("tuple of %d elements cannot initialize tuple of %d elements",et.length,len),loc);
 						mixin(ErrEplg);
 					}
 				}else{
-					et = New!ExpTuple(len, init);
-					et.loc = init.loc;
-					init = et;
-					mixin(SemChldPar!q{init});
+					et = New!ExpTuple(len, init_);
+					et.loc = init_.loc;
+					init_ = et;
+					mixin(SemChldPar!q{init_});
 				}
 				// better error message for type mismatch:
-				if(!init.isVoidInitializerExp()&&init.sstate==SemState.completed){
-					mixin(ImplConvertsTo!q{bool iconv; init, type});
-					if(!iconv) mixin(ImplConvertTo!q{init, type});
+				if(!init_.isVoidInitializerExp()&&init_.sstate==SemState.completed){
+					mixin(ImplConvertsTo!q{bool iconv; init_, type});
+					if(!iconv) mixin(ImplConvertTo!q{init_, type});
 				}
 				///
 			}
-			if(init) assert(tt || init.sstate == SemState.error || et && et.length==len);
+			if(init_) assert(tt || init_.sstate == SemState.error || et && et.length==len);
 			// TODO: gc allocations
 			if(!tc.vds && !tc.initLeftover){
 				tc.vds = new VarDecl[cast(size_t)len];
 				Expression commaLeft=null;
-				if(init){
-					if(auto ce=init.isCommaExp()){
+				if(init_){
+					if(auto ce=init_.isCommaExp()){
 						commaLeft=ExpTuple.splitCommaExp(ce, et);
 						commaLeft.semantic(sc);
 						assert(commaLeft.sstate == SemState.completed);
-						init = et;
+						init_ = et;
 					}
 					assert(et || !willInterpretInit());
 				}
 				if(commaLeft && !tc.vds.length) tc.initLeftover=commaLeft;
 				foreach(i, ref x;tc.vds){
 					auto id  = name?New!Identifier("__tuple_"~name.name~"_"~to!string(i)):null;
-					auto ini = et?et.index(sc,InContext.none,init.loc,i):null;
+					auto ini = et?et.index(sc,InContext.none,init_.loc,i):null;
 					if(!i && commaLeft){
 						assert(ini);
 						auto nini=New!(BinaryExp!(Tok!","))(commaLeft, ini);
@@ -10221,20 +10234,20 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 				tc.tupleAlias.scope_=scope_;
 			}
 			mixin(SemChld!q{tc.tupleAlias});
-			if(init) mixin(SemProp!q{init});
+			if(init_) mixin(SemProp!q{init_});
 			return doSemEplg(); // Symbol will rewrite the meaning
 		}
 
-		if(init){
-			mixin(SemProp!q{init});
+		if(init_){
+			mixin(SemProp!q{init_});
 			// order is significant: fully interpreted expressions might carry information
 			// that allows more implicit conversions
-			if(!init.isVoidInitializerExp()){
-				mixin(ImplConvertTo!q{init,type});
+			if(!init_.isVoidInitializerExp()){
+				mixin(ImplConvertTo!q{init_,type});
 			}
-			if(!willInterpretInit()) mixin(FinishDeductionProp!q{init});
+			if(!willInterpretInit()) mixin(FinishDeductionProp!q{init_});
 			else{
-				mixin(IntChld!q{init});
+				mixin(IntChld!q{init_});
 				if(stc&STCenum){
 					prepareEnumInitializer();
 					//mixin(SemCheck);
@@ -10254,11 +10267,11 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 	}
 
 	private void prepareEnumInitializer(){
-		assert(init.isConstant()||init.isArrayLiteralExp());
+		assert(init_.isConstant()||init_.isArrayLiteralExp());
 		// re-allocate mutable dynamic array constants everywhere:
-		if(init.type.isDynArrTy()&&init.type.getElementType().isMutable()){
-			if(auto lexp=init.isLiteralExp()){
-				init=lexp.toArrayLiteral();
+		if(init_.type.isDynArrTy()&&init_.type.getElementType().isMutable()){
+			if(auto lexp=init_.isLiteralExp()){
+				init_=lexp.toArrayLiteral();
 			}
 		}
 	}
@@ -10267,7 +10280,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 		mixin(ErrEplg);
 	}
 	final protected void actuallyHandleRef(Scope sc){
-		if(init&&!init.checkLvalue(sc, init.loc)) mixin(ErrEplg);
+		if(init_&&!init_.checkLvalue(sc, init_.loc)) mixin(ErrEplg);
 	}
 
 	override @property string kind(){
@@ -10290,7 +10303,7 @@ mixin template Semantic(T) if(is(T==Parameter)){
 	}
 
 	final bool mustBeTypeDeduced(){
-		return !type && !rtype && !init;
+		return !type && !rtype && !init_;
 	}
 
 	override void defaultInit(){} // parameters are not default-initialized
@@ -10412,10 +10425,10 @@ mixin template Semantic(T) if(is(T==EnumVarDecl)){
 	override void semantic(Scope sc){
 		assert(enc.name&&sc is enc.msc||sc is enc.scope_);
 		mixin(SemPrlg);
-		if(!init){
+		if(!init_){
 			if(!prec){
-				init = LiteralExp.factory(Variant(0, Type.get!int()));
-				init.loc=loc;
+				init_ = LiteralExp.factory(Variant(0, Type.get!int()));
+				init_.loc=loc;
 			}else{
 				mixin(SemChld!q{prec});
 				assert(prec.rinit);
@@ -10423,26 +10436,26 @@ mixin template Semantic(T) if(is(T==EnumVarDecl)){
 				auto previnit=prec.rinit.cloneConstant();
 				auto one=LiteralExp.factory(Variant(1,Type.get!int()));
 				// TODO: prettier error messages?
-				init=New!(BinaryExp!(Tok!"+"))(previnit,one);
-				init.loc=previnit.loc=one.loc=loc;
+				init_=New!(BinaryExp!(Tok!"+"))(previnit,one);
+				init_.loc=previnit.loc=one.loc=loc;
 			}
 		}
 		needRetry=false;
 		if(!rinit) super.semantic(sc);
 		mixin(SemCheck);
 		if(!prec&&!enc.base) enc.base=type;
-		if(!rinit) rinit=init;
+		if(!rinit) rinit=init_;
 		if(enc.name){
 			auto ty=enc.getType();
 			assert(!!ty);
 			mixin(GetEnumBase!q{auto base;enc});
-			assert(init.type is type && base);
+			assert(init_.type is type && base);
 			mixin(ImplConvertsTo!q{auto b; type, base});
 			if(!b){
-				sc.error(format("incompatible initializer '%s' of type '%s' for enum member of base type '%s'",init, init.type, base), loc);
+				sc.error(format("incompatible initializer '%s' of type '%s' for enum member of base type '%s'",init_, init_.type, base), loc);
 				mixin(ErrEplg);
 			}
-			mixin(ConvertTo!q{init,ty});
+			mixin(ConvertTo!q{init_,ty});
 		}
 		mixin(SemEplg);
 	}
@@ -10507,7 +10520,7 @@ mixin template Semantic(T) if(is(T==EnumDecl)){
 			mixin(SemProp!q{rbase});
 		}
 		mixin(SemChld!q{sc=msc?msc:sc;members[0]});
-		assert(members[0].init.isConstant());
+		assert(members[0].init_.isConstant());
 		if(name && !base) base=members[0].rinit.type;
 		foreach(i,ref m;members[1..$])
 			mixin(SemChldPar!q{sc=msc?msc:sc;m});
@@ -10651,7 +10664,7 @@ mixin template Semantic(T) if(is(T==AliasDecl)){
 		mixin(SemPrlg);
 		if(!aliasee){
 		if(auto vd = decl.isVarDecl()){
-			if(vd.init){
+			if(vd.init_){
 				sc.error("alias declarations cannot have initializers",loc);
 				mixin(ErrEplg);
 			}
@@ -10968,7 +10981,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				this.name=name;
 				needRetry = nr;
 			}
-			void semantic(Scope sc){
+			override void semantic(Scope sc){
 				mixin(SemPrlg);
 				mixin(LookupSealedOverloadSetWithRetry!q{auto setnr;self,view,name});
 				if(setnr[1]) { needRetry=setnr[1]; return; }
@@ -10981,10 +10994,12 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 	private Dependent!void addToVtbl(FunctionDecl decl){
 		// inherit vtbl (need to wait until parent is finished with semantic)
 		mixin(InheritVtbl!q{ClassDecl parent; this});
+		OverloadSet set=null;
 		if(!parent) goto Lfresh;
+		{
 		mixin(LookupSealedOverloadSetWithRetry!q{auto setnr; parent, asc, decl.name});
 		if(setnr[1]){ needRetry=setnr[1]; return indepvoid; }
-		auto set=setnr[0];
+		set=setnr[0];
 		if(!set) goto Lfresh;
 
 		// need to provide new/aliased versions for ALL overloads
@@ -11008,6 +11023,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				vtbl.addOverride(ovr, decl);
 				return indepvoid;
 			}
+		}
 		}
 	Lfresh:
 		if(!set && decl.stc & STCoverride){
@@ -11104,6 +11120,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 		mixin(CheckCircularInheritance!q{_;this});
 		mixin(InheritVtbl!q{ClassDecl _; this});
 		if(!parents.length) goto Lvtbl;
+		{
 		assert(parents[0].sstate==SemState.error||!!cast(AggregateTy)parents[0]);
 		bool hasExplicitBaseClass = false;
 		if(parents[0].sstate != SemState.error){
@@ -11124,6 +11141,7 @@ mixin template Semantic(T) if(is(T==ReferenceAggregateDecl)){
 				mixin(SetErr!q{rparents[1+i]});
 			}
 			{alias scope_ sc;mixin(SemChldPar!q{rparents[1+i]});}
+		}
 		}
 	Lvtbl:
 		enum SemRet = q{ return; };
@@ -12231,7 +12249,7 @@ class FunctionOverloadMatcher: SymbolMatcher{
 		}
 	}
 
-	void emitError(Scope sc){
+	override void emitError(Scope sc){
 		if(sc) set.matchError(sc, loc, this_, args);
 	}
 
@@ -12421,13 +12439,13 @@ mixin template Semantic(T) if(is(T==FunctionDecl)){
 		if(r && !isFunctionDef() && rhs.isFunctionDef() && type.equals(rhs.type)
 		   && stc == rhs.stc && scope_ is rhs.scope_) // TODO: consider linkage
 			return false.independent;
-		return (cast(bool)r).independent;
+		return (!!r).independent;
 	}
 
 	override void matchError(Scope sc, Location loc, Type this_, Expression[] args){
 		alias util.any any; // TODO: file bug
 		if(args.length > type.params.length
-		|| any!(_=>_.init is null)(type.params[args.length..type.params.length])){
+		|| any!(_=>_.init_ is null)(type.params[args.length..type.params.length])){
 			sc.error(format("too %s arguments to %s '%s'",args.length<type.params.length?"few":"many", kind, signatureString()[0..$-1]),loc);
 			sc.note("declared here",this.loc);
 			return;

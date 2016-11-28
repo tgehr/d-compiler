@@ -70,7 +70,7 @@ STC oneSTCOf(STC stc){
 	return stc&-stc;
 }
 
-private string getTTCases(string[] s,string[] excl = []){
+private string getTTCases(const(string[]) s,string[] excl = []){
 	string r="case ";
 	foreach(x;s) if(!excl.canFind(x)) r~="Tok!\""~x~"\",";
 	return r[0..$-1]~":";
@@ -1044,11 +1044,13 @@ private struct Parser{
 				break;
 			}
 			if(ttype == Tok!"(") goto isdglit;
+			{
 			restoreState(save);
 			nextToken();
 			auto e=parseAssocArgumentList!("}",false,StructAssocExp)();
 			expect(Tok!"}");
 			return res=New!StructLiteralExp(e);
+			}
 		isdglit:
 			restoreState(save);
 			return parseExpression(rbp!(Tok!","));
@@ -1721,7 +1723,7 @@ private struct Parser{
 				return res=New!ExternDecl(stc,lt,cast(Declaration)cast(void*)parseCondDeclBody(flags));
 			case Tok!"typedef": nextToken(); return res=New!TypedefDecl(stc,parseDeclaration(tok.loc));
 			case Tok!"@": goto case;
-			mixin(getTTCases(cast(string[])toplevelSTC,["align", "enum", "extern","static"]));
+			mixin(getTTCases(toplevelSTC,["align", "enum", "extern","static"]));
 				STC nstc; // parseSTC might parse nothing in case it is actually a type constructor
 				enum STCs={string[] r; foreach(x;toplevelSTC) if(x!="align"&&x!="enum"&&x!="extern"&&x!="static") r~=x;return r;}();
 				stc|=nstc=parseSTC!STCs().stc; // TODO: deprecation message

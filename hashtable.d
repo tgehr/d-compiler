@@ -130,7 +130,7 @@ struct HashMap(K, V, alias eq_ , alias h_){
 		auto r="[";
 		foreach(b;es) foreach(e;b) r~=text(e.k,":",e.v)~", ";
 		if(r.length>2) r=r[0..$-2];
-		r.assumeSafeAppend();
+		//r.assumeSafeAppend();
 		r~="]";
 		return r;
 	}

@@ -113,7 +113,7 @@ class EnumDecl: Declaration{
 	EnumVarDecl[] members;
 	this(STC stc,Identifier name, Expression rbase, EnumVarDecl[] mem){this.rbase=rbase; members=mem; super(stc,name);}
 	override string toString(){return (stc?STCtoString(astStc)~" ":"")~"enum"~(name?" "~name.toString():"")~(rbase?":"~rbase.toString():"")~
-			"{"~join(map!(a=>a.name.toString()~(a.init?"="~a.init.toString():""))(members),",")~"}";}
+			"{"~join(map!(a=>a.name.toString()~(a.init_?"="~a.init_.toString():""))(members),",")~"}";}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -217,20 +217,20 @@ enum WhichTemplateParameter{
 
 final class TemplateParameter: Node{
 	Identifier name;
-	Expression rtype, rspec, init;
+	Expression rtype, rspec, init_;
 	Type type, spec;
 	Expression espec;
 
 	WhichTemplateParameter which;
 	this(WhichTemplateParameter which, Expression tt, Identifier name, Expression specialization, Expression deflt){
 		this.which = which; this.name = name;
-		rtype=tt; rspec=specialization; init=deflt;
+		rtype=tt; rspec=specialization; init_=deflt;
 	}
 	override string toString(){
 		bool isAlias = which == WhichTemplateParameter.alias_;
 		bool isTuple = which == WhichTemplateParameter.tuple;
 		return (isAlias?"alias ":"")~(rtype?rtype.toString()~" ":"")~(name?name.toString():"")~
-			(isTuple?"...":"")~(rspec?":"~rspec.toString():"")~(init?"="~init.toString():"");
+			(isTuple?"...":"")~(rspec?":"~rspec.toString():"")~(init_?"="~init_.toString():"");
 	}
 	override string kind(){return "template parameter";}
 
@@ -373,11 +373,11 @@ class TemplateFunctionDecl: OverloadableDecl{
 
 class VarDecl: Declaration{
 	Expression rtype;
-	Expression init;
+	Expression init_;
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){
-		this.stc=stc; this.rtype=rtype; init=initializer; super(stc,name);
+		this.stc=stc; this.rtype=rtype; init_=initializer; super(stc,name);
 	}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~(name?name.toString():"")~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~(rtype?rtype.toString()~" ":type?type.toString()~" ":"")~(name?name.toString():"")~(init_?"="~init_.toString():"")~";";}
 
 	override VarDecl isVarDecl(){return this;}
 
@@ -390,7 +390,7 @@ class CArrayDecl: VarDecl{
 	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
 		postfix=pfix; super(stc, rtype, name, initializer);
 	}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"")~";";}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init_?"="~init_.toString():"")~";";}
 
 	mixin DownCastMethod;
 	mixin Visitors;
@@ -405,8 +405,8 @@ class Declarators: Declaration{
 		return decls.map!(a=>a.toString()).join;
 		/+string r=(decls[0].stc?STCtoString(decls[0].stc)~" ":"")~(decls[0].type?decls[0].type.toString()~" ":"");
 		//return r~join(map!((a){return a.name.toString();})(decls),","); // WTF???
-		foreach(x;decls[0..$-1]) r~=x.name.toString()~(x.init?"="~x.init.toString():"")~",";
-		return r~decls[$-1].name.toString()~(decls[$-1].init?"="~decls[$-1].init.toString():"")~";";+/
+		foreach(x;decls[0..$-1]) r~=x.name.toString()~(x.init_?"="~x.init_.toString():"")~",";
+		return r~decls[$-1].name.toString()~(decls[$-1].init_?"="~decls[$-1].init_.toString():"")~";";+/
 	}
 	mixin Visitors;
 }
@@ -414,14 +414,14 @@ class Declarators: Declaration{
 class Parameter: VarDecl{ // for functions, foreach etc
 	this(STC stc, Expression rtype, Identifier name, Expression initializer){super(stc,rtype,name,initializer);}
 	override string toString(){return (rtype?STCtoString(astStc)~(astStc?" ":"")~rtype.toString():type?STCtoString(stc)~(stc?" ":"")~type.toString()~" ":"")~
-			(name?(stc||rtype?" ":"")~name.toString():"")~(init?"="~init.toString():"");}
+			(name?(stc||rtype?" ":"")~name.toString():"")~(init_?"="~init_.toString():"");}
 	override @property string kind(){return "parameter";}
 
 	mixin Visitors;
 }
 
 class ForeachVarDecl: Parameter{ // foreach variable
-	this(STC stc, Expression rtype, Identifier name, Expression init){super(stc,rtype,name,init);}
+	this(STC stc, Expression rtype, Identifier name, Expression init_){super(stc,rtype,name,init_);}
 	mixin Visitors;
 }
 
@@ -430,7 +430,7 @@ class CArrayParam: Parameter{
 	this(STC stc, Expression rtype, Identifier name, Expression pfix, Expression initializer)in{assert(rtype&&name&&pfix);}body{
 		postfix=pfix; super(stc, rtype, name, initializer);
 	}
-	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init?"="~init.toString():"");}
+	override string toString(){return (stc?STCtoString(astStc)~" ":"")~rtype.toString()~" "~postfix.toString()~(init_?"="~init_.toString():"");}
 
 	mixin Visitors;
 }

@@ -63,7 +63,7 @@ S escape(S)(S i,bool isc=false)if(isSomeString!S){ // TODO: COW, replace with st
 			case '\0': r~="\\0"; break;
 			case ' ':  r~=" "; break;
 			default:
-				if(uni.isWhite(x)) r~=format("\\u%4.4X",cast(uint)x); // wtf? 
+				if(uni.isWhite(x)) r~=to!S(format("\\u%4.4X",cast(uint)x)); // wtf? 
 				else r~=x; break;
 		}
 	}
@@ -270,7 +270,7 @@ T fastCast(T,R)(R x) if(isFinal!T){return typeid(x) is typeid(T)?cast(T)cast(voi
 struct AAbyIdentity(K,V){
 	V[K] x;
 	size_t opHash()const @trusted pure nothrow{ return cast(size_t)cast(void*)x; }
-	int opEquals(const ref AAbyIdentity rhs)const @safe pure nothrow{ return x is rhs.x; }
+	bool opEquals(const ref AAbyIdentity rhs)const @safe pure nothrow{ return x is rhs.x; }
 }
 auto byid(K,V)(V[K] x){ return AAbyIdentity!(K,V)(x); }
 
@@ -364,8 +364,13 @@ bool all(alias a=(bool _)=>_,R)(R range){// if(is(typeof(a(R.front.init)): bool)
 	return true;
 }
 
-bool among(S,T...)(S arg,T args){
-	foreach(ref x; args)
-		if(arg == x) return true;
-	return false;
+static if(is(typeof(std.algorithm.among(0))))
+	alias std.algorithm.among among;
+else{
+	int among(S,T...)(S arg,T args){
+		foreach(i,ref x; args)
+			if(arg == x) return i+1;
+		return 0;
+	}
 }
+
