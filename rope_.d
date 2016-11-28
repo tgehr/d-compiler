@@ -64,7 +64,7 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 	struct Rope{
 		static if(segtree) private SliceSegTree* tree;
 		private this(T[] array){
-			this.array = array;
+			this.array_ = array;
 			if(array==[]) return;
 			static if(segtree){
 				tree=new SliceSegTree(buildSegTree(array/+.map!(function(a)=>a.tmplArgToHash().assocHash())+/),0,array.length);
@@ -74,33 +74,33 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 		static if(segtree){
 			@property value(){ return isArray()?tree?tree.value:S.init:rope.value; }
 			private this(T[] array, SliceSegTree* tree){
-				this.array = array;
+				this.array_ = array;
 				if(array==[]) return;
 				this.tree = tree;
 			}
 		}
 
 		private this(RopeImpl* rope){ this.rope = rope; }
-		invariant(){ assert(cast(void*)rope is array.ptr); }
-		/*private*/ union{
-			T[] array=void;
+		invariant(){ assert(cast(void*)rope is array_.ptr); }
+		private union{
+			T[] array_=void;
 			struct{
 				size_t padding=0;
 				RopeImpl* rope=void;
 			}
 		}
-		private @property bool isArray(){ return array.length || rope is null; }
+		private @property bool isArray(){ return array_.length || rope is null; }
 		private RopeImpl* toImpl(){
 			if(isArray()){
-				static if(segtree) return new RopeImpl(array,tree);
-				else return new RopeImpl(array);
+				static if(segtree) return new RopeImpl(array_,tree);
+				else return new RopeImpl(array_);
 			}
 			return rope;
 		}
 		auto generalize(Q)()if(is(Q==class)&&is(T==class)&&is(T:Q)){
 			return cast(Rope!(Q,S))this;
 		}
-		@property size_t length(){ return isArray() ? array.length : rope.length; }
+		@property size_t length(){ return isArray() ? array_.length : rope.length; }
 		Rope opBinary(string op:"~")(Rope rhs){
 			if(!length) return rhs;
 			if(!rhs.length) return this;
@@ -121,11 +121,11 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 		}
 		Rope opSlice(size_t a, size_t b)in{assert(a<=b && b<=length,text(this," ",a," ",b));}body{
 			if(a==b) return Rope([]);
-			if(isArray()) return Rope(array[a..b],(*tree)[a..b]);
+			if(isArray()) return Rope(array_[a..b],(*tree)[a..b]);
 			return Rope((*rope)[a..b]);
 		}
 		T opIndex(size_t i){
-			if(isArray()) return array[i];
+			if(isArray()) return array_[i];
 			return (*rope)[i];
 		}
 		Rope opIndexAssign(T t,size_t i){
@@ -136,11 +136,11 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 		}
 
 		int opApply(scope int delegate(T) dg){
-			if(isArray()){foreach(x;array) if(auto r=dg(x)) return r; return 0; }
+			if(isArray()){foreach(x;array_) if(auto r=dg(x)) return r; return 0; }
 			return rope.opApply(dg);
 		}
 		int opApply(scope int delegate(size_t,T) dg){
-			if(isArray()){foreach(i,x;array) if(auto r=dg(i,x)) return r; return 0; }
+			if(isArray()){foreach(i,x;array_) if(auto r=dg(i,x)) return r; return 0; }
 			return rope.opApply(dg);
 		}
 
@@ -169,17 +169,17 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			static if(segtree) value=l.value.combine(r.value);
 		}
 		this(T[] array, SliceSegTree* tree){
-			this.array=array;
+			this.array_=array;
 			this.tree=tree;
 			value=tree.value;
 		}
 		union{
-			T[] array;
+			T[] array_;
 			struct{
 				size_t length;
 				RopeImpl* l,r; // TODO: can be left unallocated if tag == Array
 			}
-			invariant(){ assert(array.length==length); }
+			invariant(){ assert(array_.length==length); }
 		}
 		// TODO: use treap instead of random balancing
 		RopeImpl* opBinary(string op:"~")(RopeImpl* rhs){
@@ -200,37 +200,37 @@ template Rope(T,S=void)if(is(S==void) || is(typeof((S a,S b)=>a.combine(b)))){
 			else return new RopeImpl(this~rhs.l,rhs.r);
 		}
 		T opIndex(size_t i){
-			if(tag==Tag.Array) return array[i];
+			if(tag==Tag.Array) return array_[i];
 			if(i<l.length) return (*l)[i];
 			return (*r)[i-l.length];
 		}
 		RopeImpl* opSlice(size_t a, size_t b){
 			if(a==0&&b==length) return &this;
-			if(tag==Tag.Array) return new RopeImpl(array[a..b], (*tree)[a..b]);
+			if(tag==Tag.Array) return new RopeImpl(array_[a..b], (*tree)[a..b]);
 			if(b<=l.length) return (*l)[a..b];
 			if(l.length<=a) return (*r)[a-l.length..b-l.length];
 			return *(*l)[a..l.length]~(*r)[0..b-l.length];
 		}
 
 		int opApply(scope int delegate(T) dg){
-			if(tag==Tag.Array){foreach(x;array) if(auto r=dg(x)) return r; return 0; }
+			if(tag==Tag.Array){foreach(x;array_) if(auto r=dg(x)) return r; return 0; }
 			if(auto r=l.opApply(dg)) return r;
 			return r.opApply(dg);
 		}
 		int opApply(scope int delegate(size_t,T) dg,size_t start=0){
-			if(tag==Tag.Array){foreach(i,x;array) if(auto r=dg(start+i,x)) return r; return 0; }
+			if(tag==Tag.Array){foreach(i,x;array_) if(auto r=dg(start+i,x)) return r; return 0; }
 			if(auto r=l.opApply(dg,start)) return r;
 			return r.opApply(dg,start+l.length);
 		}
 
 		// in-place update.
 		int unsafeByRef(scope int delegate(ref T) dg){
-			if(tag==Tag.Array){foreach(ref x;array) if(auto r=dg(x)) return r; return 0; }
+			if(tag==Tag.Array){foreach(ref x;array_) if(auto r=dg(x)) return r; return 0; }
 			if(auto r=l.unsafeByRef(dg)) return r;
 			return r.unsafeByRef(dg);
 		}
 		int unsafeByRef(scope int delegate(size_t,ref T) dg,size_t start=0){
-			if(tag==Tag.Array){foreach(i,ref x;array) if(auto r=dg(start+i,x)) return r; return 0; }
+			if(tag==Tag.Array){foreach(i,ref x;array_) if(auto r=dg(start+i,x)) return r; return 0; }
 			if(auto r=l.unsafeByRef(dg,start)) return r;
 			return r.unsafeByRef(dg,start+l.length);			
 		}
@@ -242,13 +242,13 @@ struct UnsafeByRef(T,S){
 	Rope!(T,S) enc;
 	int opApply(scope int delegate(size_t,ref T) dg){
 		with(enc){
-			if(isArray()){foreach(i,ref x;array) if(auto r=dg(i,x)) return r; return 0; }
+			if(isArray()){foreach(i,ref x;array_) if(auto r=dg(i,x)) return r; return 0; }
 			return rope.unsafeByRef(dg);
 		}
 	}
 	int opApply(scope int delegate(ref T) dg){
 		with(enc){
-			if(isArray()){foreach(ref x;array) if(auto r=dg(x)) return r; return 0; }
+			if(isArray()){foreach(ref x;array_) if(auto r=dg(x)) return r; return 0; }
 			return rope.unsafeByRef(dg);
 		}
 	}
