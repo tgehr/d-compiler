@@ -6,7 +6,7 @@ import std.stdio, std.algorithm, std.array;
 
 import std.conv : to;
 import core.memory;
-import std.c.stdlib;
+import core.stdc.stdlib;
 
 import std.path;
 

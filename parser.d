@@ -124,7 +124,7 @@ private template doParseImpl(bool d,T...){
 				case "_": return "nextToken();\n"~doParseImpl!(d,T[1..$]);
 				case "NonEmpty":
 					enum what=is(T[1]==CondDeclBody)?"declaration":"statement";
-					return `nonEmpty!"`~what~`"();`"\n"~doParseImpl!(d,T[1..$]);
+					return `nonEmpty!"`~what~(`"();`~"\n")~doParseImpl!(d,T[1..$]);
 				case "OPT":
 				static if(T[0]=="OPT")
 						return (d?"auto ":"")~T[2]~" = "~(T[3]!=")"?"ttype==Tok!\""~T[3]~"\" || ":"")~"ttype==Tok!\")\" ? null : "~
@@ -556,10 +556,10 @@ private struct Parser{
 			case Tok!"new":
 				nextToken();
 				if(ttype==Tok!"class"){
-					mixin(doParse!("_","OPT"q{"(",ArgumentList,"args",")"}));
+					mixin(doParse!("_","OPT"~q{"(",ArgumentList,"args",")"}));
 					auto aggr=cast(ClassDecl)cast(void*)parseAggregateDecl(STC.init,true); // it is an anonymous class, static cast is safe
 					mixin(rule!(NewClassExp,Existing,q{args,aggr}));
-				}else{mixin(rule!(NewExp,"OPT"q{"(",ArgumentList,")"},Type,"OPT"q{"(",ArgumentList,")"}));}
+				}else{mixin(rule!(NewExp,"OPT"~q{"(",ArgumentList,")"},Type,"OPT"~q{"(",ArgumentList,")"}));}
 			case Tok!"assert": mixin(rule!(AssertExp,"_","(",ArgumentList,")"));
 			case Tok!"mixin": mixin(rule!(MixinExp,"_","(",ArgumentList,")"));
 			case Tok!"import": mixin(rule!(ImportExp,"_","(",ArgumentList,")"));
@@ -719,7 +719,7 @@ private struct Parser{
 				auto r=parseBlockStm();
 				r.loc = loc.to(tok.loc);
 				return r;
-			mixin(pStm!("if","(",Condition,")","NonEmpty",Statement,"OPT"q{"else","NonEmpty",Statement}));
+			mixin(pStm!("if","(",Condition,")","NonEmpty",Statement,"OPT"~q{"else","NonEmpty",Statement}));
 			mixin(pStm!("while","(",Condition,")","NonEmpty",Statement));
 			mixin(pStm!("do","NonEmpty",Statement,"while","(",Expression,")",";"));
 			mixin(pStm!("for","(",NoScopeStatement,"OPT",Condition,";","OPT",Expression,")","NonEmpty",Statement));
@@ -820,18 +820,18 @@ private struct Parser{
 						return parseStmError();
 				}
 			mixin(pStm!("with","(",Expression,")","NonEmpty",Statement));
-			mixin(pStm!("synchronized","OPT"q{"(",Expression,")"},Statement));
+			mixin(pStm!("synchronized","OPT"~q{"(",Expression,")"},Statement));
 			case Tok!"try":
 				mixin(doParse!("_",Statement,"ss"));
 				auto catches=appender!(CatchStm[])();
 				if(ttype != Tok!"finally") do{ // TODO: abstract loop away, as soon as compile memory usage is better
 					Location loc=tok.loc;
-					mixin(doParse!("catch","OPT"q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
+					mixin(doParse!("catch","OPT"~q{"(",Type,"type","OPT",Identifier,"ident",")"},"NonEmpty",Statement,"s"));
 					auto c=New!CatchStm(type,ident,s); c.loc=loc.to(ptok.loc);
 					catches.put(c);
 					if(!type) break; // this really should work as loop condition!
 				}while(ttype==Tok!"catch");
-				mixin(doParse!("OPT"q{"finally",Statement,"finally_"}));
+				mixin(doParse!("OPT"~q{"finally",Statement,"finally_"}));
 				mixin(rule!(TryStm,Existing,q{ss,catches.data,finally_}));
 			mixin(pStm!("throw",Expression,";"));
 			case Tok!"scope":
@@ -893,11 +893,11 @@ private struct Parser{
 			case Tok!"i": tt=parseIdentifierList(); break;
 			mixin({string r;
 				foreach(x;typeQualifiers) r~=q{
-					case Tok!}`"`~x~`":`q{
+					case Tok!}~`"`~x~`":`~q{
 						auto loc=tok.loc;
 						nextToken();
 						if(ttype==Tok!"(") brk=true, nextToken();
-						auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}`"`~x~`"`q{))(e);if(brk) expect(Tok!")");
+						auto e=parseType(); /*e.brackets+=brk;*/ tt=New!(QualifiedType!(Tok!}~`"`~x~`"`~q{))(e);if(brk) expect(Tok!")");
 						tt.loc=loc.to(ptok.loc);
 						break;
 				};
@@ -970,7 +970,7 @@ private struct Parser{
 				if(!skipIdentifierList()) goto Lfalse; break;
 			mixin({string r;
 				foreach(x;typeQualifiers) r~=q{
-					case Tok!}`"`~x~`":`q{
+					case Tok!}~`"`~x~`":`~q{
 						nextToken(); bool brk=skip(Tok!"("); if(!skipType()||brk&&!skip(Tok!")")) return false;
 						break;
 				};
@@ -1666,17 +1666,17 @@ private struct Parser{
 				nextToken();
 				auto tt=ttype;
 				if(tt==Tok!"assert"){mixin(rule!(StaticAssertDecl,Existing,"stc","_","(",ArgumentList,")",";"));}
-				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));}
+				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",CondDeclBody,"OPT"~q{"else","NonEmpty",CondDeclBody}));}
 				stc|=STCstatic;
 				goto dispatch;
 			case Tok!"debug":
 				nextToken();
 				if(ttype==Tok!"="){mixin(rule!(DebugSpecDecl,Existing,"stc","_",DebugCondition,";"));}
-				mixin(rule!(DebugDecl,Existing,"stc","OPT"q{"(",DebugCondition,")"},"NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
+				mixin(rule!(DebugDecl,Existing,"stc","OPT"~q{"(",DebugCondition,")"},"NonEmpty",CondDeclBody,"OPT"~q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"version":
 				nextToken();
 				if(ttype==Tok!"="){mixin(rule!(VersionSpecDecl,Existing,"stc","_",DebugCondition,";"));}
-				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",CondDeclBody,"OPT"q{"else","NonEmpty",CondDeclBody}));
+				mixin(rule!(VersionDecl,Existing,"stc","(",VersionCondition,")","NonEmpty",CondDeclBody,"OPT"~q{"else","NonEmpty",CondDeclBody}));
 			case Tok!"pragma":
 				mixin(rule!(PragmaDecl,Existing,"stc","_","(",PTuple,")",CondDeclBody)); // Body can be empty
 			case Tok!"import":

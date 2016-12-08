@@ -3,7 +3,7 @@
 // License: http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0
 
 import std.stdio;
-import std.c.stdlib;
+import core.stdc.stdlib;
 
 enum CSI = "\033[";
 enum RESET=CSI~"0m";
