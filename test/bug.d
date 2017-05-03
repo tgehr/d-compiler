@@ -1,13 +1,11 @@
-struct S{
-	@property bool empty(){
-		return false;
-	}
+
+/+
+template empty(alias x){
+	enum empty=x.empty();
 }
 
-enum empty(alias x)=x.empty;
-
 pragma(msg, empty!(S()));
-
++/
 
 /+
 // +---

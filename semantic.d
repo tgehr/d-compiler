@@ -5309,7 +5309,6 @@ mixin template Semantic(T) if(is(T==CallExp)){
 		}
 
 		foreach(ref x;adapted) if(x) mixin(SemChld!q{x});
-
 		type = tt.ret;
 
 		if(tt.params.length > args.length){
@@ -6704,8 +6703,14 @@ mixin template Semantic(T) if(is(T==FieldExp)){
 	}
 
 	override bool isConstant(){ return e1.isConstant(); }
-	override bool isConstFoldable(){ return e1.isConstFoldable(); }
-
+	override bool isConstFoldable(){
+		if(!e1.isConstFoldable()) return false;
+		if(e2.meaning){
+			if(auto vd=e2.meaning.isVarDecl())
+				return vd.stc&STCenum || !(vd.stc&STCstatic);
+		}else return true; // (array length)
+		return false;
+	}
 	// TemplateDecl needs this.
 	override bool tmplArgEquals(Expression rhs){
 		if(e1.isCurrentExp()){

@@ -1,3 +1,15 @@
+struct MemberFunctionNoConstFold{
+	static:
+	struct S{
+		bool empty(){
+			return false;
+		}
+	}
+	enum x=S();
+	enum empty=x.empty;
+	static assert(!empty);
+}
+
 struct TestScheduling{
 	static:
 	alias Seq(T...)=T;

@@ -246,7 +246,10 @@ mixin template Interpret(T) if(is(T==Symbol)){
 mixin template Interpret(T) if(is(T==FieldExp)){
 	override bool checkInterpret(Scope sc){
 		// more or less duplicated above
-		if(!e2.meaning.isVarDecl()) return false;
+		if(!e2.meaning.isVarDecl()){
+			sc.error("cannot interpret member function at compile time",loc); // TODO: allow?
+			return false;
+		}
 		if(e2.meaning.sstate == SemState.error) return false;
 		if(e2.isConstant()) return true;
 		auto this_=e1.extractThis();
@@ -576,7 +579,7 @@ mixin template Interpret(T) if(is(T _==UnaryExp!S,TokenType S)){
 		FunctionDef ctfeCallWrapper;
 
 	}else static if(S!=Tok!"++"&&S!=Tok!"--"):
-	override bool checkInterpret(Scope sc){return e.checkInterpret(sc);}
+	override bool checkInterpret(Scope sc){ return e.checkInterpret(sc); }
 	override Variant interpretV(){
 		return e.interpretV().opUnary!(TokChars!S)();
 	}
