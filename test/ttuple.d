@@ -1,3 +1,42 @@
+struct AliasSeqOf{
+	static:
+	alias Seq(T...)=T;
+	
+	auto iota(int a,int b){
+		static struct Iota{
+			int a,b;
+			this(int a,int b){
+				this.a=a;
+				this.b=b;
+			}
+			bool empty(){
+				return a>=b;
+			}
+			void popFront(){
+			++a;
+			}
+			@property int front(){
+				return a;
+			}
+		}
+		return Iota(a,b);
+	}
+	
+	auto rest(T)(T arg){
+		arg.popFront();
+		return arg;
+	}
+	
+	template aliasSeqOf(alias x,T...){
+		static if(x.empty) alias aliasSeqOf=T;
+		else{
+			enum front=x.front;
+			alias aliasSeqOf=aliasSeqOf!(rest(x),T,front);
+		}
+	}	
+	static assert(aliasSeqOf!(iota(0,10))==Seq!(0,1,2,3,4,5,6,7,8,9));
+}
+
 struct TestSeqAccessCheck2{
 	static:
 	alias Seq(T...)=T;
