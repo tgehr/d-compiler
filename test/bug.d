@@ -1,3 +1,233 @@
+struct S{
+	@property bool empty(){
+		return false;
+	}
+}
+
+enum empty(alias x)=x.empty;
+
+pragma(msg, empty!(S()));
+
+
+/+
+// +---
+alias Seq(T...)=T;
+
+auto iota(int a,int b){
+	static struct Iota{
+		int a,b;
+		this(int a,int b){
+			this.a=a;
+			this.b=b;
+		}
+		bool empty(){
+			return a>=b;
+		}
+		void popFront(){
+			++a;
+		}
+		@property int front(){
+			return a;
+		}
+	}
+	return Iota(a,b);
+}
+
+auto rest(T)(T arg){
+	arg.popFront();
+	return arg;
+}
+
+template aliasSeqOf(alias x,T...){
+	static if(x.empty) alias aliasSeqOf=T;
+	else{
+		enum front=x.front;
+		alias aliasSeqOf=aliasSeqOf!(x.rest,T,front);
+	}
+}
+
+pragma(msg, empty!(iota(0,500)));
+// ---+
++/
+
+/+
+int test(){
+	int a=1,b=1,c=1;
+
+	int k=a && b && ++c;
+	return c;
+}
+
+pragma(msg, test());+/
+
+/+
+string text(int x){
+	if(!x) return "0";
+	if(x<0) return "-"~text(-x);
+	string r;
+	while(x){
+		r~=cast(char)('0'+x%10);
+		x/=10;
+	}
+	return r;
+}
++/
+/+
+static foreach(i;0..10){
+	mixin(`int foo`~text(i)~`(){ return i; }`);
+	int mixin(`foo`~text(i))(){ return i; }
+}
++/
+
+/+
+int add8ret3(ref int x){
+	x+=8;
+	return 3;
+}
+
+int foo(){
+	int x=1;
+	x-=add8ret3(x);
+	return x;
+}
+pragma(msg, foo());
++/
+/+
+int foo(){
+	int r=0;
+	foreach(i;0..1000000) r++;
+	return r;
+}
+pragma(msg,foo());
++/
+
+/+
+auto seq(T...)(T args){
+    return args;
+}
+pragma(msg, seq(1,2,3));
++/
+/+
+void foo(){
+	int j;
+	for({j=2; int d = 3; } j+d<7; {j++; d++;}) {
+	}
+}
++/
+/+struct A{
+	int i;
+	int b;
+}
+struct S{
+	union U{
+		A first;
+		A second;
+	}
+	U u;
+	this(A val){
+		u.second = val;
+		assign(val);
+	}
+	int assign(A val){
+		u.first.i = val.i+1;
+		return u.first.i;
+	}
+}
+
+void main(){
+    enum a = S({A aa; aa.i=1; return aa;}());
+    static assert(a.u.first.i == 2);
+}+/
+
+
+
+// *****
+/+
+int main() {
+	int sum=0;
+
+	int return1_add9tosum() {
+		sum += 9;
+		return 1;
+	}
+    sum += return1_add9tosum();
+	return sum;
+}
+
+pragma(msg, main());
+
+void main(){
+	int x=0;
+	assert(3 == ++x + ++x);
+}
+//pragma(msg, main());+/
+
+/+
+
+template A(alias Arg) {
+    enum A = Arg;
+    enum Unrelated = ({return A();})(); // TODO
+};
+
+void main() {
+    enum FnPtr = &asdf;
+    enum _ = A!FnPtr;
+};
+
+void asdf() {};
++/
+
+// ****
+
+/+
+immutable x=[1,2,3];
+
+/+void foo(inout(int)*,inout(int)[]){}
+
+pragma(msg, foo(x.ptr,x));+/
+
+
+
+struct S{
+	this(inout(int)*)inout{ }
+}
+pragma(msg, S(x.ptr));
+class C{
+	this(inout(int)*)inout{ }
+}
+//pragma(msg, new C(x.ptr));
++/
+
+/+
+int testStructMemberAliasParam3(){
+	int x;
+	struct S{
+		int y;
+		int bar(){
+			return k!(()=>x);
+		}
+		immutable int k(alias a)=2;
+	}
+	S s;
+	s.k!2=3;
+	return s.bar();
+}
+static assert(testStructMemberAliasParam3()==35);
+pragma(msg, "testStructMemberAliasParam3: ", testStructMemberAliasParam3());
++/
+
+//mixin(['i','n','t',' ','f','o','o','a','s','d','f',';']);
+//mixin(cast(dchar[])['2','a']~";");
+//pragma(msg, cast(immutable(dchar)[])[cast(dchar)'2',cast(dchar)'a']);
+
+/+int f(X...)(){ return X[0]; }
+struct T {
+	int x=2;
+	static int bar(){
+		return f!x(); // error
+	}
+}
++/
 /+
 auto eval(alias a,T...)(T args){
 	return a(args); // TODO: reverse eponymous template lookup for alias parameters

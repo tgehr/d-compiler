@@ -1,8 +1,12 @@
+
+* UDA's
+
+* Built-in members (init, min, max, ...)
+
 * various forms of import statements
 - static, selective, renaming, ...
 
-* union declarations
-- Error on overlapping initialization
+* Initialization of union fields
 
 * anonymous structs & unions
 - Analysis & Lowering
@@ -21,12 +25,9 @@
 
 * with statements
 * foreach statements
-* built-in attributes
 - init, stringof, ...
 
 * pattern matching in old-style template constraints
-* declaration blocks
--  eg. private { ... }
 
 * explicit casts from/to class references
 - eg. to/from void* and to bool
@@ -34,17 +35,18 @@
 * try-catch-finally statements
 * scope guards
 * initialization crossing check
+* multi-argument struct constructors.
 * struct postblit & destructors
 * finish operator overloading support
 
 * opDispatch
 * member alias declarations aliasing members
 - correctly provide a this pointer
-- finish support for alias to sequences of members
 
 * visibility
-- private, package
-- protected
+- package, protected
+
+* alias this
 
 * optimize analysis
 - get rid of unneeded allocations
@@ -57,6 +59,12 @@ Meta:
 
 DONE:
 * switch statements
+* declaration blocks
+-  eg. private { ... }
+* visibility: private
+
+* alias declarations:
+- finish support for alias to sequences of members
 
 /+
 * alias this

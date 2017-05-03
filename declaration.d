@@ -86,8 +86,8 @@ class ModuleDecl: Declaration{
 final class ImportBindingsExp: Expression{
 	Expression symbol;
 	Expression[] bindings;
-	this(Expression sym, Expression[] bind){symbol=sym; bindings=bind;}
-	override string toString(){return symbol.toString()~": "~join(map!(to!string)(bindings),", ");}
+	this(Expression sym, Expression[] bind)in{assert(!!sym&&bind.length);}body{symbol=sym; bindings=bind;}
+	override string toString(){return (symbol?symbol.toString():"")~": "~join(map!(to!string)(bindings),", ");}
 	
 	mixin DownCastMethod;
 }
@@ -451,7 +451,7 @@ class FunctionDecl: OverloadableDecl{
 		this.type=type; pre=pr, post=po; postres=pres; super(stc, name);
 	}
 	final string signatureString(){
-		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":!astStc?"auto ":"")~name.toString()~type.pListToString()~
+		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":!astStc&&!isConstructor()?"auto ":"")~name.toString()~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(!pre&&!post?";":"");		
 	}
 	override string toString(){

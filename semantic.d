@@ -5022,11 +5022,12 @@ class Symbol: Expression{
 		if(m){
 			mixin(Rewrite!q{m});
 			// resolve the overload in place and then rely on
-			// semantic to catch eventual circular dependencies:
+			// semantic to catch potential circular dependencies:
 			meaning = m;
 			isSymbolMatcher=!!meaning.isSymbolMatcher();
 			sstate = SemState.begin;
 			type = null;
+			inoutRes = context.inoutRes;
 			Symbol.semantic(scope_);
 			assert(!rewrite||cast(Expression)rewrite);
 			return (cast(Expression)cast(void*)(rewrite?rewrite:this)).independent;
@@ -5811,12 +5812,7 @@ class StructConsExp: TemporaryExp{
 		sstate = SemState.completed;
 		needRetry = false;
 		//analyzeTemporary(sc, STC.init);
-		if(!tmpVarDecl){
-			auto ne=New!StructConsExp(type, args);
-			ne.argsLeftover=argsLeftover;
-			ne.loc=loc;
-			createTemporary(sc);
-		}
+		if(!tmpVarDecl) createTemporary(sc);
 		mixin(SemCheck);
 		mixin(SemEplg);
 	}
@@ -5891,6 +5887,7 @@ enum ResolveConstructor = q{
 			constructor.matchError(sc,loc,type,args);
 			mixin(ErrEplg);
 		}
+		// r=r.resolveInout(context.inoutRes); // TODO
 		if(!consCall){
 			consCall = New!CallExp(constructor, args);
 			consCall.argsLeftover = argsLeftover;
@@ -10390,7 +10387,6 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 				return computePath(ass.e2);
 			}else assert(0,text("TODO: ",e,typeid(e)));
 		}
-
 		path = computePath(symbols[0]);
 	}
 	override void semantic(Scope sc){
