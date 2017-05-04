@@ -8864,7 +8864,7 @@ template Semantic(T) if(is(T==OpApplyFunctionDef)){ }
 mixin template Semantic(T) if(is(T==ForeachStm)){
 	Statement lower;
 	GaggingScope gsc=null;
-	Identifier[] checkMembership;
+	Expression[] checkMembership;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		{
@@ -8872,19 +8872,43 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
-		auto ty = aggregate.type;
-		auto tyu = aggregate.type.getHeadUnqual();
-		void createMembershipTest(string s){
-			checkMembership~=New!Identifier(s);
-			checkMembership[$-1].willAlias();
-			checkMembership[$-1].accessCheck=AccessCheck.none;
+		void createMembershipTest(string s,bool call=false){
+			auto id=New!Identifier(s);
+			id.accessCheck=AccessCheck.none;
+			auto fld=New!(BinaryExp!(Tok!"."))(aggregate,id);
+			if(!call) fld.willAlias();
+			if(call) checkMembership~=New!CallExp(fld,(Expression[]).init);
+			else checkMembership~=fld;
 			if(!gsc) checkMembership[$-1].sstate=SemState.error;
 		}
 		int membershipTestIndex=0;
-		Identifier getMembershipTest(string s){
-			if(checkMembership.length==membershipTestIndex) createMembershipTest(s);
+		Expression getMembershipTest(string s,bool call=false){
+			if(checkMembership.length==membershipTestIndex) createMembershipTest(s,call);
 			return checkMembership[membershipTestIndex++];
 		}
+		if(!gsc){
+			auto msc=aggregate.getMemberScope();
+			if(msc) gsc=New!GaggingScope(msc);
+		}
+		// opSlice
+		auto sliceCheck=getMembershipTest("opSlice",true);
+		assert(sliceCheck is checkMembership[0]);
+		if(sliceCheck){
+			mixin(SemChldPar!q{sc=gsc;sliceCheck});
+			if(sliceCheck.sstate==SemState.completed){
+				auto loc=aggregate.loc;
+				auto opSlice=New!Identifier("opSlice");
+				opSlice.loc=loc;
+				aggregate=New!(BinaryExp!(Tok!"."))(aggregate,opSlice);
+				aggregate.loc=loc;
+				aggregate=New!CallExp(aggregate,(Expression[]).init);
+				aggregate.loc=loc;
+				checkMembership[0]=null;
+			}
+		}
+		mixin(SemChld!q{aggregate});
+		auto ty = aggregate.type;
+		auto tyu = aggregate.type.getHeadUnqual();
 		// foreach over built-in arrays
 		Type et = null;
 		if(auto tt = tyu.isArrayTy()) et = tt.ty;
@@ -8898,24 +8922,18 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		// TODO: foreach over string types with automatic decoding
 		// TODO: foreach over associative arrays
 		// TODO: finish: foreach with opApply
-		if(!gsc){
-			auto msc=aggregate.getMemberScope();
-			if(msc) gsc=New!GaggingScope(msc);
-		}
 		auto opApplyCheck=getMembershipTest(isReverse?"opApplyReverse":"opApply");
-		mixin(SemChldPar!q{sc=gsc;checkMembership[0]});
-		if(checkMembership[0].sstate==SemState.completed){
+		mixin(SemChldPar!q{sc=gsc;opApplyCheck});
+		if(opApplyCheck.sstate==SemState.completed){
 			needRetry=false;
 			lower=createOpApplyForeach(sc);
 			mixin(SemCheck);
 			goto Llowered;
 		}
-		// TODO: finish: foreach over ranges
-
 		auto frontCheck=getMembershipTest(isReverse?"back":"front");
 		auto emptyCheck=getMembershipTest("empty");
 		auto popCheck=getMembershipTest(isReverse?"popBack":"popFront");
-		Identifier[3] rangeCheck=[frontCheck,emptyCheck,popCheck];
+		Expression[3] rangeCheck=[frontCheck,emptyCheck,popCheck];
 		foreach(ref x;rangeCheck) mixin(SemChldPar!q{sc=gsc;x});
 		alias util.all all;
 		if(all!(a=>a.sstate==SemState.completed)(rangeCheck[])){

@@ -1,3 +1,57 @@
+struct OnlyMembers{
+	int opApply(scope int delegate(int) dg){
+		return 0;
+	}
+	struct S{
+		bool empty(){ return true; }
+		int front(){ return 0; }
+		void popFront();
+	}
+	void test(){
+		foreach(x;S()){}
+	}
+}
+
+struct SliceForeach2{
+static:
+	struct S{
+		bool empty(){ return true; }
+		int front(){ return 0; }
+		void popFront(){}
+		int opSlice(){return 0; }
+	}
+	void test(){
+		foreach(x;S()){} // error
+	}
+	struct T{
+		bool empty(){ return true; }
+		int front(){ return 0; }
+		void popFront(){}
+		int opSlice;
+		
+	}
+	void test2(){
+		foreach(x;T()){} // ok
+	}
+}
+
+
+struct SliceForeach{
+static:
+	struct S{
+		int x=1;
+		bool empty(){ return x>10; }
+		int front(){ return x; }
+		void popFront(){ x++; }
+		S opSlice()(){ S r; r.x=x+1; return r; } // // TODO: default construction
+	}
+	int foo(){
+		int r=0;
+		foreach(x;S()) r+=x;
+		return r;
+	}
+	static assert(foo()==54);
+}
 
 struct OpApplyIotaTests{
 static:
