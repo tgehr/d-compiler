@@ -1,3 +1,31 @@
+
+int[] opSlice(UFCSOpSlice x){ return [1,2,3]; }
+
+struct UFCSOpSlice{
+	static int test(){
+		int r=0;
+		foreach(x;UFCSOpSlice()) // TODO: error
+			r+=x;
+		return r;
+	}
+	pragma(msg, test());
+}
+
+bool empty(ref UFCSForeach x){ return x.x>10; }
+int front(ref UFCSForeach x){ return x.x; }
+void popFront(ref UFCSForeach x){ x.x += 1; }
+
+struct UFCSForeach{
+	int x;
+	static int test(){
+		int r=0;
+		foreach(x;UFCSForeach()) // error
+			r+=1;
+		return r;
+	}
+	pragma(msg, test());
+}
+
 struct OnlyMembers{
 	int opApply(scope int delegate(int) dg){
 		return 0;
