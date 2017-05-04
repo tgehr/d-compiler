@@ -1,3 +1,19 @@
+struct FunPtrForeach{
+	static int[] test(){
+		int[] r;
+		foreach(i;(int delegate(ref int) f){ // error
+			foreach(i;0..10) if(auto r=f(i)) return r;
+			return 0;
+		}){
+			//if(i==5) continue;
+			//if(i==8) break;
+			//r~=i;
+		}
+		return r;
+	}
+	static assert(test()==[0,1,2,3,4,6,7]);
+}
+
 struct DelegateForeach{
 	static int[] test(){
 		int[] r;
@@ -26,7 +42,6 @@ struct DelegateForeach{
 		return r;
 	}
 }
-
 
 int[] opSlice(UFCSOpSlice x){ return [1,2,3]; }
 
