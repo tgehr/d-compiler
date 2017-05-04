@@ -8874,6 +8874,17 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		mixin(FinishDeductionProp!q{aggregate});
 		auto ty = aggregate.type;
 		auto tyu = aggregate.type.getHeadUnqual();
+		void createMembershipTest(string s){
+			checkMembership~=New!Identifier(s);
+			checkMembership[$-1].willAlias();
+			checkMembership[$-1].accessCheck=AccessCheck.none;
+			if(!gsc) checkMembership[$-1].sstate=SemState.error;
+		}
+		int membershipTestIndex=0;
+		Identifier getMembershipTest(string s){
+			if(checkMembership.length==membershipTestIndex) createMembershipTest(s);
+			return checkMembership[membershipTestIndex++];
+		}
 		// foreach over built-in arrays
 		Type et = null;
 		if(auto tt = tyu.isArrayTy()) et = tt.ty;
@@ -8891,13 +8902,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			auto msc=aggregate.getMemberScope();
 			if(msc) gsc=New!GaggingScope(msc);
 		}
-		void createMembershipTest(string s){
-			checkMembership~=New!Identifier(s);
-			checkMembership[$-1].willAlias();
-			checkMembership[$-1].accessCheck=AccessCheck.none;
-			if(!gsc) checkMembership[$-1].sstate=SemState.error;
-		}
-		if(!checkMembership.length) createMembershipTest(isReverse?"opApplyReverse":"opApply");
+		auto opApplyCheck=getMembershipTest(isReverse?"opApplyReverse":"opApply");
 		mixin(SemChldPar!q{sc=gsc;checkMembership[0]});
 		if(checkMembership[0].sstate==SemState.completed){
 			needRetry=false;
@@ -8906,15 +8911,14 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			goto Llowered;
 		}
 		// TODO: finish: foreach over ranges
-		if(checkMembership.length==1){
-			createMembershipTest(isReverse?"back":"front"); // 1
-			createMembershipTest("empty"); // 2
-			createMembershipTest(isReverse?"popBack":"popFront"); // 3
-		}
-		assert(checkMembership.length>=4);
-		foreach(i;1..4) mixin(SemChldPar!q{sc=gsc;checkMembership[i]});
+
+		auto frontCheck=getMembershipTest(isReverse?"back":"front");
+		auto emptyCheck=getMembershipTest("empty");
+		auto popCheck=getMembershipTest(isReverse?"popBack":"popFront");
+		Identifier[3] rangeCheck=[frontCheck,emptyCheck,popCheck];
+		foreach(ref x;rangeCheck) mixin(SemChldPar!q{sc=gsc;x});
 		alias util.all all;
-		if(all!(a=>a.sstate==SemState.completed)(checkMembership[1..4])){
+		if(all!(a=>a.sstate==SemState.completed)(rangeCheck[])){
 			needRetry=false;
 			lower=createRangeForeach(sc);
 			mixin(SemCheck);
