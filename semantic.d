@@ -8872,6 +8872,16 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
+		// foreach over delegates
+		if(cast(DelegateTy)aggregate.type){
+			if(isReverse){
+				sc.error("cannot use foreach_reverse with a delegate",aggregate.loc);
+				mixin(ErrEplg);
+			}
+			lower=createOpApplyForeach(sc,true);
+			mixin(SemCheck);
+			goto Llowered;
+		}
 		void createMembershipTest(string s,bool call=false){
 			auto id=New!Identifier(s);
 			id.accessCheck=AccessCheck.none;
@@ -8943,7 +8953,6 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			goto Llowered;
 		}
 		}
-		// TODO: foreach over delegates
 		// TODO: foreach over Tuples
 		// TODO: EXTENSION: foreach using opApply/range primitives with UFCS
 	Llowered:
@@ -9041,11 +9050,14 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		ret.isOpApplyReturn=true;
 		return ret;
 	}
-	private Statement createOpApplyForeach(Scope sc){
+	private Statement createOpApplyForeach(Scope sc,bool isDelegate=false){
 		enum SemRet=q{ return null; };
 		if(!opApplyExp){
-			auto be=New!(BinaryExp!(Tok!"."))(aggregate,New!Identifier(isReverse?"opApplyReverse":"opApply"));
-			be.loc=aggregate.loc;
+			Expression fun;
+			if(!isDelegate){
+				fun=New!(BinaryExp!(Tok!"."))(aggregate,New!Identifier(isReverse?"opApplyReverse":"opApply"));
+				fun.loc=aggregate.loc;
+			}else fun=aggregate;
 			// GC:
 			auto fty=New!FunctionTy(STC.init,null,vars.map!(a=>cast(Parameter)a).array,VarArgs.none);
 			auto ret=createOpApplyReturn(0,loc);
@@ -9056,7 +9068,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			retVar.presemantic(sc);
 			Expression lmb=New!OpApplyFunctionLiteralExp(fty,cbdy,this);
 			lmb.loc=loc; // TODO: fix diagnostics!
-			opApplyExp=New!CallExp(be,[lmb]);
+			opApplyExp=New!CallExp(fun,[lmb]);
 			opApplyExp.loc=aggregate.loc;
 		}
 		mixin(SemChld!q{opApplyExp});
