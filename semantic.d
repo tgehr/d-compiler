@@ -8869,7 +8869,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		mixin(SemPrlg);
 		{
 		if(lower) goto Llowered;
-		if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
+		// if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
 		// foreach over delegates
@@ -8952,18 +8952,26 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			mixin(SemCheck);
 			goto Llowered;
 		}
+		// foreach over seq
+		if(auto tpl=aggregate.isTuple()){
+			assert(vars.length);
+			if(vars.length>2){
+				sc.error("at most two loop variables allowed for unrolled foreach",
+				         vars[0].loc.to(vars[$-1].loc));
+				mixin(ErrEplg);
+			}
+			needRetry=false;
+			lower=createSeqForeach(tpl.length,sc);
+			mixin(SemCheck);
+			goto Llowered;
 		}
-		// TODO: foreach over Tuples
 		// TODO: EXTENSION: foreach using opApply/range primitives with UFCS
+		}
 	Llowered:
 		if(lower) mixin(SemChld!q{lower});
 		else{
-			// TODO: assert(lower) instead
-			foreach(var; vars) var.semantic(lsc); // TODO: fix?
-			//mixin(SemChld!q{scope=lsc, bdy}); // TODO: implement this
-			bdy.semantic(lsc); // TODO: get rid of direct call
-			mixin(SemProp!q{sc=lsc;bdy});
-			mixin(PropErr!q{vars, aggregate});
+			sc.error("invalid foreach aggregate",aggregate.loc);
+			mixin(ErrEplg);
 		}
 		mixin(SemEplg);
 	}
@@ -9139,9 +9147,108 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		return f;
 	}
 
+	private Statement createSeqForeach(size_t length,Scope sc)in{
+		assert(vars.length==1||vars.length==2);
+	}body{
+		//dw(tpl," ",tpl.length," ",sc);
+		Statement[] s;
+		auto r=New!UnrolledForeachStm(BlockStm.init);
+		foreach(i;0..length){
+			Expression index=LiteralExp.factory(Variant(i,Type.get!Size_t()));
+			index.loc=loc;
+			auto iexp=New!IndexExp(aggregate,[index]);
+			iexp.loc=loc;
+			Statement vindex=null;
+			if(vars.length==2){
+				auto id=New!Identifier(vars[0].name.name);
+				id.loc=loc;
+				vindex=New!ForeachVarDecl(vars[0].stc,Type.get!Size_t(),id,index);
+				vindex.loc=loc;
+			}
+			static class AliasOrVarDecl: Statement{
+				STC stc;
+				string name;
+				Expression init_;
+				this(STC stc,string name,Expression init_){
+					this.stc=stc; this.name=name; this.init_=init_;
+				}
+				override void semantic(Scope sc){
+					mixin(SemPrlg);
+					init_.willAlias();
+					mixin(SemChld!q{init_});
+					auto sym=init_.isSymbol();
+					Statement r;
+					if(!sym||!sym.meaning||sym.meaning.isVarDecl()){
+						auto id=New!Identifier(name);
+						id.loc=loc;
+						r=New!ForeachVarDecl(stc,null,id,init_);
+						r.loc=loc;
+					}else{
+						r=AliasDecl.createAliasToExp(name,init_,loc);
+					}
+					r.semantic(sc);
+					mixin(RewEplg!q{r});
+				}
+			}
+			auto value=vars.length==2?vars[1]:vars[0];
+			auto vvalue=New!AliasOrVarDecl(value.stc,value.name.name,iexp);
+			vvalue.loc=value.loc;
+			// (This ignores storage classes, just like DMD .)
+			auto cs=New!CompoundStm((vindex?[vindex]:[])~[vvalue,bdy.ddup()]);
+			cs.loc=loc;
+			auto u=New!UnrolledForeachBodyStm(r,cs);
+			u.loc=loc;
+			s~=u;
+		}
+		auto bdy=New!BlockStm(s);
+		bdy.loc=loc;
+		r.bdy=bdy;
+		r.loc=loc;
+		return r;
+	}
 private:
 	BlockScope lsc;
 }
+
+static class UnrolledForeachStm: BreakableStm{
+	BlockStm bdy;
+	this(BlockStm bdy){ this.bdy=bdy; }
+	override string toString(){
+		return bdy.toString();
+	}
+	mixin Visitors;
+}
+
+mixin template Semantic(T) if(is(T==UnrolledForeachStm)){
+	void semantic(Scope sc){
+		mixin(SemPrlg);
+		mixin(SemChld!q{bdy});
+		mixin(SemEplg);
+	}
+}
+
+class UnrolledForeachBodyStm: LoopingStm{
+	UnrolledForeachStm outer;
+	CompoundStm bdy;
+	this(UnrolledForeachStm outer,CompoundStm bdy){
+		this.outer=outer; this.bdy=bdy;
+	}
+	override string toString(){
+		return bdy.toString();
+	}
+	mixin Visitors;
+}
+
+mixin template Semantic(T) if(is(T==UnrolledForeachBodyStm)){
+	BlockScope lsc;
+	void semantic(Scope sc){
+		mixin(SemPrlg);
+		if(!lsc){ lsc=new BlockScope(sc); lsc.setLoopingStm(this); }
+		mixin(SemChld!q{sc=lsc;bdy});
+		mixin(SemEplg);
+	}
+}
+
 
 
 mixin template Semantic(T) if(is(T==ForeachRangeStm)){
@@ -9829,10 +9936,14 @@ private:
 class WithBaseScope: Scope{
 	Scope other;
 	Expression sym;
-	this(Scope other,Expression sym){ this.other=other; this.sym=sym; }
 	private AliasDecl createAliasToDecl(Declaration decl){
-		return New!AliasDecl(STC.init,New!VarDecl(STC.init,New!(BinaryExp!(Tok!"."))(sym,New!Symbol(decl)),New!Identifier(decl.name.name),Expression.init));
+		auto be=New!(BinaryExp!(Tok!"."))(sym,New!Symbol(decl));
+		auto id=New!Identifier(decl.name.name);
+		auto vd=New!VarDecl(STC.init,be,id,Expression.init);
+		auto a=New!AliasDecl(STC.init,vd);
+		return a;
 	}
+	this(Scope other,Expression sym){ this.other=other; this.sym=sym; }
 	private Declaration getAlias(Declaration decl){
 		if(!decl||typeid(decl) is typeid(DoesNotExistDecl))
 			return decl;
@@ -10694,6 +10805,15 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 }
 
 mixin template Semantic(T) if(is(T==AliasDecl)){
+	static AliasDecl createAliasToExp(string name,Expression expr,Location loc){
+		auto id=New!Identifier(name);
+		id.loc=loc;
+		auto vd=New!VarDecl(STC.init,expr,id,Expression.init);
+		vd.loc=loc;
+		auto a=New!AliasDecl(STC.init,vd);
+		a.loc=loc;
+		return a;
+	}
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
 		mixin(SemPrlg);

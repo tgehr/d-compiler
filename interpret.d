@@ -2913,7 +2913,7 @@ Lhltstr:
 }
 
 
-mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==ILabeledStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==ForeachStm) && !is(T==ForeachRangeStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TupleAssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==WithStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
+mixin template CTFEInterpret(T) if(!is(T==Node)&&!is(T==FunctionDef)&&!is(T==TemplateDecl)&&!is(T==TemplateInstanceDecl) && !is(T==BlockDecl) && !is(T==PragmaDecl) && !is(T==EmptyStm) && !is(T==CompoundStm) && !is(T==ILabeledStm) && !is(T==LabeledStm) && !is(T==ExpressionStm) && !is(T==IfStm) && !is(T==ForStm) && !is(T==ForeachStm) && !is(T==UnrolledForeachStm) && !is(T==UnrolledForeachBodyStm) && !is(T==ForeachRangeStm) && !is(T==WhileStm) && !is(T==DoStm) && !is(T==SwitchStm) && !is(T==SwitchLabelStm) && !is(T==CaseStm) && !is(T==CaseRangeStm) && !is(T==DefaultStm) && !is(T==LiteralExp) && !is(T==ArrayLiteralExp) && !is(T==ReturnStm) && !is(T==CastExp) && !is(T==Symbol) && !is(T==FieldExp) && !is(T==ConditionDeclExp) && !is(T==VarDecl) && !is(T==Expression) && !is(T==ExpTuple) && !is(T _==BinaryExp!S,TokenType S) && !is(T==ABinaryExp) && !is(T==AssignExp) && !is(T==TupleAssignExp) && !is(T==TernaryExp)&&!is(T _==UnaryExp!S,TokenType S) && !is(T _==PostfixExp!S,TokenType S) &&!is(T==Declarators) && !is(T==BreakStm) && !is(T==ContinueStm) && !is(T==GotoStm) && !is(T==WithStm) && !is(T==BreakableStm) && !is(T==LoopingStm) && !is(T==SliceExp) && !is(T==AssertExp) && !is(T==CallExp) && !is(T==Declaration) && !is(T==PtrExp)&&!is(T==LengthExp)&&!is(T==DollarExp)&&!is(T==AggregateDecl)&&!is(T==ReferenceAggregateDecl)&&!is(T==UnionDecl)&&!is(T==AggregateTy)&&!is(T==TmpVarExp)&&!is(T==TemporaryExp)&&!is(T==StructConsExp)&&!is(T==NewExp)&&!is(T==CurrentExp)&&!is(T:Type)){}
 
 
 mixin template CTFEInterpret(T) if(is(T==Node)){
@@ -3720,7 +3720,7 @@ mixin template CTFEInterpret(T) if(is(T==IfStm)){
 mixin template CTFEInterpret(T) if(is(T==BreakableStm)){
 protected:
 	final void setBCEnd(ByteCodeBuilder.Label* end){ bcend = end; }
-	final void emitBCEnd(ref ByteCodeBuilder bld){bld.emitLabel(*bcend);}
+	void emitBCEnd(ref ByteCodeBuilder bld){bld.emitLabel(*bcend);}
 	final void cleanupBCEnd(){ bcend = null; }
 	enum doBCEnd = q{
 		auto end = bld.getLabel();
@@ -3730,7 +3730,7 @@ protected:
 			cleanupBCEnd();
 		}
 	};
-private:
+/+private:+/
 	ByteCodeBuilder.Label* bcend;
 }
 mixin template CTFEInterpret(T) if(is(T==LoopingStm)){
@@ -3796,6 +3796,25 @@ mixin template CTFEInterpret(T) if(is(T==ForeachStm)||is(T==ForeachRangeStm)){
 	override void byteCompile(ref ByteCodeBuilder bld){
 		assert(!!lower,"TODO");
 		lower.byteCompile(bld);
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==UnrolledForeachStm)){
+	override void byteCompile(ref ByteCodeBuilder bld){
+		mixin(doBCEnd);
+		bdy.byteCompile(bld);
+	}
+}
+mixin template CTFEInterpret(T) if(is(T==UnrolledForeachBodyStm)){
+	override void emitBCContinueLabel(ref ByteCodeBuilder bld){
+		return super.emitBCEnd(bld);
+	}
+	override void emitBCEnd(ref ByteCodeBuilder bld){
+		assert(!!outer);
+		return outer.emitBCEnd(bld);
+	}
+	override void byteCompile(ref ByteCodeBuilder bld){
+		mixin(doBCEnd);
+		bdy.byteCompile(bld);
 	}
 }
 

@@ -1,3 +1,71 @@
+
+struct SeqForeachBreakContinue{
+static:
+	alias Seq(T...)=T;
+	int[] test(){
+		int[] r;
+		foreach(i;Seq!(0,1,2,3,4,5)){
+			if(i==2) continue;
+			if(i==4) break;
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test()==[0,1,3]);
+}
+
+struct VarSeqForeach{
+static:
+	alias Seq(T...)=T;
+	int[] test(){
+		int x,y,z;
+		foreach(i,ref k;Seq!(x,y,z))
+			k=cast(int)i+1;
+		return [x,y,z];
+	}
+	static assert(test()==[1,2,3]);
+
+	int[] test2(){
+		int x,y,z;
+		foreach(ref i,k;Seq!(x,y,z)){ // error
+			k=cast(int)i+1;
+		}
+		return [x,y,z];
+	}
+	static assert(test2()==[0,0,0]);
+	int[][] test3(){
+		auto a=[1,2,3],b=[1,2,3],c=[1,2,3];
+		foreach(i;Seq!(a,b,c)){
+			i=[10,10,10];
+		}
+		auto x=1,y=2,z=3;
+		foreach(ref i;Seq!(x,y,z)){
+			i=10;
+		}
+		auto l=1,m=2,n=3;
+		foreach(i;Seq!(l,m,n)){
+			i=10;
+		}
+		return [a,b,c,[x,y,z],[l,m,n]];
+	}
+	static assert(test3==[[1,2,3],[1,2,3],[1,2,3],[10,10,10],[1,2,3]]);
+}
+
+struct SeqForeach{
+static:
+	alias Seq(T...)=T;
+	int test(){
+		int r=0;
+		foreach(immutable i,k;Seq!(1,2,3)){
+			pragma(msg, typeof(i)," ",typeof(k));
+			r += cast(int)i*k; // // TODO: DMD allows this without cast...
+			//break;
+		}
+		return r;
+	}
+	pragma(msg, test());
+}
+
 struct FunPtrForeach{
 	static int[] test(){
 		int[] r;
