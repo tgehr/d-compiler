@@ -745,11 +745,11 @@ private struct Parser{
 				}while(ttype!=Tok!";" && ttype!=Tok!"EOF");
 				expect(Tok!";");
 				auto e=parseExpression();
-				if(vars.length==1&&ttype==Tok!".."){
-					mixin(rule!(ForeachRangeStm,Existing,q{vars.data[0],e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
+				if(ttype==Tok!".."){
+					mixin(rule!(ForeachStm,Existing,q{vars.data,Expression.init,e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
 				}
 				expect(Tok!")"); nonEmpty();
-				mixin(rule!(ForeachStm,Existing,q{vars.data,e},Statement,Existing,"isreverse"));
+				mixin(rule!(ForeachStm,Existing,q{vars.data,e,Expression.init,Expression.init},Statement,Existing,"isreverse"));
 			case Tok!"final":
 				if(peek().type != Tok!"switch") goto default;
 				nextToken();

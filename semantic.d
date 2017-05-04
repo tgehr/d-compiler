@@ -8869,6 +8869,25 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		mixin(SemPrlg);
 		{
 		if(lower) goto Llowered;
+		if(left && right){
+			assert(vars.length);
+			if(vars.length>1){
+				sc.error("only one loop variable allowed for foreach range statement",loc);
+				mixin(ErrEplg);
+			}
+			mixin(SemChld!q{left,right});
+			mixin(TypeCombine!q{auto type;left,right});
+			if(!type){
+				sc.error(format("incompatible types '%s' and '%s' for foreach range",left.type,right.type),left.loc.to(right.loc));
+				mixin(ErrEplg);
+			}
+			assert(!lower);
+			lower=createForStmForRange(sc,vars[0],null,type,isReverse,left,right,bdy);
+			lower.loc=loc;
+			mixin(SemCheck);
+			goto Llowered;
+		}
+		assert(!!aggregate);
 		// if(!lsc){lsc = New!BlockScope(sc); lsc.setLoopingStm(this);}
 		mixin(SemChld!q{aggregate});
 		mixin(FinishDeductionProp!q{aggregate});
@@ -8976,6 +8995,47 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		mixin(SemEplg);
 	}
 
+	static ForStm createForStmForRange(Scope sc,ForeachVarDecl var,ForeachVarDecl idxvar,Type type,bool isReverse,Expression left, Expression right, Statement bdy, scope Statement[] mdecls=[],scope Statement[] mups=[]){
+		if(var){ assert(!var.init_); var.init_=left; }
+		if(!idxvar){
+			idxvar=New!ForeachVarDecl(STC.init, type, null, isReverse?right:left);
+			idxvar.loc=idxvar.init_.loc;
+		}
+		auto boundvar=New!ForeachVarDecl(STC.init, type, null, isReverse?left:right);
+		boundvar.loc=boundvar.init_.loc;
+		auto tmpl=isReverse?boundvar:idxvar;
+		tmpl.presemantic(sc);
+		auto tmpr=isReverse?idxvar:boundvar;
+		tmpr.presemantic(sc);
+		auto s1=New!CompoundStm(mdecls~[cast(Statement)tmpl,tmpr]);
+		s1.loc=(var?var:left).loc.to(right.loc);
+		auto syml=New!Symbol(tmpl);
+		syml.loc=left.loc;
+		auto symr=New!Symbol(tmpr);
+		symr.loc=right.loc;
+		auto e1=type.isBasicType()? // DMD seems to do this. Is this documented?
+			New!(BinaryExp!(Tok!"<"))(syml,symr):
+			New!(BinaryExp!(Tok!"!="))(syml,symr);
+		e1.loc=syml.loc.to(symr.loc);
+		Expression e2=null;
+		Statement s2;
+		if(!isReverse){
+			e2=New!(UnaryExp!(Tok!"++"))(syml);
+			e2.loc=e1.loc;
+			if(var) var.init_=syml;
+			s2=New!BlockStm((var?[cast(Statement)var]:[])~mups~[bdy]);
+		}else{
+			auto edec=New!(UnaryExp!(Tok!"--"))(symr);
+			edec.loc=e1.loc;
+			auto sdec=New!ExpressionStm(edec);
+			sdec.loc=edec.loc;
+			if(var) var.init_=symr;
+			s2=New!BlockStm((var?[sdec,var]:[cast(Statement)sdec])~mups~[bdy]);
+		}
+		s2.loc=bdy.loc;
+		return New!ForStm(s1,e1,e2,s2);
+	}
+
 	private ForStm createArrayForeach(Scope sc,Type ty,Type et)in{
 		assert(ty is aggregate.type);
 		assert(et is ty.getElementType);
@@ -9034,7 +9094,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		symidx.loc=agsym.loc;
 		vars[$-1].init_=index;
 
-		auto f=ForeachRangeStm.createForStmForRange(sc,var,indexvar,s_t,isReverse,left,right,bdy,mdecls,mups);
+		auto f=createForStmForRange(sc,var,indexvar,s_t,isReverse,left,right,bdy,mdecls,mups);
 		f.loc=loc;
 		return f;
 	}
@@ -9246,68 +9306,6 @@ mixin template Semantic(T) if(is(T==UnrolledForeachBodyStm)){
 		if(!lsc){ lsc=new BlockScope(sc); lsc.setLoopingStm(this); }
 		mixin(SemChld!q{sc=lsc;bdy});
 		mixin(SemEplg);
-	}
-}
-
-
-
-mixin template Semantic(T) if(is(T==ForeachRangeStm)){
-	ForStm lower;
-	override void semantic(Scope sc){
-		mixin(SemPrlg);
-		mixin(SemChld!q{left,right});
-		mixin(TypeCombine!q{auto type;left,right});
-		if(!type){
-			sc.error(format("incompatible types '%s' and '%s' for foreach range",left.type,right.type),left.loc.to(right.loc));
-			mixin(ErrEplg);
-		}
-		if(!lower){
-			lower=createForStmForRange(sc,var,null,type,isReverse,left,right,bdy);
-			lower.loc=loc;
-		}
-		mixin(SemChld!q{lower});
-		mixin(SemEplg);
-	}
-
-	static ForStm createForStmForRange(Scope sc,ForeachVarDecl var,ForeachVarDecl idxvar,Type type,bool isReverse,Expression left, Expression right, Statement bdy, scope Statement[] mdecls=[],scope Statement[] mups=[]){
-		if(var){ assert(!var.init_); var.init_=left; }
-		if(!idxvar){
-			idxvar=New!ForeachVarDecl(STC.init, type, null, isReverse?right:left);
-			idxvar.loc=idxvar.init_.loc;
-		}
-		auto boundvar=New!ForeachVarDecl(STC.init, type, null, isReverse?left:right);
-		boundvar.loc=boundvar.init_.loc;
-		auto tmpl=isReverse?boundvar:idxvar;
-		tmpl.presemantic(sc);
-		auto tmpr=isReverse?idxvar:boundvar;
-		tmpr.presemantic(sc);
-		auto s1=New!CompoundStm(mdecls~[cast(Statement)tmpl,tmpr]);
-		s1.loc=(var?var:left).loc.to(right.loc);
-		auto syml=New!Symbol(tmpl);
-		syml.loc=left.loc;
-		auto symr=New!Symbol(tmpr);
-		symr.loc=right.loc;
-		auto e1=type.isBasicType()? // DMD seems to do this. Is this documented?
-			New!(BinaryExp!(Tok!"<"))(syml,symr):
-			New!(BinaryExp!(Tok!"!="))(syml,symr);
-		e1.loc=syml.loc.to(symr.loc);
-		Expression e2=null;
-		Statement s2;
-		if(!isReverse){
-			e2=New!(UnaryExp!(Tok!"++"))(syml);
-			e2.loc=e1.loc;
-			if(var) var.init_=syml;
-			s2=New!BlockStm((var?[cast(Statement)var]:[])~mups~[bdy]);
-		}else{
-			auto edec=New!(UnaryExp!(Tok!"--"))(symr);
-			edec.loc=e1.loc;
-			auto sdec=New!ExpressionStm(edec);
-			sdec.loc=edec.loc;
-			if(var) var.init_=symr;
-			s2=New!BlockStm((var?[sdec,var]:[cast(Statement)sdec])~mups~[bdy]);
-		}
-		s2.loc=bdy.loc;
-		return New!ForStm(s1,e1,e2,s2);
 	}
 }
 
@@ -9870,9 +9868,6 @@ mixin template Semantic(T) if(is(T==ContinueStm)||is(T==BreakStm)){
 			assert(fr.isOpApplyForeach());
 			return enc;
 		}
-		if(auto fr=enc.isForeachRangeStm())
-			return processLower(fr.lower);
-
 		return enc;
 	}
 

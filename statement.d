@@ -82,7 +82,7 @@ class IfStm: Statement{
 
 abstract class BreakableStm: Statement{
 	mixin DownCastMethod;
-	mixin DownCastMethods!(ForeachStm,ForeachRangeStm);
+	mixin DownCastMethods!ForeachStm;
 	mixin Visitors;
 }
 abstract class LoopingStm: BreakableStm{
@@ -114,10 +114,13 @@ class ForStm: LoopingStm{
 }
 class ForeachStm: LoopingStm{
 	ForeachVarDecl[] vars;
-	Expression aggregate;
+	Expression aggregate;  // for foreach over aggregate
+	Expression left,right; // for foreach range statement
 	Statement bdy;
 	bool isReverse;
-	this(ForeachVarDecl[] v,Expression a,Statement b, bool isr=false){ vars = v; aggregate = a; bdy = b; isReverse=isr; }
+	this(ForeachVarDecl[] v,Expression a,Expression l,Expression r,Statement b, bool isr=false)in{
+		assert(!!a^(l&&r));
+	}body{ vars = v; aggregate = a; left=l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){
 		if(lower) return "/+lowered foreach+/ "~lower.toString();
 		return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();
@@ -126,17 +129,7 @@ class ForeachStm: LoopingStm{
 	mixin DownCastMethod;
 	mixin Visitors;
 }
-class ForeachRangeStm: LoopingStm{
-	ForeachVarDecl var;
-	Expression left,right;
-	Statement bdy;
-	bool isReverse;
-	this(ForeachVarDecl v,Expression l,Expression r,Statement b, bool isr=false){ var = v; left = l; right=r; bdy = b; isReverse=isr; }
-	override string toString(){return "foreach"~(isReverse?"_reverse":"")~"("~var.toString()~";"~left.toString()~".."~right.toString()~") "~bdy.toString();}
 
-	mixin DownCastMethod;
-	mixin Visitors;
-}
 class SwitchStm: BreakableStm{
 	bool f; Expression e; Statement s;
 	this(bool isfinal, Expression exp, Statement statement){f=isfinal; e=exp; s=statement;}
