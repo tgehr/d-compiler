@@ -1,3 +1,5 @@
+static assert(2~`==i`); // error
+
 struct MemberFunctionNoConstFold{
 	static:
 	struct S{

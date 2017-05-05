@@ -643,11 +643,11 @@ mixin template Interpret(T) if(is(T _==BinaryExp!S, TokenType S) && !is(T==Binar
 				if(e1.type.getUnqual().equals(ety.getUnqual())){
 				   auto lhs = e1.interpretV();
 				   if(ety is Type.get!(immutable(char))())
-					   lhs = Variant(""c~lhs.get!char(),ety);
+					   lhs = Variant(""c~lhs.get!char(),type);
 				   else if(ety is Type.get!(immutable(wchar))())
-					   lhs = Variant(""w~lhs.get!wchar(),ety);
+					   lhs = Variant(""w~lhs.get!wchar(),type);
 				   else if(ety is Type.get!(immutable(dchar))())
-					   lhs = Variant(""d~lhs.get!dchar(),ety);
+					   lhs = Variant(""d~lhs.get!dchar(),type);
 				   else{ auto l=[lhs];lhs = Variant(l,l,ety.getDynArr()); }
 				   return lhs.opBinary!"~"(e2.interpretV());
 				}
