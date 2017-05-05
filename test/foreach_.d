@@ -1,3 +1,19 @@
+struct SeqForeachConstant{
+static:
+	alias Seq(T...)=T;
+	void test(){
+		foreach(x;Seq!1) x=2; // error
+	}
+	int test2(){
+		int r=0;
+		foreach(x;Seq!(1,2,3)){
+			enum k=x;
+			r+=k;
+		}
+		return r;
+	}
+	static assert(test2()==6);
+}
 
 struct SeqForeachBreakContinue{
 static:

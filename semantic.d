@@ -9241,6 +9241,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 					if(!sym||!sym.meaning||sym.meaning.isVarDecl()){
 						auto id=New!Identifier(name);
 						id.loc=loc;
+						if(init_.isConstant()) stc|=STCenum;
 						r=New!ForeachVarDecl(stc,null,id,init_);
 						r.loc=loc;
 					}else{
