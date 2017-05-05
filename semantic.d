@@ -9284,11 +9284,12 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 				override void presemantic(Scope sc){}
 				override void semantic(Scope sc){
 					mixin(SemPrlg);
-					init_.willAlias();
+					bool mustBeVar=!!(stc&(STCenum|STCstatic));
+					if(!mustBeVar) init_.willAlias();
 					mixin(SemChld!q{init_});
 					auto sym=init_.isSymbol();
 					Declaration r;
-					if(!sym||!sym.meaning||sym.meaning.isVarDecl()){
+					if(mustBeVar||!sym||!sym.meaning||sym.meaning.isVarDecl()){
 						if(init_.isConstant()) stc|=STCenum;
 						r=New!ForeachVarDecl(stc,null,name,init_);
 					}else{
@@ -10828,6 +10829,8 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 	Expression toArray;
 	override void presemantic(Scope sc){
 		if(sstate != SemState.pre) return;
+		assert(!!stm);
+		stm.loc=loc;
 		scope_=sc;
 		sstate = SemState.begin;
 		needRetry = true;
@@ -10845,6 +10848,8 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 	}
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		assert(!!stm);
+		stm.loc=loc;
 		if(stm.aggregate){
 			mixin(SemChld!q{stm.aggregate});
 			mixin(IntChld!q{stm.aggregate});

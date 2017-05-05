@@ -1,3 +1,15 @@
+struct EnumForeach{
+	static:
+	alias Seq(T...)=T;
+	int a=1;
+	int fun(){ return a; }
+	int gun(){ return 2; }
+	int hun(){ return 3;}
+	auto test(){
+		static foreach(enum x;Seq!(fun,gun,hun)){ // error
+		}
+	}
+}
 
 struct TestUninterpretable{
 static:
