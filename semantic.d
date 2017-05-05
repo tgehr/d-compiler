@@ -9118,7 +9118,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			}
 		}else vars[$-1].type = et;
 
-		auto agvar=New!ForeachVarDecl(STC.init,ty,null,aggregate);
+		auto agvar=New!ForeachVarDecl(vars[$-1].stc&(STCenum|STCstatic),ty,null,aggregate);
 		agvar.loc=aggregate.loc;
 		agvar.presemantic(sc);
 		scope Statement[] mdecls=[agvar];
