@@ -436,6 +436,8 @@ class Parameter: VarDecl{ // for functions, foreach etc
 
 class ForeachVarDecl: Parameter{ // foreach variable
 	this(STC stc, Expression rtype, Identifier name, Expression init_){super(stc,rtype,name,init_);}
+
+	override @property string kind(){ return "loop variable"; }
 	mixin Visitors;
 }
 
