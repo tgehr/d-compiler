@@ -1,4 +1,25 @@
 /+
+int ret(alias x)(){
+	return x;
+}
+
+struct S{
+	int x=0;
+	int m(){ return x; }
+	void foo(){
+		int k(){ return m; }
+		ret!x();
+		ret!m(); // // TODO: does not work in DMD
+		ret!k();
+	}
+}
+
+void main(){
+	
+}
++/
+
+/+
 auto seq(T...)(T args){
     return args;
 }
