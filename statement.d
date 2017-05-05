@@ -123,7 +123,8 @@ class ForeachStm: LoopingStm{
 	}body{ vars = v; aggregate = a; left=l; right=r; bdy = b; isReverse=isr; }
 	override string toString(){
 		if(lower) return "/+lowered foreach+/ "~lower.toString();
-		return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~aggregate.toString()~") "~bdy.toString();
+		assert(!!aggregate^(left&&right));
+		return "foreach"~(isReverse?"_reverse":"")~"("~join(map!(to!string)(vars),",")~";"~(aggregate?aggregate.toString():left.toString()~".."~right.toString())~") "~bdy.toString();
 	}
 
 	mixin DownCastMethod;
