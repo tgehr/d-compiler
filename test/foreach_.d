@@ -1,3 +1,23 @@
+struct RangeStaticForeach{
+	static:
+	struct Range{
+		int x=0;
+		this(int x){ this.x=x; } // TODO: struct default constructors
+		@property int front(){ return x; }
+		void popFront(){ x += 2; }
+		@property bool empty(){ return x>=10; }
+	}
+	static foreach(i;Range()){
+		mixin(`enum x`~cast(char)('0'+i)~"=i;");
+	}
+	static foreach(i;0..5){
+		static assert(mixin(`x`~cast(char)('0'+2*i))==2*i);
+	}
+	static foreach(i,k;Range()){ // TODO: error
+		
+	}
+}
+
 struct OpApplySingleStaticForeach{
 	static:
 	struct OpApply{
