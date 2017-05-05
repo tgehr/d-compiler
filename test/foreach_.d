@@ -1,12 +1,47 @@
+struct TypeStaticForeach{
+static:
+	alias Seq(T...)=T;
+	static foreach(i,alias T;Seq!(int,double,char)){
+		mixin(`T x`~cast(char)('0'+i)~";");
+	}
+	pragma(msg, "x0: ",typeof(x0));
+	pragma(msg, "x1: ",typeof(x1));
+	pragma(msg, "x2: ",typeof(x2));
+	static assert(is(typeof(x0)==int));
+	static assert(is(typeof(x1)==double));
+	static assert(is(typeof(x2)==char));
+}
+
+struct AliasForeach{
+static:
+	alias Seq(T...)=T;
+	int[][] test(){
+		int a,b,c;
+		static foreach(x;Seq!(a,b,c,2)){
+			static if(is(typeof({x=2;}))) x=2;
+		}
+		int x,y,z;
+		static foreach(alias x;Seq!(x,y,z,2)){
+			static if(is(typeof({x=2;}))) x=2;
+		}
+		int j,k,l;
+		static foreach(ref x;Seq!(j,k,l,2)){ // error
+			static if(is(typeof({x=2;}))) x=2;
+		}
+		return [[a,b,c],[x,y,z]];
+	}
+	static assert(test()==[[0,0,0],[2,2,2]]);
+}
+
 struct EnumForeach{
-	static:
+static:
 	alias Seq(T...)=T;
 	int a=1;
-	int fun(){ return a; }
+	int fun(){ return a; } // error
 	int gun(){ return 2; }
 	int hun(){ return 3;}
 	auto test(){
-		static foreach(enum x;Seq!(fun,gun,hun)){ // error
+		static foreach(enum x;Seq!(fun,gun,hun)){
 		}
 	}
 }

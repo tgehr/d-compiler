@@ -9272,25 +9272,29 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			if(vars.length==2){
 				auto id=New!Identifier(vars[0].name.name);
 				id.loc=loc;
-				vindex=New!ForeachVarDecl(vars[0].stc,Type.get!Size_t(),id,index);
+				vindex=New!ForeachVarDecl(vars[0].stc|STCenum,Type.get!Size_t(),id,index);
 				vindex.loc=vars[0].loc;
 			}
 			static class AliasOrVarDecl: Declaration{
+				Expression initProbe;
 				Expression init_;
 				this(STC stc,Identifier name,Expression init_){
 					super(stc,name);
+					this.initProbe=init_.ddup();
 					this.init_=init_;
 				}
 				override void presemantic(Scope sc){}
 				override void semantic(Scope sc){
 					mixin(SemPrlg);
-					bool mustBeVar=!!(stc&(STCenum|STCstatic));
-					if(!mustBeVar) init_.willAlias();
-					mixin(SemChld!q{init_});
+					initProbe.willAlias();
+					mixin(SemChld!q{initProbe});
+					bool cannotBeVar=!!(stc&STCalias)||initProbe.isType();
+					bool mustBeVar=!cannotBeVar&&!!(stc&(STCenum|STCstatic));
 					auto sym=init_.isSymbol();
 					Declaration r;
-					if(mustBeVar||!sym||!sym.meaning||sym.meaning.isVarDecl()){
+					if(!cannotBeVar&&(mustBeVar||!sym||!sym.meaning||sym.meaning.isVarDecl())){
 						if(init_.isConstant()) stc|=STCenum;
+						init_.sstate = SemState.begin;
 						r=New!ForeachVarDecl(stc,null,name,init_);
 					}else{
 						r=AliasDecl.createAliasToExp(name,init_,loc);
@@ -9325,6 +9329,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 				auto fwdsc=New!ForwardingScope(sc);
 				assert(!!vvalue);
 				if(vindex){
+					fwdsc.nonForwardingInsert(vindex);
 					vindex.scope_=fwdsc;
 					vindex.sstate=SemState.begin;
 				}
@@ -10323,6 +10328,12 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 
+		if(stc&STCalias){
+			assert(!!cast(ForeachVarDecl)this);
+			sc.error("can only use loop alias declaration in unrolled foreach statement",loc);
+			mixin(ErrEplg);
+		}
+		
 		if(rtype){
 			type=rtype.typeSemantic(sc);
 			mixin(PropRetry!q{rtype});
@@ -10852,7 +10863,8 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 		stm.loc=loc;
 		if(stm.aggregate){
 			mixin(SemChld!q{stm.aggregate});
-			mixin(IntChld!q{stm.aggregate});
+			if(!stm.aggregate.isTuple())
+				mixin(IntChld!q{stm.aggregate});
 		}else assert(stm.left&&stm.right);
 		assert(stm.vars.length);
 		if(stm.left&&stm.right){

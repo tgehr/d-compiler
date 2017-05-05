@@ -16,7 +16,7 @@ private immutable arrLbp=mixin({string r="[";foreach(t;EnumMembers!TokenType) r~
 
 
 
-enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"return","scope","shared","static","synchronized"]; // ref and auto ref taken to the front for easier handling by STCtoString
+enum storageClasses=protectionAttributes~["ref","auto ref","abstract","align","auto",/*"auto ref",*/"const","deprecated","enum","extern","final","immutable","in","inout","lazy","nothrow","out","override","pure","__gshared",/*"ref",*/"return","scope","shared","static","synchronized","alias"]; // ref and auto ref taken to the front for easier handling by STCtoString
 
 immutable toplevelSTC=protectionAttributes~["abstract","align","auto","auto ref","const","deprecated","enum","extern","final","immutable","inout","shared","nothrow","override","pure","__gshared","ref","scope","static","synchronized"]; // TODO: protection attributes must always come first!
 
@@ -723,6 +723,7 @@ private struct Parser{
 			auto stc=STC.init;
 			if(ttype==Tok!"ref") stc=STCref;
 			stc|=parseSTC!toplevelSTC().stc; // TODO: record deprecation message
+			if(ttype==Tok!"alias"){ stc|=STCalias; nextToken(); }
 			Expression type;
 			TokenType tt;
 			Location loc=tok.loc;
@@ -764,7 +765,7 @@ private struct Parser{
 			mixin(pStm!("do","NonEmpty",Statement,"while","(",Expression,")",";"));
 			mixin(pStm!("for","(",NoScopeStatement,"OPT",Condition,";","OPT",Expression,")","NonEmpty",Statement));
 			case Tok!"foreach_reverse",Tok!"foreach":
-				return parseForeachStm();
+				return res=parseForeachStm();
 			case Tok!"final":
 				if(peek().type != Tok!"switch") goto default;
 				nextToken();
@@ -1683,7 +1684,7 @@ private struct Parser{
 				if(tt==Tok!"assert"){mixin(rule!(StaticAssertDecl,Existing,"stc","_","(",ArgumentList,")",";"));}
 				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",CondDeclBody,"OPT"~q{"else","NonEmpty",CondDeclBody}));}
 				if(tt==Tok!"foreach"||tt==Tok!"foreach_reverse")
-					return parseForeachStm!true(stc,flags);
+					return res=parseForeachStm!true(stc,flags);
 				stc|=STCstatic;
 				goto dispatch;
 			case Tok!"debug":

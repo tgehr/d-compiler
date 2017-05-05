@@ -5579,6 +5579,7 @@ mixin template CTFEInterpret(T) if(is(T==FunctionDef)){
 			void perform(Symbol self){
 				if(self.sstate!=SemState.completed) return;
 				assert(self.scope_,text(self," ",self.loc));
+				assert(self.meaning.scope_);
 				if(self.scope_.getFrameNesting()       >
 				   self.meaning.scope_.getFrameNesting()){
 					runAnalysis!MarkHeapContext(self);
