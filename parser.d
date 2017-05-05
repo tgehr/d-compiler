@@ -702,10 +702,40 @@ private struct Parser{
 		if(ttype == Tok!"{") return parseCompoundStm();
 		return parseStatement();
 	}
+
+	ForeachStm parseForeachStm(){
+		mixin(SetLoc!ForeachStm);
+		bool isreverse=ttype==Tok!"foreach_reverse";
+		assert(isreverse||ttype==Tok!"foreach");
+		nextToken();
+		expect(Tok!"(");
+		auto vars=appender!(ForeachVarDecl[])();
+		do{
+			auto stc=STC.init;
+			if(ttype==Tok!"ref") stc=STCref;
+			stc|=parseSTC!toplevelSTC().stc; // TODO: record deprecation message
+			Expression type;
+			TokenType tt;
+			Location loc=tok.loc;
+			if(ttype!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
+			auto name=parseIdentifier();
+			auto p=New!ForeachVarDecl(stc,type,name,Expression.init); p.loc=loc.to(ptok.loc);
+			vars.put(p);
+			if(ttype==Tok!",") nextToken();
+			else break;
+		}while(ttype!=Tok!";" && ttype!=Tok!"EOF");
+		expect(Tok!";");
+		auto e=parseExpression();
+		if(ttype==Tok!".."){
+			mixin(rule!(ForeachStm,Existing,q{vars.data,Expression.init,e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
+		}
+		expect(Tok!")"); nonEmpty();
+		mixin(rule!(ForeachStm,Existing,q{vars.data,e,Expression.init,Expression.init},Statement,Existing,"isreverse"));
+	}
+	
 	Statement parseStatement(){
 		mixin(SetLoc!Statement);
 		bool isfinal = false; //for final switch
-		bool isreverse = false; //for foreach_reverse
 		if(ttype == Tok!"i" && peek().type == Tok!":"){
 			auto l = New!Identifier(tok.name);
 			l.loc=tok.loc;
@@ -723,33 +753,8 @@ private struct Parser{
 			mixin(pStm!("while","(",Condition,")","NonEmpty",Statement));
 			mixin(pStm!("do","NonEmpty",Statement,"while","(",Expression,")",";"));
 			mixin(pStm!("for","(",NoScopeStatement,"OPT",Condition,";","OPT",Expression,")","NonEmpty",Statement));
-			case Tok!"foreach_reverse":
-				isreverse=true;
-			case Tok!"foreach":
-				nextToken();
-				expect(Tok!"(");
-				auto vars=appender!(ForeachVarDecl[])();
-				do{
-					auto stc=STC.init;
-					if(ttype==Tok!"ref") stc=STCref;
-					stc|=parseSTC!toplevelSTC().stc; // TODO: record deprecation message
-					Expression type;
-					TokenType tt;
-					Location loc=tok.loc;
-					if(ttype!=Tok!"i" || (tt=peek().type)!=Tok!"," && tt!=Tok!";") type=parseType();
-					auto name=parseIdentifier();
-					auto p=New!ForeachVarDecl(stc,type,name,Expression.init); p.loc=loc.to(ptok.loc);
-					vars.put(p);
-					if(ttype==Tok!",") nextToken();
-					else break;
-				}while(ttype!=Tok!";" && ttype!=Tok!"EOF");
-				expect(Tok!";");
-				auto e=parseExpression();
-				if(ttype==Tok!".."){
-					mixin(rule!(ForeachStm,Existing,q{vars.data,Expression.init,e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
-				}
-				expect(Tok!")"); nonEmpty();
-				mixin(rule!(ForeachStm,Existing,q{vars.data,e,Expression.init,Expression.init},Statement,Existing,"isreverse"));
+			case Tok!"foreach_reverse",Tok!"foreach":
+				return parseForeachStm();
 			case Tok!"final":
 				if(peek().type != Tok!"switch") goto default;
 				nextToken();
