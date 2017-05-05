@@ -1,3 +1,18 @@
+
+struct TestUninterpretable{
+static:
+	alias Seq(T...)=T;
+	auto test(){
+		int k;
+		static foreach(x;[k]){ // error
+			
+		}
+		foreach(enum x;[1,2,3]){} // error // TODO: improve diagnostic
+		foreach(enum x;Seq!(1,2,3)){} // ok
+		static foreach(enum x;[1,2,3]){} //ok
+	}
+}
+
 struct StaticForeachAmbiguity{
 	static foreach(i;0..!is(typeof(x))) enum y=0; // error
 	static foreach(i;0..!is(typeof(y))) enum x=0; // error
