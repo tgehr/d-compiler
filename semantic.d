@@ -12989,7 +12989,8 @@ mixin template Semantic(T) if(is(T==FunctionDef)){
 			fsc = buildFunctionScope();
 			foreach(p; type.params){
 				if(p.sstate == SemState.pre) p.sstate = SemState.begin;
-				if(p.name) if(!fsc.insert(p)) p.sstate = SemState.error;
+				if(p.name){ if(!fsc.insert(p)) p.sstate = SemState.error; }
+				else p.scope_=fsc;
 			}
 		}
 

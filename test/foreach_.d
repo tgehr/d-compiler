@@ -1,3 +1,19 @@
+struct OpApplySingleStaticForeach{
+	static:
+	struct OpApply{
+		int opApply(scope int delegate(int) dg){
+			foreach(i;0..10) if(auto r=dg(i)) return r;
+			return 0;
+		}
+	}
+	static foreach(b;OpApply()){
+		mixin(`enum x`~cast(char)('0'+b)~"=b;");
+	}
+	static foreach(i;0..10){
+		static assert(mixin(`x`~cast(char)('0'+i))==i);
+	}
+}
+
 struct TypeStaticForeach{
 static:
 	alias Seq(T...)=T;
