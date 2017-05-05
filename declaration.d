@@ -163,6 +163,20 @@ class StaticIfDecl: ConditionalDecl{
 
 	mixin Visitors;
 }
+class StaticForeachDecl: GenerativeDecl{
+	ForeachStm stm;
+	this(STC stc,ForeachStm stm){ super(stc,null); this.stm=stm; }
+	this(STC stc,ForeachVarDecl[] v,Expression a,Expression l,Expression r,Statement b, bool isr=false)in{
+		assert(!!a^(l&&r));
+	}body{
+		this(stc,New!ForeachStm(v,a,l,r,b,isr));
+	}
+	override string toString(){
+		return "static "~stm.toString();
+	}
+
+	mixin Visitors;
+}
 class StaticAssertDecl: Declaration{
 	Expression[] a;
 	this(STC stc,Expression[] args){a = args; super(stc,null);}

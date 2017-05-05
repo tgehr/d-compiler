@@ -59,7 +59,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	bool insert(Declaration decl)in{
 		assert(decl.name&&decl.name.ptr&&!decl.scope_, decl.toString()~" "~(decl.scope_ is null?" null scope":"non-null scope"));
 	}out(result){
-		assert(!result||decl.scope_ is this);
+			assert(!result||decl.scope_ is this||cast(ForwardingScope)this&&decl.scope_ is (cast(ForwardingScope)this).parent,text(decl," ",typeid(decl)," ",typeid(this)));
 	}body{
 		auto d=symtabLookup(this, decl.name);
 		if(d){
@@ -304,7 +304,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 			// TODO: this will be somewhat challenging for protected
 			d=New!DoesNotExistDecl(ident);
 			if(!isVisibleFrom(view,STCprivate)) d.stc|=STCpublic; // only bans public symbols
-			insert(d);
+			symtab[d.name.ptr]=d;
 		}else if(auto ov=d.isOverloadSet()){
 			assert(!ov.sealingLookup);
 			ov.sealingLookup = ident;
@@ -330,16 +330,6 @@ abstract class Scope: IncompleteScope{ // SCOPE
 		auto t=tuple(dependee,decl);
 		if(arbitrary.find(t).empty) arbitrary~=t; // TODO: this can be slow
 	}
-	void potentialRemoveArbitrary(Declaration dependee, Declaration decl){
-		foreach(i,x; arbitrary){
-			if(x is tuple(dependee,decl)){
-				arbitrary[i]=move(arbitrary[$-1]);
-				arbitrary=arbitrary[0..$-1];
-				arbitrary.assumeSafeAppend();
-				break;
-			}
-		}
-	}
 
 	void potentialRemove(Identifier ident, Declaration dependee, Declaration decl){
 		auto ptr = ident.ptr in psymtab;
@@ -351,6 +341,16 @@ abstract class Scope: IncompleteScope{ // SCOPE
 				(*ptr).assumeSafeAppend();
 				break;
 			}
+	}
+	void potentialRemoveArbitrary(Declaration dependee, Declaration decl){
+		foreach(i,x; arbitrary){
+			if(x is tuple(dependee,decl)){
+				arbitrary[i]=move(arbitrary[$-1]);
+				arbitrary=arbitrary[0..$-1];
+				arbitrary.assumeSafeAppend();
+				break;
+			}
+		}
 	}
 
 	Declaration/+final+/[] potentialLookup(Scope view, Identifier ident){

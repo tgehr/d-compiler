@@ -703,8 +703,17 @@ private struct Parser{
 		return parseStatement();
 	}
 
-	ForeachStm parseForeachStm(){
-		mixin(SetLoc!ForeachStm);
+	auto parseForeachStm(bool isStatic=false)(STC sstc=STC.init,int flags=0){
+		static if(isStatic){
+			alias StaticForeachDecl Result;
+			alias Seq!(Result,Existing,"sstc") Rule;
+			alias CondDeclBody Body;
+		}else{
+			alias ForeachStm Result;
+			alias Result Rule;
+			alias Statement Body;
+		}
+		mixin(SetLoc!Result);
 		bool isreverse=ttype==Tok!"foreach_reverse";
 		assert(isreverse||ttype==Tok!"foreach");
 		nextToken();
@@ -727,10 +736,11 @@ private struct Parser{
 		expect(Tok!";");
 		auto e=parseExpression();
 		if(ttype==Tok!".."){
-			mixin(rule!(ForeachStm,Existing,q{vars.data,Expression.init,e},"_",Expression,")","NonEmpty",Statement,Existing,"isreverse"));
+			mixin(rule!(Rule,Existing,q{vars.data,Expression.init,e},"_",Expression,")","NonEmpty",Body,Existing,"isreverse"));
+		}else{
+			expect(Tok!")"); nonEmpty();
+			mixin(rule!(Rule,Existing,q{vars.data,e,Expression.init,Expression.init},Body,Existing,"isreverse"));
 		}
-		expect(Tok!")"); nonEmpty();
-		mixin(rule!(ForeachStm,Existing,q{vars.data,e,Expression.init,Expression.init},Statement,Existing,"isreverse"));
 	}
 	
 	Statement parseStatement(){
@@ -1672,6 +1682,8 @@ private struct Parser{
 				auto tt=ttype;
 				if(tt==Tok!"assert"){mixin(rule!(StaticAssertDecl,Existing,"stc","_","(",ArgumentList,")",";"));}
 				if(tt==Tok!"if"){mixin(rule!(StaticIfDecl,Existing,"stc","_","(",AssignExp,")","NonEmpty",CondDeclBody,"OPT"~q{"else","NonEmpty",CondDeclBody}));}
+				if(tt==Tok!"foreach"||tt==Tok!"foreach_reverse")
+					return parseForeachStm!true(stc,flags);
 				stc|=STCstatic;
 				goto dispatch;
 			case Tok!"debug":

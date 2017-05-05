@@ -1,3 +1,8 @@
+struct StaticForeachAmbiguity{
+	static foreach(i;0..!is(typeof(x))) enum y=0; // error
+	static foreach(i;0..!is(typeof(y))) enum x=0; // error
+}
+
 struct SeqForeachConstant{
 static:
 	alias Seq(T...)=T;
@@ -28,6 +33,46 @@ static:
 		return r;
 	}
 	static assert(test()==[0,1,3]);
+}
+struct TestStaticForeach{
+static:
+	int test(int x){
+		int r=0;
+		switch(x){
+			static foreach(i;0..10){
+				case i: r=i; break;
+			}
+			default: r=-1; break;
+		}
+		return r;
+	}
+	static foreach(i;0..15){
+		pragma(msg, "test(",i,")→ ",test(i));
+		static assert(test(i)==(i<10?i:-1));
+	}
+
+	enum x=[1,2,3];
+
+	static foreach(i;x){
+		pragma(msg, mixin("x"~cast(char)('0'+i)));
+		pragma(msg,x);
+	}
+
+	static foreach(i;x){
+		mixin("enum x"~cast(char)('0'+i)~"="~cast(char)('0'+i)~";");
+	}
+
+	int[] noBreakNoContinue(){
+		int[] r;
+		static foreach(i;0..1){
+			if(i==3) continue; // error
+			if(i==7) break; // error
+			r~=i;
+		}
+		return r;
+	}
+
+	mixin("enum k=3;");
 }
 
 struct VarSeqForeach{

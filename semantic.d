@@ -1040,6 +1040,11 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		mixin(SemEplg);
 	}
 
+	override bool isConstant(){
+		alias util.all all;
+		return all!(x=>x.isConstant())(lit);
+	}
+
 	override bool isUnique(){ return true; } // TODO: analyze what's contained within
 
 	override Dependent!bool implicitlyConvertsTo(Type rhs){
@@ -5373,7 +5378,50 @@ class GaggingErrorHandler: ErrorHandler{
 	override bool showsEffect(){ return false; }
 }
 
-class GaggingScope: NestedScope{
+class ForwardingScope: NestedScope{
+	this(Scope parent){super(parent);}
+
+	override bool insert(Declaration decl){
+		return parent.insert(decl);
+	}
+
+	bool nonForwardingInsert(Declaration decl){
+		return super.insert(decl);
+	}
+	
+	override void potentialInsert(Identifier ident, Declaration dependee, Declaration decl){
+		return parent.potentialInsert(ident,dependee,decl);
+	}
+
+	override void potentialInsertArbitrary(Declaration dependee, Declaration decl){
+		return parent.potentialInsertArbitrary(dependee,decl);
+	}
+
+	override void potentialRemove(Identifier ident, Declaration dependee, Declaration decl){
+		return parent.potentialRemove(ident,dependee,decl);
+	}
+
+	override void potentialRemoveArbitrary(Declaration dependee, Declaration decl){
+		return parent.potentialRemoveArbitrary(dependee,decl);
+	}
+	
+	override FunctionDef getFunction(){return parent.getFunction();}
+
+	override BreakableStm getBreakableStm(){
+		return parent.getBreakableStm();
+	}
+	override LoopingStm getLoopingStm(){
+		return parent.getLoopingStm();
+	}
+	override SwitchStm getSwitchStm(){
+		return parent.getSwitchStm();
+	}
+	override bool isEnclosing(BreakableStm stm){
+		return parent.isEnclosing(stm);
+	}
+}
+
+class GaggingScope: ForwardingScope{
 
 	this(Scope parent){super(parent);}
 
@@ -5403,8 +5451,6 @@ class GaggingScope: NestedScope{
 	protected override bool inexistentImpl(Scope view, Identifier ident){
 		return parent.inexistentImpl(view, ident);
 	}
-
-	override FunctionDef getFunction(){return parent.getFunction();}
 }
 
 class GaggingRecordingErrorHandler: GaggingErrorHandler{
@@ -8664,15 +8710,17 @@ mixin template Semantic(T) if(is(T==EmptyStm)){
 }
 
 mixin template Semantic(T) if(is(T==CompoundStm)){
+	Scope scope_;
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+		if(!scope_) scope_=sc;
 		//mixin(SemChld!q{s});
 		size_t initial = current;
 		foreach(i,ref x; s[initial..$]){
-			mixin(SemChldPar!q{x});
+			mixin(SemChldPar!q{sc=scope_;x});
 			current = max(current, initial+1+i);
 		}
-		mixin(PropErr!q{s});
+		mixin(PropErr!q{sc=scope_;s});
 		mixin(SemEplg);
 	}
 	invariant(){assert(sstate!=SemState.completed || current == s.length);}
@@ -9207,63 +9255,99 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		return f;
 	}
 
-	private Statement createSeqForeach(size_t length,Scope sc)in{
+	auto createSeqForeach(bool isStatic=false,bool isDecl=false)(ulong length,Scope sc,STC stc=STC.init)in{
 		assert(vars.length==1||vars.length==2);
 	}body{
+		static if(isDecl) alias Declaration Result;
+		else alias Statement Result;
 		//dw(tpl," ",tpl.length," ",sc);
-		Statement[] s;
-		auto r=New!UnrolledForeachStm(BlockStm.init);
+		Result[] s;
+		static if(!isStatic) auto r=New!UnrolledForeachStm(BlockStm.init);
 		foreach(i;0..length){
 			Expression index=LiteralExp.factory(Variant(i,Type.get!Size_t()));
 			index.loc=loc;
 			auto iexp=New!IndexExp(aggregate,[index]);
 			iexp.loc=loc;
-			Statement vindex=null;
+			Declaration vindex=null;
 			if(vars.length==2){
 				auto id=New!Identifier(vars[0].name.name);
 				id.loc=loc;
 				vindex=New!ForeachVarDecl(vars[0].stc,Type.get!Size_t(),id,index);
-				vindex.loc=loc;
+				vindex.loc=vars[0].loc;
 			}
-			static class AliasOrVarDecl: Statement{
-				STC stc;
-				string name;
+			static class AliasOrVarDecl: Declaration{
 				Expression init_;
-				this(STC stc,string name,Expression init_){
-					this.stc=stc; this.name=name; this.init_=init_;
+				this(STC stc,Identifier name,Expression init_){
+					super(stc,name);
+					this.init_=init_;
 				}
+				override void presemantic(Scope sc){}
 				override void semantic(Scope sc){
 					mixin(SemPrlg);
 					init_.willAlias();
 					mixin(SemChld!q{init_});
 					auto sym=init_.isSymbol();
-					Statement r;
+					Declaration r;
 					if(!sym||!sym.meaning||sym.meaning.isVarDecl()){
-						auto id=New!Identifier(name);
-						id.loc=loc;
 						if(init_.isConstant()) stc|=STCenum;
-						r=New!ForeachVarDecl(stc,null,id,init_);
-						r.loc=loc;
+						r=New!ForeachVarDecl(stc,null,name,init_);
 					}else{
 						r=AliasDecl.createAliasToExp(name,init_,loc);
+					}
+					r.loc=loc;
+					static if(isStatic){
+						assert(cast(ForwardingScope)scope_);
+						auto fwdsc=cast(ForwardingScope)cast(void*)scope_;
+						fwdsc.nonForwardingInsert(r);
+						r.sstate=SemState.begin;
 					}
 					r.semantic(sc);
 					mixin(RewEplg!q{r});
 				}
 			}
 			auto value=vars.length==2?vars[1]:vars[0];
-			auto vvalue=New!AliasOrVarDecl(value.stc,value.name.name,iexp);
+			auto id=New!Identifier(value.name.name);
+			id.loc=value.name.loc;
+			auto vvalue=New!AliasOrVarDecl(value.stc,id,iexp);
 			vvalue.loc=value.loc;
 			// (This ignores storage classes, just like DMD .)
-			auto cs=New!CompoundStm((vindex?[vindex]:[])~[vvalue,bdy.ddup()]);
+			static if(isDecl) assert(!!cast(Declaration)bdy);
+			auto bdy=(vindex?[cast(Result)vindex]:[])~[vvalue,(cast(Result)bdy).ddup()];
+			static if(!isDecl){
+				auto cs=New!CompoundStm(bdy);
+			}else{
+				static assert(isStatic);
+				auto cs=New!BlockDecl(STC.init,bdy); // TODO: apply stc
+			}
 			cs.loc=loc;
-			auto u=New!UnrolledForeachBodyStm(r,cs);
-			u.loc=loc;
-			s~=u;
+			static if(isStatic){
+				auto fwdsc=New!ForwardingScope(sc);
+				assert(!!vvalue);
+				if(vindex){
+					vindex.scope_=fwdsc;
+					vindex.sstate=SemState.begin;
+				}
+				vvalue.scope_=fwdsc;
+				vvalue.sstate=SemState.begin;
+				static if(isDecl) cs.presemantic(fwdsc);
+				else cs.scope_=fwdsc;
+			}
+			static if(!isStatic){
+				auto u=New!UnrolledForeachBodyStm(r,cs);
+				u.loc=loc;
+				s~=u;
+			}else s~=cs;
 		}
-		auto bdy=New!BlockStm(s);
-		bdy.loc=loc;
-		r.bdy=bdy;
+		static if(!isStatic){
+			static assert(!isDecl);
+			auto bdy=New!BlockStm(s);
+			bdy.loc=loc;
+			r.bdy=bdy;
+		}else static if(!isDecl){
+			auto r=New!CompoundStm(s);
+		}else{
+			auto r=New!BlockDecl(STC.init,s);
+		}
 		r.loc=loc;
 		return r;
 	}
@@ -10237,6 +10321,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
+
 		if(rtype){
 			type=rtype.typeSemantic(sc);
 			mixin(PropRetry!q{rtype});
@@ -10254,7 +10339,7 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 			sc.error(format("initializer required for '%s' declaration",STCtoString(stc)),loc);
 			mixin(ErrEplg);
 		}
-		if(sstate == SemState.pre && name){ // insert into scope
+		if(sstate == SemState.pre){ // insert into scope
 			presemantic(sc);
 			mixin(SemCheck);
 			sstate = SemState.begin;
@@ -10739,6 +10824,118 @@ private:
 	bool lazyDup = false;
 }
 
+mixin template Semantic(T) if(is(T==StaticForeachDecl)){
+	Expression toArray;
+	override void presemantic(Scope sc){
+		if(sstate != SemState.pre) return;
+		scope_=sc;
+		sstate = SemState.begin;
+		needRetry = true;
+		potentialInsert(sc, this);
+	}
+	override void potentialInsert(Scope sc,Declaration decl){
+		assert(!!stm);
+		if(auto d=cast(Declaration)stm.bdy)
+			d.potentialInsert(sc, decl);
+	}
+	override void potentialRemove(Scope sc, Declaration decl){
+		assert(!!stm);
+		if(auto d=cast(Declaration)stm.bdy)
+			d.potentialRemove(sc, decl);
+	}
+	override void semantic(Scope sc){
+		mixin(SemPrlg);
+		if(stm.aggregate){
+			mixin(SemChld!q{stm.aggregate});
+			mixin(IntChld!q{stm.aggregate});
+		}else assert(stm.left&&stm.right);
+		assert(stm.vars.length);
+		if(stm.left&&stm.right){
+			if(stm.vars.length>1){
+				sc.error("only one loop variable allowed for foreach range statement",loc);
+				mixin(ErrEplg);
+			}
+		}
+		if(!stm.aggregate||!stm.aggregate.isTuple()&&!stm.aggregate.type.isArrayTy()&&!stm.aggregate.type.isDynArrTy()){
+			if(!toArray){
+				auto loc=stm.aggregate?stm.aggregate.loc:stm.left.loc.to(stm.right.loc);
+				auto createVariable(){
+					auto v=New!ForeachVarDecl(STC.init,Expression.init,Identifier.init,Expression.init);
+					v.loc=loc;
+					return v;
+				}
+				auto createSymbol(Declaration v){
+					auto s=New!Symbol(v);
+					s.loc=loc;
+					return s;
+				}
+				auto createForeach(ForeachVarDecl v,Statement bdy){
+					auto r=New!ForeachStm([v],stm.aggregate.maybe!(x=>x.ddup()),stm.left.maybe!(x=>x.ddup()),stm.right.maybe!(x=>x.ddup()),bdy,stm.isReverse);
+					r.loc=loc;
+					return r;
+				}
+				auto evaluate(Statement[] bdy){
+					auto bbdy=New!CompoundStm(bdy);
+					bbdy.loc=loc;
+					auto fun=New!FunctionLiteralExp(New!FunctionTy(STC.init,null,(Parameter[]).init,VarArgs.none),bbdy,FunctionLiteralExp.Kind.none);
+					fun.loc=loc;
+					auto call=New!CallExp(fun,(Expression[]).init);
+					call.loc=loc;
+					return call;
+				}
+				auto v1=createVariable();
+				auto b1=New!ReturnStm(createSymbol(v1));
+				b1.loc=loc;
+				Statement fe1=createForeach(v1,b1);
+				auto aexp=New!AssertExp([LiteralExp.factory(Variant(false,Type.get!bool))]);
+				aexp.loc=loc;
+				auto astm=New!ExpressionStm(aexp);
+				astm.loc=loc;
+				auto typeof_=New!TypeofExp(evaluate([fe1,astm]));
+				typeof_.loc=loc;
+				auto type=New!IndexExp(typeof_,(Expression[]).init);
+				type.loc=loc;
+				auto vres=New!VarDecl(STC.init,type,Identifier.init,Expression.init);
+				vres.loc=loc;
+				auto v2=createVariable();
+				auto e2=New!(BinaryExp!(Tok!"~="))(createSymbol(vres),createSymbol(v2));
+				e2.loc=loc;
+				auto b2=New!ExpressionStm(e2);
+				b2.loc=loc;
+				auto fe2=createForeach(v2,b2);
+				Statement ret=New!ReturnStm(createSymbol(vres));
+				ret.loc=loc;
+				toArray=evaluate([vres,fe2,ret]);
+			}
+		}
+		if(toArray){
+			mixin(SemChld!q{toArray});
+			mixin(IntChld!q{toArray});
+			assert(toArray.isConstant());
+			if(stm.aggregate!=toArray){
+				stm.aggregate=toArray;
+				stm.left=stm.right=null;
+			}
+		}
+		if(!stm.lower){
+			ulong length;
+			if(auto tpl=stm.aggregate.isTuple()){
+				length=tpl.length;
+			}else{
+				length=stm.aggregate.interpretV.length;
+			}
+			if(!stm.bdy.isDeclaration()){
+				stm.lower=stm.createSeqForeach!true(length,sc,stc);
+			}else{
+				stm.lower=stm.createSeqForeach!(true,true)(length,sc,stc);
+			}
+		}
+		auto r=stm.lower;
+		potentialRemove(sc, this);
+		r.semantic(sc);
+		mixin(RewEplg!q{r});
+	}
+}
 
 mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 	Expression a0Leftover=null, a1Leftover=null;
@@ -10801,9 +10998,7 @@ mixin template Semantic(T) if(is(T==StaticAssertDecl)){
 }
 
 mixin template Semantic(T) if(is(T==AliasDecl)){
-	static AliasDecl createAliasToExp(string name,Expression expr,Location loc){
-		auto id=New!Identifier(name);
-		id.loc=loc;
+	static AliasDecl createAliasToExp(Identifier id,Expression expr,Location loc){
 		auto vd=New!VarDecl(STC.init,expr,id,Expression.init);
 		vd.loc=loc;
 		auto a=New!AliasDecl(STC.init,vd);
@@ -10948,14 +11143,15 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 
 	override void semantic(Scope sc){
 		if(sstate == SemState.pre) presemantic(sc);
+		assert(!!scope_);
 		mixin(SemPrlg);
 		if(!addedToScheduler){
 			foreach(x; decls)
-				Scheduler().add(x, sc);
+				Scheduler().add(x, scope_);
 			addedToScheduler = true;
 		}
 		foreach(ref x; decls){
-			x.semantic(sc);
+			x.semantic(scope_);
 			mixin(Rewrite!q{x});
 		}
 		foreach(x; decls) mixin(SemProp!q{x});
