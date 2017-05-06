@@ -2,7 +2,7 @@ struct RangeStaticForeach{
 	static:
 	struct Range{
 		int x=0;
-		this(int x){ this.x=x; } // TODO: struct default constructors
+		this(int x){ this.x=x; } // // TODO: struct default constructors
 		@property int front(){ return x; }
 		void popFront(){ x += 2; }
 		@property bool empty(){ return x>=10; }

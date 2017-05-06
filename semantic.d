@@ -4357,7 +4357,9 @@ class TupleAssignExp: TemporaryExp{
 				}else vars=tmpe;
 				symbols[i]=tmpe.sym;
 			}
-			lowered=New!(BinaryExp!(Tok!","))(vars,New!ExpTuple(symbols));
+			lowered=New!ExpTuple(symbols);
+			if(vars) lowered=New!(BinaryExp!(Tok!","))(vars,lowered);
+			else assert(!symbols.length);
 			lowered.loc=loc;
 			if(commaLeft2){
 				lowered=New!(BinaryExp!(Tok!","))(commaLeft2,lowered);
@@ -4368,6 +4370,7 @@ class TupleAssignExp: TemporaryExp{
 				lowered.loc=loc;
 			}
 		}
+		assert(!!lowered);
 		mixin(SemChld!q{lowered});
 		mixin(NoRetry);
 		sstate=SemState.completed;

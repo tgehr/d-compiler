@@ -1,3 +1,9 @@
+struct CheckWrongConstructorCall{
+	struct S(T...){ this(T x){ x=x; } }
+	auto s(T...)(T x){ return S(x); } // error
+	pragma(msg, s(1,2));
+}
+
 struct AliasSeqOf{
 	static:
 	alias Seq(T...)=T;
