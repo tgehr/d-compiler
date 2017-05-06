@@ -5385,7 +5385,9 @@ class ForwardingScope: NestedScope{
 	this(Scope parent){super(parent);}
 
 	override bool insert(Declaration decl){
-		return parent.insert(decl);
+		auto r=parent.insert(decl);
+		if(r) decl.scope_=this;
+		return r;
 	}
 
 	bool nonForwardingInsert(Declaration decl){
@@ -10371,7 +10373,6 @@ mixin template Semantic(T) if(is(T==VarDecl)){
 
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
-
 		if(stc&STCalias){
 			assert(!!cast(ForeachVarDecl)this);
 			sc.error("can only use loop alias declaration in unrolled foreach statement",loc);
@@ -11272,8 +11273,9 @@ mixin template Semantic(T) if(is(T==BlockDecl)){
 		assert(!!scope_);
 		mixin(SemPrlg);
 		if(!addedToScheduler){
-			foreach(x; decls)
+			foreach(x; decls){
 				Scheduler().add(x, scope_);
+			}
 			addedToScheduler = true;
 		}
 		foreach(ref x; decls){
@@ -13383,6 +13385,7 @@ mixin template Semantic(T) if(is(T==MixinExp)||is(T==MixinStm)||is(T==MixinDecl)
 		if(sc.handler.nerrors != nerrors) mixin(ErrEplg);
 
 		else static if(is(T==MixinDecl)) r.pickupSTC(stc);
+
 		r.semantic(sc);
 		// ohan.note("mixed in here", loc);
 		// TODO: do we want something like this?
