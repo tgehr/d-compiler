@@ -1,3 +1,13 @@
+struct NestedStaticForeach{
+	static:
+	static foreach(i,name;["a"]){
+		static foreach(j,name2;["d"]){
+			mixin("enum "~name~name2~"=[i,j];");
+		}
+	}
+	pragma(msg, ad);
+}
+
 struct TestEnumOutsideFunctionScope{
 static:
 	alias Seq(T...)=T;
