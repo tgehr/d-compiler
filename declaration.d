@@ -260,7 +260,7 @@ class TemplateDecl: OverloadableDecl{
 		isMixin=m; params=prm; constraint=c; bdy=b; super(stc,name);
 	}
 	override string toString(){
-		return (stc?STCtoString(astStc)~" ":"")~"template "~name.toString()~"("~join(map!(to!string)(params),",")~")"~
+		return (stc?STCtoString(astStc)~" ":"")~"template "~(name?name.toString():"")~"("~join(map!(to!string)(params),",")~")"~
 			(constraint?" if("~constraint.toString()~")":"")~bdy.toString();
 	}
 	override string kind(){
@@ -491,7 +491,7 @@ class FunctionDef: FunctionDecl, NotifyOnLayoutChanged{
 		possibleSTCs=STCstatic|STCinferrable;
 	}
 	override string toString(){
-		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~name.toString()~type.pListToString()~
+		return (astStc&~type.stc?STCtoString(astStc&~type.stc)~" ":"")~(type.rret?type.rret.toString()~" ":"")~(name?name.toString():"")~type.pListToString()~
 			(pre?"in"~pre.toString():"")~(post?"out"~(postres?"("~postres.toString()~")":"")~post.toString():"")~(pre||post?"body":"")~bdy.toString();
 	}
 

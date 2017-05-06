@@ -1,3 +1,43 @@
+
+struct OpApplyMultipleStaticForeach{
+static:
+	struct OpApply{
+		int opApply(scope int delegate(int,int) dg){
+			foreach(i;0..10) if(auto r=dg(i,i*i)) return r;
+			return 0;
+		}
+	}
+	static foreach(a,b;OpApply()){
+		mixin(`enum x`~cast(char)('0'+a)~"=b;");
+	}
+	static foreach(i;0..10){
+		static assert(mixin(`x`~cast(char)('0'+i))==i*i);
+	}
+}
+
+
+struct OpApplyMultipleStaticForeachLowered{
+static:
+	struct OpApply{
+		int opApply(scope int delegate(int,int) dg){
+			foreach(i;0..10) if(auto r=dg(i,i*i)) return r;
+			return 0;
+		}
+	}
+	static foreach(x;{
+			static struct S(T...){ this(T k){ this.x=k; } T x; }
+			static s(T...)(T a){ return S!T(a); }
+			typeof({ foreach(a,b;OpApply()){ return s(a,b); }}())[] r;
+			foreach(a,b;OpApply()) r~=s(a,b);
+			return r;
+		}()){
+		mixin(`enum x`~cast(char)('0'+x.x[0])~"=x.x[1];");
+	}
+	static foreach(i;0..10){
+		static assert(mixin(`x`~cast(char)('0'+i))==i*i);
+	}
+}
+
 struct RangeStaticForeach{
 	static:
 	struct Range{
@@ -13,7 +53,7 @@ struct RangeStaticForeach{
 	static foreach(i;0..5){
 		static assert(mixin(`x`~cast(char)('0'+2*i))==2*i);
 	}
-	static foreach(i,k;Range()){ // TODO: error
+	static foreach(i,k;Range()){ // error
 		
 	}
 }

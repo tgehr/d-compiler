@@ -5883,7 +5883,6 @@ enum ResolveConstructor = q{
 		alias a2Leftover argsLeftover;
 	}else auto caggr = strd;
 	// TODO: struct default constructors
-
 	mixin(IsDeclAccessible!q{bool b; Declaration, sc.getDeclaration, caggr});
 
 	if(!b){
@@ -9258,7 +9257,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		return f;
 	}
 
-	auto createSeqForeach(bool isStatic=false,bool isDecl=false)(ulong length,Scope sc,STC stc=STC.init)in{
+	auto createSeqForeach(bool isStatic=false,bool isDecl=false)(ulong length,Scope sc,STC stc=STC.init,string toExpand=null)in{
 		assert(vars.length==1||vars.length==2);
 	}body{
 		static if(isDecl) alias Declaration Result;
@@ -9272,7 +9271,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			auto iexp=New!IndexExp(aggregate,[index]);
 			iexp.loc=loc;
 			Declaration vindex=null;
-			if(vars.length==2){
+			if(!toExpand.length && vars.length==2){
 				auto id=New!Identifier(vars[0].name.name);
 				id.loc=loc;
 				vindex=New!ForeachVarDecl(vars[0].stc|STCenum,Type.get!Size_t(),id,index);
@@ -9296,8 +9295,8 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 					auto sym=init_.isSymbol();
 					Declaration r;
 					if(!cannotBeVar&&(mustBeVar||!sym||!sym.meaning||sym.meaning.isVarDecl())){
+						mixin(SemChld!q{init_});
 						if(init_.isConstant()) stc|=STCenum;
-						init_.sstate = SemState.begin;
 						r=New!ForeachVarDecl(stc,null,name,init_);
 					}else{
 						r=AliasDecl.createAliasToExp(name,init_,loc);
@@ -9312,32 +9311,69 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 					r.semantic(sc);
 					mixin(RewEplg!q{r});
 				}
+				override string toString(){
+					return "alias "~(name?name.toString():"")~"="~(init_?init_.toString():"")~";";
+				}
 			}
-			auto value=vars.length==2?vars[1]:vars[0];
-			auto id=New!Identifier(value.name.name);
-			id.loc=value.name.loc;
-			auto vvalue=New!AliasOrVarDecl(value.stc,id,iexp);
-			vvalue.loc=value.loc;
+			Declaration vvalue;
+			Result[] nbdy;
+			static if(isStatic){
+				auto fwdsc=New!ForwardingScope(sc);
+			}
+			if(!toExpand.length){
+				assert(1<=vars.length&&vars.length<=2);
+				auto value=vars[$-1];
+				auto id=New!Identifier(value.name.name);
+				id.loc=value.name.loc;
+				vvalue=New!AliasOrVarDecl(value.stc,id,iexp);
+				vvalue.loc=value.loc;
+				static if(isStatic){
+					assert(!!vvalue);
+					if(vindex){
+						fwdsc.nonForwardingInsert(vindex);
+						assert(vindex.scope_==fwdsc);
+						vindex.sstate=SemState.begin;
+					}
+					vvalue.scope_=fwdsc;
+					vvalue.sstate=SemState.begin;
+				}
+				if(vindex) nbdy~=vindex;
+				nbdy~=vvalue;
+			}else static if(isStatic){
+				auto vunexp=New!AliasOrVarDecl(STC.init,New!Identifier("`unexpanded"),iexp); // TODO: this is a hack
+				vunexp.loc=loc;
+				vunexp.scope_=fwdsc;
+				vunexp.sstate=SemState.begin;
+				nbdy~=vunexp;
+				foreach(k,v;vars){
+					auto id=New!Identifier(v.name.name);
+					id.loc=loc;
+					auto cidb=New!Identifier("`unexpanded");
+					cidb.loc=loc;
+					auto cidf=New!Identifier(toExpand);
+					cidf.loc=loc;
+					auto cfield=New!(BinaryExp!(Tok!"."))(cidb,cidf);
+					cfield.loc=loc;
+					auto cinit=New!IndexExp(cfield,[LiteralExp.factory(Variant(cast(ulong)k,Type.get!Size_t()))]);
+					cinit.loc=loc;
+					auto cv=New!AliasOrVarDecl(v.stc,id,cinit);
+					cv.loc=loc;
+					cv.scope_=fwdsc;
+					cv.sstate=SemState.begin;
+					nbdy~=cv;
+				}
+			}
+			nbdy~=(cast(Result)bdy).ddup();
 			// (This ignores storage classes, just like DMD .)
 			static if(isDecl) assert(!!cast(Declaration)bdy);
-			auto bdy=(vindex?[cast(Result)vindex]:[])~[vvalue,(cast(Result)bdy).ddup()];
 			static if(!isDecl){
-				auto cs=New!CompoundStm(bdy);
+				auto cs=New!CompoundStm(nbdy);
 			}else{
 				static assert(isStatic);
-				auto cs=New!BlockDecl(STC.init,bdy); // TODO: apply stc
+				auto cs=New!BlockDecl(STC.init,nbdy); // TODO: apply stc
 			}
 			cs.loc=loc;
 			static if(isStatic){
-				auto fwdsc=New!ForwardingScope(sc);
-				assert(!!vvalue);
-				if(vindex){
-					fwdsc.nonForwardingInsert(vindex);
-					vindex.scope_=fwdsc;
-					vindex.sstate=SemState.begin;
-				}
-				vvalue.scope_=fwdsc;
-				vvalue.sstate=SemState.begin;
 				static if(isDecl) cs.presemantic(fwdsc);
 				else cs.scope_=fwdsc;
 			}
@@ -10182,7 +10218,7 @@ mixin template Semantic(T) if(is(T==Declaration)){
 
 	// TODO: make OO instead of functional?
 	static Dependent!bool isDeclAccessible(Declaration from, Declaration decl, Declaration mfun=null)in{
-		assert(decl.sstate != SemState.pre);
+		assert(decl.sstate != SemState.pre,text(from," ",decl));
 	}body{
 		bool show = from&&decl&&from.name&&decl.name&&from.name.name=="compare"&&decl.name.name=="o";
 
@@ -10889,8 +10925,59 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 					s.loc=loc;
 					return s;
 				}
-				auto createForeach(ForeachVarDecl v,Statement bdy){
-					auto r=New!ForeachStm([v],stm.aggregate.maybe!(x=>x.ddup()),stm.left.maybe!(x=>x.ddup()),stm.right.maybe!(x=>x.ddup()),bdy,stm.isReverse);
+				auto createSymbols(ForeachVarDecl[] v){
+					return v.map!createSymbol.array;
+				}
+				Expression createTupleFuncLit(){
+					auto tprm=New!TemplateParameter(WhichTemplateParameter.tuple,null,New!Identifier("T"),null,null);
+					tprm.loc=loc;
+					auto tprmsym=New!Identifier("T");
+					tprmsym.loc=loc;
+					auto prm=New!Parameter(STC.init,tprmsym,New!Identifier("param"),null);
+					prm.loc=loc;
+					auto prmSym=New!Identifier("param");
+					prmSym.loc=loc;
+					Declaration field=New!VarDecl(STC.init,tprmsym,New!Identifier("field"),null);
+					field.loc=loc;
+					auto dbdy=New!BlockDecl(STC.init,[field]);
+					dbdy.loc=loc;
+					Declaration decl=New!StructDecl(STCstatic,New!Identifier("Tuple"),dbdy);
+					auto declSym=New!Identifier("Tuple");
+					declSym.loc=loc;
+					auto var=New!VarDecl(STC.init,declSym,New!Identifier("var"),null);
+					var.loc=loc;
+					auto varSym=New!Identifier("var");
+					varSym.loc=loc;
+					auto fieldSym=New!Identifier("field");
+					fieldSym.loc=loc;
+					auto lhs=New!(BinaryExp!(Tok!"."))(varSym,fieldSym);
+					lhs.loc=loc;
+					auto aexp=New!(BinaryExp!(Tok!"="))(lhs,prmSym);
+					aexp.loc=loc;
+					Statement assgn=New!ExpressionStm(aexp);
+					assgn.loc=loc;
+					Statement ret=New!ReturnStm(varSym);
+					Statement[] s=[cast(Statement)decl,var,assgn,ret];
+					auto bdy=New!CompoundStm(s);
+					auto id=New!Identifier(uniqueIdent("__fedgliteral"));
+					id.loc=loc;
+					auto fd=New!FunctionDef(STCstatic,New!FunctionTy(STC.init,null,[prm],VarArgs.none),id,null,null,null,bdy);
+					fd.loc=loc;
+					auto tfd=Parser.wrapInTemplate(fd,[tprm],null);
+					tfd.loc=loc;
+					auto fun=New!Symbol(tfd,true,true);
+					fun.loc=loc;
+					return fun;
+				}
+				Expression tupleFuncLit=null;
+				Expression createTuple(Expression[] e){
+					if(!tupleFuncLit) tupleFuncLit=createTupleFuncLit();
+					auto ce=New!CallExp(tupleFuncLit,e);
+					ce.loc=loc;
+					return ce;
+				}
+				auto createForeach(ForeachVarDecl[] vars,Statement bdy){
+					auto r=New!ForeachStm(vars,stm.aggregate.maybe!(x=>x.ddup()),stm.left.maybe!(x=>x.ddup()),stm.right.maybe!(x=>x.ddup()),bdy,stm.isReverse);
 					r.loc=loc;
 					return r;
 				}
@@ -10903,8 +10990,14 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 					call.loc=loc;
 					return call;
 				}
-				auto v1=createVariable();
-				auto b1=New!ReturnStm(createSymbol(v1));
+				auto v1=(ForeachVarDecl[]).init;
+				foreach(i;0..stm.vars.length) v1~=createVariable();
+				Statement b1;
+				if(v1.length==1){
+					b1=New!ReturnStm(createSymbol(v1[0]));
+				}else{
+					b1=New!ReturnStm(createTuple(cast(Expression[])createSymbols(v1)));
+				}
 				b1.loc=loc;
 				Statement fe1=createForeach(v1,b1);
 				auto aexp=New!AssertExp([LiteralExp.factory(Variant(false,Type.get!bool))]);
@@ -10917,8 +11010,15 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 				type.loc=loc;
 				auto vres=New!VarDecl(STC.init,type,Identifier.init,Expression.init);
 				vres.loc=loc;
-				auto v2=createVariable();
-				auto e2=New!(BinaryExp!(Tok!"~="))(createSymbol(vres),createSymbol(v2));
+				auto v2=(ForeachVarDecl[]).init;
+				foreach(i;0..stm.vars.length) v2~=createVariable();
+				Expression rhs;
+				if(v2.length==1){
+					rhs=createSymbol(v2[0]);
+				}else{
+					rhs=createTuple(cast(Expression[])createSymbols(v2));
+				}
+				auto e2=New!(BinaryExp!(Tok!"~="))(createSymbol(vres),rhs);
 				e2.loc=loc;
 				auto b2=New!ExpressionStm(e2);
 				b2.loc=loc;
@@ -10944,10 +11044,11 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 			}else{
 				length=stm.aggregate.interpretV.length;
 			}
+			auto toExpand=toArray&&stm.vars.length>1?"field":null;
 			if(!stm.bdy.isDeclaration()){
-				stm.lower=stm.createSeqForeach!true(length,sc,stc);
+				stm.lower=stm.createSeqForeach!true(length,sc,stc,toExpand);
 			}else{
-				stm.lower=stm.createSeqForeach!(true,true)(length,sc,stc);
+				stm.lower=stm.createSeqForeach!(true,true)(length,sc,stc,toExpand);
 			}
 		}
 		auto r=stm.lower;

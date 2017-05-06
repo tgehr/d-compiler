@@ -1417,7 +1417,7 @@ private struct Parser{
 		if(isTemplate) return wrapInTemplate(r, tparam, constr);
 		return r;
 	}
-	TemplateDecl wrapInTemplate(Declaration r, TemplateParameter[] tparams, Expression constr){
+	static TemplateDecl wrapInTemplate(Declaration r, TemplateParameter[] tparams, Expression constr){
 		auto tmplname = New!Identifier(r.name.name);
 		tmplname.loc = r.name.loc;
 		auto b = New!BlockDecl(r.stc,[r]);
