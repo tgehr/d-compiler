@@ -1,3 +1,10 @@
+struct TestEnumOutsideFunctionScope{
+static:
+	alias Seq(T...)=T;
+	int a;
+	static foreach(x;Seq!(a)){ // error
+	}
+}
 
 struct OpApplyMultipleStaticForeach{
 static:
