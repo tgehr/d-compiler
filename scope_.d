@@ -59,7 +59,7 @@ abstract class Scope: IncompleteScope{ // SCOPE
 	bool insert(Declaration decl)in{
 		assert(decl.name&&decl.name.ptr&&!decl.scope_, decl.toString()~" "~(decl.scope_ is null?" null scope":"non-null scope"));
 	}out(result){
-			assert(!result||decl.scope_ is this||cast(ForwardingScope)this&&decl.scope_ is (cast(ForwardingScope)this).parent,text(decl," ",typeid(decl)," ",typeid(this)));
+			assert(!result||decl.scope_ is this||cast(ForwardingScope)this,text(decl," ",typeid(decl)," ",typeid(this)));
 	}body{
 		auto d=symtabLookup(this, decl.name);
 		if(d){
