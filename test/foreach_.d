@@ -1,3 +1,30 @@
+struct StaticForeachByAliasDefault{
+static:
+	alias Seq(T...)=T;
+	
+	int[] test(){
+		int a,b,c;
+		static foreach(i,x;Seq!(a,b,c)) x=i;
+		return [a,b,c];
+	}
+	static assert(test()==[0,1,2]);
+
+	int[] test2(){
+		int x=0;
+		int foo(){ return ++x; }
+		static foreach(y;Seq!foo)
+			return [y,y,y];
+	}
+	static assert(test2()==[1,2,3]);
+
+	int[] test3(){
+		int x=0;
+		int foo(){ return ++x; } // error
+		static foreach(enum y;Seq!foo)
+			return [y,y,y];
+	}
+}
+
 struct NestedStaticForeach{
 	static:
 	static foreach(i,name;["a"]){
@@ -8,11 +35,11 @@ struct NestedStaticForeach{
 	pragma(msg, ad);
 }
 
-struct TestEnumOutsideFunctionScope{
+struct TestAliasOutsideFunctionScope{
 static:
 	alias Seq(T...)=T;
 	int a;
-	static foreach(x;Seq!(a)){ // error
+	static foreach(x;Seq!(a)){ // ok
 	}
 }
 

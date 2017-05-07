@@ -9281,32 +9281,30 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 			}
 			assert(!!sc);
 			auto enclosing=sc.getDeclaration();
-			bool inFunction=enclosing&&enclosing.isFunctionDef();
 			static class AliasOrVarDecl: Declaration{
-				Expression initProbe;
+				Expression initAlias;
 				Expression init_;
-				bool inFunction;
-				this(STC stc,Identifier name,Expression init_,bool inFunction){
+				this(STC stc,Identifier name,Expression init_){
 					super(stc,name);
-					this.initProbe=init_.ddup();
+					this.initAlias=init_.ddup();
 					this.init_=init_;
-					this.inFunction=inFunction;
 				}
 				override void presemantic(Scope sc){}
 				override void semantic(Scope sc){
 					mixin(SemPrlg);
-					initProbe.willAlias();
-					mixin(SemChld!q{initProbe});
-					bool cannotBeVar=!!(stc&STCalias)||initProbe.isType();
+					initAlias.willAlias();
+					mixin(SemChld!q{initAlias});
+					mixin(SemChld!q{init_});
+					if(init_.isConstant()) stc|=STCenum;
+					else static if(isStatic) if(!(stc&STCenum)) stc|=STCalias;
+					bool cannotBeVar=!!(stc&STCalias)||initAlias.isType();
 					bool mustBeVar=!cannotBeVar&&!!(stc&(STCenum|STCstatic));
 					auto sym=init_.isSymbol();
 					Declaration r;
 					if(!cannotBeVar&&(mustBeVar||!sym||!sym.meaning||sym.meaning.isVarDecl())){
-						mixin(SemChld!q{init_});
-						if(!inFunction||init_.isConstant()) stc|=STCenum;
 						r=New!ForeachVarDecl(stc,null,name,init_);
 					}else{
-						r=AliasDecl.createAliasToExp(name,init_,loc);
+						r=AliasDecl.createAliasToExp(name,initAlias,loc);
 					}
 					r.loc=loc;
 					static if(isStatic){
@@ -9332,7 +9330,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 				auto value=vars[$-1];
 				auto id=New!Identifier(value.name.name);
 				id.loc=value.name.loc;
-				vvalue=New!AliasOrVarDecl(value.stc,id,iexp,inFunction);
+				vvalue=New!AliasOrVarDecl(value.stc,id,iexp);
 				vvalue.loc=value.loc;
 				static if(isStatic){
 					assert(!!vvalue);
@@ -9347,7 +9345,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 				if(vindex) nbdy~=vindex;
 				nbdy~=vvalue;
 			}else static if(isStatic){
-				auto vunexp=New!AliasOrVarDecl(STC.init,New!Identifier("`unexpanded"),iexp,inFunction); // TODO: this is a hack
+				auto vunexp=New!AliasOrVarDecl(STC.init,New!Identifier("`unexpanded"),iexp); // TODO: this is a hack
 				vunexp.loc=loc;
 				vunexp.scope_=fwdsc;
 				vunexp.sstate=SemState.begin;
@@ -9363,7 +9361,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 					cfield.loc=loc;
 					auto cinit=New!IndexExp(cfield,[LiteralExp.factory(Variant(cast(ulong)k,Type.get!Size_t()))]);
 					cinit.loc=loc;
-					auto cv=New!AliasOrVarDecl(v.stc,id,cinit,inFunction);
+					auto cv=New!AliasOrVarDecl(v.stc,id,cinit);
 					cv.loc=loc;
 					cv.scope_=fwdsc;
 					cv.sstate=SemState.begin;
