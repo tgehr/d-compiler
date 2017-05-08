@@ -1,3 +1,62 @@
+struct UnrolledForeachReverse{
+static:
+	alias Seq(T...)=T;
+	int[] test(){
+		int[] r;
+		foreach_reverse(i;Seq!(0,1,2,3)){
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test()==[3,2,1,0]);
+}
+
+struct StaticForeachReverse{
+static:
+	alias Seq(T...)=T;
+	int[] test(){
+		int[] r;
+		static foreach_reverse(i;0..4){
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test()==[3,2,1,0]);
+
+	int[] test2(){
+		int[] r;
+		static foreach_reverse(i;[0,1,2,3]){
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test2()==[3,2,1,0]);
+
+	int[] test3(){
+		static struct S{
+			int opApplyReverse(scope int delegate(int) dg){
+				foreach_reverse(i;0..4) if(auto r=dg(i)) return r;
+				return 0;
+			}
+		}
+		int[] r;
+		static foreach_reverse(i;S()){
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test3()==[3,2,1,0]);
+
+	int[] test4(){
+		int[] r;
+		static foreach_reverse(i;Seq!(0,1,2,3)){
+			r~=i;
+		}
+		return r;
+	}
+	static assert(test()==[3,2,1,0]);
+}
+
 struct StaticForeachByAliasDefault{
 static:
 	alias Seq(T...)=T;

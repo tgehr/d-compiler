@@ -9267,7 +9267,7 @@ mixin template Semantic(T) if(is(T==ForeachStm)){
 		//dw(tpl," ",tpl.length," ",sc);
 		Result[] s;
 		static if(!isStatic) auto r=New!UnrolledForeachStm(BlockStm.init);
-		foreach(i;0..length){
+		for(auto i=isReverse?length:0;isReverse?i--:i<length;i+=!isReverse){
 			Expression index=LiteralExp.factory(Variant(i,Type.get!Size_t()));
 			index.loc=loc;
 			auto iexp=New!IndexExp(aggregate,[index]);
@@ -11030,6 +11030,7 @@ mixin template Semantic(T) if(is(T==StaticForeachDecl)){
 				Statement ret=New!ReturnStm(createSymbol(vres));
 				ret.loc=loc;
 				toArray=evaluate([vres,fe2,ret]);
+				stm.isReverse=false;
 			}
 		}
 		if(toArray){
