@@ -1,3 +1,10 @@
+struct StaticForeachReverseHiding{
+	static foreach(i;[0]){
+		enum i = 1; // TODO: disallow?
+		static assert(i==0);
+	}
+}
+
 struct UnrolledForeachReverse{
 static:
 	alias Seq(T...)=T;
