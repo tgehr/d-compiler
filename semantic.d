@@ -4897,9 +4897,10 @@ class Symbol: Expression{
 	}
 
 	string accessError(){
-		// TODO: better error message?
-		if(meaning.scope_.getDeclaration().isFunctionDef())
-			return format("cannot access the frame in which '%s' is stored", loc.rep);
+		auto decl=meaning.scope_.getDeclaration();
+		assert(!!decl);
+		if(decl.isFunctionDef()) // TODO: explain why not accessible
+			return format("cannot access the frame of %s '%s'", decl.kind, decl.name.name);
 		else{
 			// error message duplicated in FieldExp.semantic
 			return format("need 'this' to access %s '%s'",kind,loc.rep);
