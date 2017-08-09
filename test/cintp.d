@@ -5,7 +5,7 @@ struct ArrayLiteralConstantType{
 	static assert(is(typeof(y)==immutable(int[])));
 }
 
-static assert(2~`==i`); // error
+static assert(2~`==i`); // error (TODO: DMD allows this)
 
 struct MemberFunctionNoConstFold{
 	static:

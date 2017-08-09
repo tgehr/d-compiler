@@ -1,6 +1,24 @@
+/+ // TODO: implement scope(...)
+struct StaticForeachScopeExit{
+static:
+	int[] test(){
+		int[] r;
+		scope(exit) r ~= 1234;
+		{
+			static foreach(i;0..5){
+				scope(exit) r ~= i;
+			}
+			r ~= 5;
+		}
+		return r;
+	}
+	static assert(test()==[5,4,3,2,1,0]);
+}
++/
+
 struct StaticForeachReverseHiding{
 	static foreach(i;[0]){
-		enum i = 1; // TODO: disallow?
+		enum i = 1; // TODO: error?
 		static assert(i==0);
 	}
 }
