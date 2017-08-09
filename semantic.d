@@ -994,7 +994,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChld!q{lit});
-		if(!lit.length){type=Type.get!EmptyArray(); mixin(SemEplg);}
+		if(!lit.length){if(!type) type=Type.get!EmptyArray(); mixin(SemEplg);}
 		auto ty=lit[0].type;
 		if(!type) foreach(i,x;lit[1..$]){
 			mixin(ImplConvertsTo!q{bool xtoty; x, ty}); // TODO: ditto?
@@ -1036,7 +1036,7 @@ mixin template Semantic(T) if(is(T==ArrayLiteralExp)){
 		mixin(SemChldPar!q{lit});
 		alias util.all all; // TODO: file bug
 		assert(all!(_=>_.sstate == SemState.completed)(lit));
-		type=ty.getDynArr();
+		if(!type) type=ty.getDynArr();
 		mixin(SemEplg);
 	}
 

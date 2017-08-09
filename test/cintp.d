@@ -1,3 +1,10 @@
+struct ArrayLiteralConstantType{
+	enum int[] x=[];
+	static assert(is(typeof(x)==int[]));
+	enum immutable(int[]) y=[1];
+	static assert(is(typeof(y)==immutable(int[])));
+}
+
 static assert(2~`==i`); // error
 
 struct MemberFunctionNoConstFold{
