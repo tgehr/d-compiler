@@ -179,6 +179,7 @@ class Source{
 			swap(sources[i], sources[$-1]);
 			sources=sources[0..$-1];
 			sources.assumeSafeAppend();
+			return;
 		}
 		assert(0);
 	}
