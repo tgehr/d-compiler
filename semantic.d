@@ -7853,7 +7853,7 @@ mixin template Semantic(T) if(is(T==BasicType)){
 
 	override Dependent!Type combine(Type rhs){
 		if(this is rhs.getHeadUnqual()) return this.independent!Type;
-		else if(rhs is Type.get!void()) return null.independent!Type;;
+		else if(rhs is Type.get!void()) return null.independent!Type;
 		if(auto bt=rhs.getHeadUnqual().isBasicType()){
 			if(strength[op]>0&&strength[bt.op]>=0){
 				if(strength[op]<4&&strength[bt.op]<4) return Type.get!int().independent!Type;
@@ -10692,7 +10692,7 @@ mixin template Semantic(T) if(is(T==ImportDecl)){
 			if(err) sc.error(err, symbols[0].loc);
 			mixin(ErrEplg);
 		}
-		if(!(stc&STCstatic)&&!sc.addImport(m.sc,importKindFromSTC(stc))) mixin(ErrEplg);;
+		if(!(stc&STCstatic)&&!sc.addImport(m.sc,importKindFromSTC(stc))) mixin(ErrEplg);
 		mixin(SemEplg);
 	}
 }
