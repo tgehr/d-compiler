@@ -1,5 +1,4 @@
 // Written in the D programming language
-// Author: Timon Gehr
 // License: http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0
 
 import std.stdio;
@@ -66,7 +65,7 @@ class VerboseErrorHandler: ErrorHandler{
 		write(source, loc.line, column, err, isNote);
 		if(line.length&&line[0]){
 			display(line);
-			highlight(column, loc.rep);
+			highlight(column,column-getColumn(loc,tabsize-1), loc.rep);
 		}		
 	}
 protected:
@@ -76,8 +75,8 @@ protected:
 	void display(string line){
 		stderr.writeln(line);
 	}
-	void highlight(int column, string rep){
-		foreach(i;0..column-1) stderr.write(" ");
+	void highlight(int column, int ntabs, string rep){
+		foreach(i;0..column-1-ntabs*(getTabsize()-1)) stderr.write(i<ntabs?"\t":" ");
 		stderr.write(underlineArrow);
 		rep.popFront();
 		foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write(underlineStroke);}
@@ -94,14 +93,19 @@ protected:
 			else stderr.writeln(BOLD,source,':',line,":",column,": ",RED,"error:",RESET,BOLD," ",error,RESET);
 		}else super.write(source, line, column, error, isNote);
 	}
-	override void highlight(int column, string rep){
+	override void highlight(int column, int ntabs, string rep){
 		if(isATTy(stderr)){
-			foreach(i;0..column-1) stderr.write(" ");
+			foreach(i;0..column-1-ntabs*(getTabsize()-1)) stderr.write(i<ntabs?"\t":" ");
 			//stderr.write(CSI~"A",GREEN,";",CSI~"D",CSI~"B");
 			stderr.write(BOLD,GREEN,underlineArrow);
 			rep.popFront();
 			foreach(dchar x;rep){if(isNewLine(x)) break; stderr.write(underlineStroke);}
 			stderr.writeln(RESET);
-		}else super.highlight(column, rep);
+		}else super.highlight(column, ntabs, rep);
 	}
+}
+
+string formatError(string msg,Location loc){
+	import std.conv;
+	return text(loc.line,": ",msg); // TODO: column
 }
