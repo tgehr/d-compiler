@@ -208,7 +208,7 @@ alias Lexer Code;
 private alias ChunkGCAlloc Alloc; // works for DMD
 //private alias GCAlloc Alloc;
 
-private struct Parser{
+struct Parser{
 	alias Alloc.New New;
 	alias Alloc.appender appender;
 	enum filename = "tt.d";

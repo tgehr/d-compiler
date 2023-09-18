@@ -3,7 +3,8 @@ OBJFILES = d.o lexer.o operators.o parser.o expression.o statement.o declaration
 
 #DMD = dmd -m64 -O -release -noboundscheck
 #DMD = dmd -g -m32 -O -release -noboundscheck
-DMD = dmd -debug -gc -m32
+DMD = dmd -d -debug -g -m32 -L-no-pie
+#DMD = dmd2/linux/bin64/dmd -d -debug -g -m32 -L-no-pie
 #DMD = ../dmd/src/dmd -m32 -O -release -noboundscheck
 #DMD = ../dmd/src/dmd -debug -gc -m32
 #DMD = ../dmd/src/dmd -m32 -O -release -inline -noboundscheck

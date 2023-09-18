@@ -238,6 +238,11 @@ struct Variant{
 		assert(occupies == Occupies.none);
 	}
 
+	this()(typeof(null), Type type = null){ // templated because of DMD bug
+		this.type=type;
+		assert(occupies == Occupies.none || occupies == Occupies.void_);
+	}
+	
 	this()(Symbol fptr, Type type)in{
 		auto tu=type.getHeadUnqual();
 		assert(tu.isPointerTy()&&tu.getFunctionTy());
@@ -675,6 +680,12 @@ struct Variant{
 				assert(rhs.occupies==occupies.tpl);
 				return compareMultiple!false(tpl,rhs.tpl);
 			}
+			static if(op=="!>=") return (this.opBinary!">="(rhs)).opUnary!"!";
+			static if(op=="!<=") return (this.opBinary!"<="(rhs)).opUnary!"!";
+			static if(op=="<>") return this.opBinary!"<"(rhs)|this.opBinary!">"(rhs);
+			static if(op=="!<>") return (this.opBinary!"<"(rhs)|this.opBinary!">"(rhs)).opUnary!"!";
+			static if(op=="<>=") return this.opBinary!"<="(rhs)|this.opBinary!">="(rhs);
+			static if(op=="!<>=") return (this.opBinary!"<="(rhs)|this.opBinary!">="(rhs)).opUnary!"!";
 		}
 
 		if(type.getHeadUnqual().isSomeString()){

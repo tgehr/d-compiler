@@ -1179,13 +1179,14 @@ private dchar readEscapeSeq(ref immutable(char)* _p) in{assert(*(_p-1)=='\\');}b
 			if(*p!=';') throw new EscapeSeqException("unterminated named character entity",p[0..1]);
 			_p=p+1;
 			switch(s[0..p-s]){
-				mixin({
+				string generate(){ // workaround for DMD bug
 					string r;
 					struct E{string k; uint v;}
 					E[] entities=mixin(import("namedcharentities")); // no AAs in CTFE =@
 					foreach(x;entities) r~=`case "`~x.k~`": return cast(dchar)`~to!string(x.v)~`;`;
 					return r;
-				}());
+				}
+				mixin(generate());
 				default: throw new EscapeSeqException(format("unrecognized named character entity '\\&%s'",s[0..p-s+1]),(s-1)[0..p-s+2]);
 			}
 		default:

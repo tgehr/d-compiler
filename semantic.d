@@ -9416,7 +9416,7 @@ static class UnrolledForeachStm: BreakableStm{
 }
 
 mixin template Semantic(T) if(is(T==UnrolledForeachStm)){
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		mixin(SemChld!q{bdy});
 		mixin(SemEplg);
@@ -9437,7 +9437,7 @@ class UnrolledForeachBodyStm: LoopingStm{
 
 mixin template Semantic(T) if(is(T==UnrolledForeachBodyStm)){
 	BlockScope lsc;
-	void semantic(Scope sc){
+	override void semantic(Scope sc){
 		mixin(SemPrlg);
 		if(!lsc){ lsc=new BlockScope(sc); lsc.setLoopingStm(this); }
 		mixin(SemChld!q{sc=lsc;bdy});
